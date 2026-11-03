@@ -19,7 +19,7 @@ MAX_ROUNDS = 30
 MODES = ["kadry", "zoom", "licytacja", "rok", "kolejnosc", "plakat", "aktorzy", "cytat"]
 DURATION = {"kadry": 3 * STAGE_SECONDS, "zoom": 30, "plakat": 30, "cytat": 30, "rok": 25, "kolejnosc": 40}
 ACTOR_SECONDS = 6
-MAX_ACTORS = 6
+MAX_ACTORS = 8
 BID_SECONDS = 15
 ORDER_N = 4
 TITLE_MODES = {"kadry", "zoom", "plakat", "aktorzy", "cytat"}
@@ -97,6 +97,10 @@ def load_pack(con, pack_id):
     movies = []
     posters = {r[0] for r in con.execute(
         "SELECT p.movie_id FROM posters p JOIN movies m ON m.id=p.movie_id WHERE m.pack_id=?", (pack_id,))}
+    quotes = {}
+    for q in con.execute("SELECT q.movie_id, q.text, q.lang FROM quotes q JOIN movies m ON m.id=q.movie_id "
+                         "WHERE m.pack_id=? ORDER BY q.id", (pack_id,)):
+        quotes.setdefault(q["movie_id"], []).append({"text": q["text"], "lang": q["lang"] or ""})
     for m in con.execute("SELECT * FROM movies WHERE pack_id=? ORDER BY id", (pack_id,)).fetchall():
         fr = db.game_frames(con, m["id"]) if m["status"] == "ok" else None
         try:
@@ -104,9 +108,49 @@ def load_pack(con, pack_id):
         except ValueError:
             cast = []
         movies.append({"id": m["id"], "title": m["title"], "year": m["year"], "pl_title": m["pl_title"] or "",
-                       "aliases": db.split_aliases(m["aliases"]), "quotes": db.split_list(m["quotes"]),
+                       "aliases": db.split_aliases(m["aliases"]), "quotes": quotes.get(m["id"], []),
                        "frames": fr, "poster": m["id"] in posters, "cast": cast})
     return movies
+
+
+def load_questions(con, pack_id):
+    out = []
+    for r in con.execute("SELECT * FROM questions WHERE pack_id=? ORDER BY id", (pack_id,)):
+        try:
+            ans = json.loads(r["answers"] or "[]")
+        except ValueError:
+            ans = []
+        if len(ans) >= 2 and (r["prompt_pl"] or r["prompt_en"]):
+            out.append({"id": r["id"], "prompt_pl": r["prompt_pl"], "prompt_en": r["prompt_en"], "answers": ans})
+    return out
+
+
+def pack_data(con, pack):
+    d = dict(pack)
+    d["questions"] = load_questions(con, d["id"])
+    return d
+
+
+def fallback_question(movies):
+    """Bez własnych pytań: "Ile filmów z tego pakietu wymienisz?" - odpowiedzi to filmy pakietu."""
+    return {"id": 0, "prompt_pl": "Ile filmów z tego pakietu wymienisz?",
+            "prompt_en": "How many films from this pack can you name?",
+            "answers": [{"text": m["title"], "aliases": ([m["pl_title"]] if m["pl_title"] else []) + m["aliases"],
+                         "pl": m["pl_title"]} for m in movies]}
+
+
+def answer_distance(guess, a):
+    ds = [d for d in (distance(guess, n) for n in [a["text"]] + list(a.get("aliases") or [])) if d is not None]
+    return min(ds) if ds else None
+
+
+def best_answer(guess, answers, idxs):
+    scored = sorted((d, i) for i in idxs for d in [answer_distance(guess, answers[i])] if d is not None)
+    if not scored:
+        return None
+    if len(scored) > 1 and scored[0][0] == scored[1][0] and scored[0][0] > 0:
+        return None
+    return scored[0][1]
 
 
 def availability(pack, movies, has_key):
@@ -116,7 +160,7 @@ def availability(pack, movies, has_key):
     info = {
         "kadry": (framed, 1, "frames"),
         "zoom": (framed, 1, "frames"),
-        "licytacja": (len(movies), 5, "movies"),
+        "licytacja": (len(pack.get("questions") or []) or (1 if len(movies) >= 5 else 0), 1, "questions"),
         "rok": (sum(1 for m in movies if m["year"]), 3, "years"),
         "kolejnosc": (len(years), ORDER_N, "years"),
         "plakat": (sum(1 for m in movies if m["poster"]), 3, "posters"),
@@ -127,8 +171,7 @@ def availability(pack, movies, has_key):
     for k in MODES:
         have, need, what = info[k]
         ok = have >= need and k not in off
-        reason = None if ok else "disabled" if k in off else \
-            ("tmdb_key" if what in ("posters", "cast") and not has_key else what)
+        reason = None if ok else "disabled" if k in off else what
         out[k] = {"ok": ok, "have": have, "need": need, "reason": reason}
     return out
 
@@ -221,11 +264,15 @@ class Room:
             return {"mode": mode, "movie": m, "style": random.choice(["pix", "tiles"]), "seed": random.randint(1, 10**6)}
         if mode == "aktorzy":
             m = self.pick([x for x in ms if len(x["cast"]) >= 3], used)
-            cast = sorted(m["cast"][:MAX_ACTORS], key=lambda c: c.get("popularity") or 0)   # od najmniej znanych
+            cast = m["cast"][-MAX_ACTORS:]      # w bazie już w kolejności odsłaniania (gwiazda na końcu)
             return {"mode": mode, "movie": m, "cast": [c["name"] for c in cast]}
         if mode == "cytat":
             m = self.pick([x for x in ms if x["quotes"]], used)
-            return {"mode": mode, "movie": m, "quote": random.choice(m["quotes"])}
+            qs = m["quotes"]
+            base = random.choice([q for q in qs if not q["lang"]] or qs)
+            pick = {lg: (base if base["lang"] in ("", lg) and not [q for q in qs if q["lang"] == lg] else
+                         random.choice([q for q in qs if q["lang"] == lg] or [base])) for lg in ("pl", "en")}
+            return {"mode": mode, "movie": m, "quote": {lg: q["text"] for lg, q in pick.items()}}
         if mode == "rok":
             m = self.pick([x for x in ms if x["year"]], used)
             return {"mode": mode, "movie": m}
@@ -237,7 +284,11 @@ class Room:
             items = random.sample(list(by_year.values()), ORDER_N)
             return {"mode": mode, "items": items}
         if mode == "licytacja":
-            return {"mode": mode, "bids": {}, "bidder": None, "bid": 0, "found": [], "type_end": None}
+            qs = self.pack.get("questions") or []
+            fresh = [q for q in qs if ("q", q["id"]) not in used] or qs
+            q = random.choice(fresh) if fresh else fallback_question(ms)
+            used.add(("q", q["id"]))
+            return {"mode": mode, "q": q, "bids": {}, "bidder": None, "bid": 0, "found": [], "type_end": None}
         return None
 
     @property
@@ -377,7 +428,7 @@ class Room:
             if t["bidder"] is None:
                 if p["id"] in t["bids"]:
                     return {"ok": False}
-                bid = max(1, min(int(d.get("bid")), len(self.movies)))
+                bid = max(1, min(int(d.get("bid")), len(t["q"]["answers"])))
                 t["bids"][p["id"]] = (bid, el)
                 self.event("bid", p["name"])
                 self.tick()
@@ -385,16 +436,19 @@ class Room:
             if p["id"] != t["bidder"]:
                 return {"ok": False}
             text = str(d.get("text") or "")[:120]
-            left = [m for m in self.movies if m["id"] not in {f["id"] for f in t["found"]}]
-            m = best_movie(text, left, lang)
-            if not m:
-                dup = best_movie(text, [x for x in self.movies if x not in left], lang)
+            ans = t["q"]["answers"]
+            got = {f["i"] for f in t["found"]}
+            i = best_answer(text, ans, [k for k in range(len(ans)) if k not in got])
+            if i is None:
+                dup = best_answer(text, ans, sorted(got))
+                t.setdefault("misses", 0)
+                t["misses"] += 1
                 self.version += 1
-                return {"ok": True, "correct": False, "duplicate": bool(dup)}
-            t["found"].append({"id": m["id"], "title": m["title"], "pl_title": m["pl_title"], "year": m["year"]})
+                return {"ok": True, "correct": False, "duplicate": dup is not None}
+            t["found"].append({"i": i, "text": ans[i]["text"], "pl": ans[i].get("pl") or ""})
             self.version += 1
             self.tick()
-            return {"ok": True, "correct": True, "title": m["title"]}
+            return {"ok": True, "correct": True, "title": ans[i]["text"]}
         return {"ok": False}
 
     # --- stan dla klienta
@@ -404,6 +458,14 @@ class Room:
         if year:
             out["year"] = m["year"]
         return out
+
+    @staticmethod
+    def prompt(q, lang):
+        return (q["prompt_en"] or q["prompt_pl"]) if lang == "en" else (q["prompt_pl"] or q["prompt_en"])
+
+    @staticmethod
+    def fview(f, lang):
+        return {"title": f["text"], "pl_title": f.get("pl") if lang == "pl" else ""}
 
     @staticmethod
     def thumb(m):
@@ -450,7 +512,7 @@ class Room:
                 k = min(len(t["cast"]), int(el // ACTOR_SECONDS) + 1)
                 out.update(cast=t["cast"][:k], cast_total=len(t["cast"]), actor_seconds=ACTOR_SECONDS)
             elif mode == "cytat":
-                out.update(quote=t["quote"], hint_year=t["movie"]["year"] if el >= self.duration() / 2 else None)
+                out.update(quote=t["quote"][lang if lang in ("pl", "en") else "pl"], hint_year=t["movie"]["year"] if el >= self.duration() / 2 else None)
             elif mode == "rok":
                 out.update(movie=self.mview(t["movie"], lang, year=False), img=self.thumb(t["movie"]),
                            mine=me and me["ans"])
@@ -458,7 +520,7 @@ class Room:
                 out.update(items=[dict(self.mview(m, lang, year=False), img=self.thumb(m)) for m in t["items"]],
                            mine=me and me["ans"])
             elif mode == "licytacja":
-                out.update(total=len(self.movies), bid_seconds=BID_SECONDS,
+                out.update(total=len(t["q"]["answers"]), bid_seconds=BID_SECONDS, prompt=self.prompt(t["q"], lang),
                            bidders=[self.players[pid]["name"] for pid in t["bids"] if pid in self.players],
                            my_bid=(t["bids"].get(me["id"]) or [None])[0] if me else None)
                 if t["bidder"] is None:
@@ -468,7 +530,7 @@ class Room:
                                bidder_name=self.players.get(t["bidder"], {}).get("name", "?"),
                                duration=self.type_seconds(t["bid"]), left=round(t["type_end"] - now, 1),
                                elapsed=round(self.type_seconds(t["bid"]) - (t["type_end"] - now), 2),
-                               found=[self.mview(f, lang) if lang == "pl" else dict(f, pl_title="") for f in t["found"]])
+                               found=[self.fview(f, lang) for f in t["found"]], misses=t.get("misses", 0))
             return out
         # reveal
         out["left"] = round(REVEAL_SECONDS - el, 1)
@@ -480,7 +542,7 @@ class Room:
             if mode == "aktorzy":
                 ans["cast"] = t["cast"]
             if mode == "cytat":
-                ans["quote"] = t["quote"]
+                ans["quote"] = t["quote"][lang if lang in ("pl", "en") else "pl"]
             if mode == "zoom":
                 ans["img"] = f"/frame/{t['frame']}.jpg"
             if mode == "plakat":
@@ -493,9 +555,11 @@ class Room:
             ans["items"] = [dict(self.mview(m, lang), img=self.thumb(m)) for m in right]
         if mode == "licytacja":
             ans.update(bidder_name=self.players.get(t["bidder"] or "", {}).get("name"), bid=t["bid"],
-                       success=t.get("success", False), total=len(self.movies),
+                       success=t.get("success", False), total=len(t["q"]["answers"]), prompt=self.prompt(t["q"], lang),
+                       missed=[self.fview({"text": a["text"], "pl": a.get("pl") or ""}, lang) for k, a in
+                               enumerate(t["q"]["answers"]) if k not in {f["i"] for f in t["found"]}][:40],
                        bids=[{"name": self.players[pid]["name"], "bid": b[0]} for pid, b in t["bids"].items()
                              if pid in self.players],
-                       found=[dict(f, pl_title=f["pl_title"] if lang == "pl" else "") for f in t["found"]])
+                       found=[self.fview(f, lang) for f in t["found"]])
         out["answer"] = ans
         return out

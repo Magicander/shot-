@@ -136,7 +136,7 @@ function playerList(players, opts = {}) {
 const MODE_INFO = {
   kadry: ["Kadry", "Trzy kadry z filmu, od najtrudniejszego. Im szybciej zgadniesz, tym więcej punktów."],
   zoom: ["Zoom", "Mocne zbliżenie fragmentu kadru, które powoli się oddala. Zgadnij tytuł jak najwcześniej."],
-  licytacja: ["Licytacja", "Każdy deklaruje, ile filmów z pakietu wymieni. Najwyższa oferta wpisuje tytuły na czas. Uda się: 200 pkt za każdy zadeklarowany film. Nie uda się: pozostali dostają po 100 pkt za każdy."],
+  licytacja: ["Licytacja", "Pytanie z listą odpowiedzi. Każdy deklaruje, ile poda. Najwyższa oferta wpisuje odpowiedzi na czas. Uda się: 200 pkt za każdą zadeklarowaną. Nie uda się: pozostali dostają po 100 pkt za każdą."],
   rok: ["Który rok", "Podaj rok premiery. Dokładny rok to 1000 pkt, każdy rok różnicy zabiera około 30 procent, ponad 8 lat to zero."],
   kolejnosc: ["Ułóż po kolei", "Ułóż 4 filmy od najstarszego do najnowszego. 250 pkt za każde dobre miejsce."],
   plakat: ["Plakat", "Plakat odsłania się stopniowo. Im wcześniej zgadniesz, tym więcej punktów."],
@@ -147,13 +147,13 @@ const modeName = k => T(MODE_INFO[k][0]);
 function modeHint(k, a) {
   const v = {need: a.need, have: a.have};
   return T({disabled: "Wyłączony przez admina dla tego pakietu.",
-    tmdb_key: "Wymaga klucza TMDB (panel admina, ustawienia).",
+    questions: "Brak pytań do licytacji. Admin dodaje je w edytorze trybów.",
     frames: "Potrzebny co najmniej {need} film z kadrami (jest {have}).",
     movies: "Potrzeba co najmniej {need} filmów w pakiecie (jest {have}).",
     years: k === "kolejnosc" ? "Potrzeba {need} filmów z różnymi latami premiery (jest {have})." : "Potrzeba {need} filmów z rokiem premiery (jest {have}).",
-    posters: "Za mało plakatów ({have}/{need}). Admin: Pobierz dane TMDB.",
-    cast: "Za mało filmów z obsadą ({have}/{need}). Admin: Pobierz dane TMDB.",
-    quotes: "Za mało cytatów ({have}/{need}). Admin dopisuje je przy filmach."}[a.reason] || "", v);
+    posters: "Za mało plakatów ({have}/{need}). Admin: edytor trybów, plakaty.",
+    cast: "Za mało filmów z obsadą ({have}/{need}). Admin: edytor trybów, aktorzy.",
+    quotes: "Za mało cytatów ({have}/{need}). Admin dopisuje je w edytorze trybów."}[a.reason] || "", v);
 }
 const showTitle = o => o.pl_title && LANG === "pl" && fold(o.pl_title) !== fold(o.title) ? `${esc(o.pl_title)} <small class="orig">(${esc(o.title)})</small>` : esc(o.title);
 
@@ -314,13 +314,14 @@ function renderRound(v, keepInput) {
 
 function renderAuction(m) {
   const rules = `<details class="rules" ${S.sub === "bid" ? "open" : ""}><summary>${T("zasady licytacji")}</summary><ol>
-    <li>${T("Każdy po cichu deklaruje, ile filmów z tego pakietu wymieni (pakiet ma {n}).", {n:S.total})}</li>
-    <li>${T("Najwyższa deklaracja wygrywa (przy remisie: kto pierwszy). Ta osoba wpisuje tytuły na czas: 15 s + 5 s za każdy film.")}</li>
-    <li>${T("Liczą się tylko filmy z pakietu, bez powtórek. W wersji PL można wpisywać polskie tytuły.")}</li>
-    <li>${T("Uda się: licytujący dostaje 200 pkt za każdy zadeklarowany film. Nie uda się: każdy z pozostałych dostaje po 100 pkt za każdy.")}</li></ol></details>`;
+    <li>${T("Każdy po cichu deklaruje, ile poprawnych odpowiedzi poda (lista ma {n}).", {n:S.total})}</li>
+    <li>${T("Najwyższa deklaracja wygrywa (przy remisie: kto pierwszy). Ta osoba wpisuje odpowiedzi na czas: 15 s + 5 s za każdą.")}</li>
+    <li>${T("Liczą się tylko odpowiedzi z listy, bez powtórek. Drobne literówki przechodzą. Wszyscy widzą postęp na żywo.")}</li>
+    <li>${T("Uda się: licytujący dostaje 200 pkt za każdą zadeklarowaną odpowiedź. Nie uda się: każdy z pozostałych dostaje po 100 pkt za każdą.")}</li></ol></details>`;
   if (S.sub === "bid") {
     return `<div class="stage textstage auction"><span class="lvl">${T("licytacja · deklaracje")}</span><span class="clock" id="clock"></span>
-      <h2 class="ytitle">${T("Ile filmów z pakietu wymienisz?")}</h2>
+      <h2 class="ytitle qprompt">${esc(S.prompt)}</h2>
+      <p class="muted small-note">${T("Ile poprawnych odpowiedzi podasz? Na liście jest {n}.", {n: S.total})}</p>
       ${S.my_bid ? `<p class="bigbid">${S.my_bid}</p><p class="muted">${T("Twoja deklaracja. Czekamy na pozostałych.")}</p>`
         : `<div class="bidrow"><div class="stepper" role="group"><button type="button" id="bminus" aria-label="${T("mniej")}">-</button><span class="n" id="bidn">3</span><button type="button" id="bplus" aria-label="${T("więcej")}">+</button></div>
            <button class="pill orange big" id="bsend">${T("licytuję")}</button></div>`}
@@ -329,10 +330,12 @@ function renderAuction(m) {
   }
   const mine = S.bidder === S.me;
   return `<div class="stage textstage auction"><span class="lvl">${T("licytacja · {name} wpisuje", {name: esc(S.bidder_name)})}</span><span class="clock" id="clock"></span>
-    <h2 class="ytitle">${mine ? T("Wpisz {n} filmów z pakietu", {n:S.bid}) : T("{name} musi wymienić {n} filmów", {name: esc(S.bidder_name), n:S.bid})}</h2>
-    <p class="progressn"><b>${S.found.length}</b> / ${S.bid}</p>
-    <ul class="found">${S.found.map(f => `<li>${showTitle(f)}${f.year ? ` <small>${f.year}</small>` : ""}</li>`).join("")}</ul>
-    ${rules}</div>${bar()}${mine ? guessForm(T("Tytuł z pakietu...")) : `<div class="feedback">${T("Patrzymy, czy da radę...")}</div>`}`;
+    <h2 class="ytitle qprompt">${esc(S.prompt)}</h2>
+    <p class="muted small-note">${mine ? T("Wpisz {n} odpowiedzi, jedna po drugiej.", {n:S.bid}) : T("{name} musi podać {n} odpowiedzi.", {name: esc(S.bidder_name), n:S.bid})}</p>
+    <div class="aprog"><div class="prog"><i style="width:${Math.min(100, S.found.length / Math.max(1, S.bid) * 100)}%"></i></div>
+      <p class="progressn"><b>${S.found.length}</b> / ${S.bid}${S.misses ? ` <small class="muted">${T("pudła: {n}", {n: S.misses})}</small>` : ""}</p></div>
+    <ul class="found">${S.found.map(f => `<li>${showTitle(f)}</li>`).join("")}${Array.from({length: Math.max(0, S.bid - S.found.length)}, () => `<li class="slot"></li>`).join("")}</ul>
+    ${rules}</div>${bar()}${mine ? guessForm(T("Twoja odpowiedź...")) : `<div class="feedback">${T("Patrzymy, czy da radę...")}</div>`}`;
 }
 
 async function guessAct(body) {
@@ -400,7 +403,7 @@ function setupGuess(prev, focus, auction) {
   if (focus && matchMedia("(pointer:fine)").matches) g.focus();
   const show = () => {
     const q = fold(g.value);
-    items = q.length < 1 ? [] : titles.filter(t => fold(t).split(" ").some(w => w.startsWith(q.split(" ")[0])) && fold(t).includes(q.split(" ").slice(1).join(" "))
+    items = q.length < 1 || auction ? [] : titles.filter(t => fold(t).split(" ").some(w => w.startsWith(q.split(" ")[0])) && fold(t).includes(q.split(" ").slice(1).join(" "))
       || fold(t).startsWith(q) || fold(t).replace(/^the /, "").startsWith(q)).slice(0, 6);
     sel = -1;
     ac.innerHTML = items.map((t, i) => `<li data-i="${i}">${esc(t)}</li>`).join("");
@@ -422,8 +425,8 @@ function setupGuess(prev, focus, auction) {
     try {
       const r = await api(`/api/rooms/${CODE}/guess`, {pid:ME.pid, token:ME.token, text});
       if (r.correct) { if (auction) { g.value = ""; toast(T("Zaliczone: {t}", {t: r.title})); } lastKey = ""; poll(); }
-      else if (r.duplicate) { fb.textContent = T("Ten film już był."); fb.className = "feedback bad"; g.select(); }
-      else { fb.textContent = auction ? T("\"{text}\" nie pasuje do żadnego filmu z pakietu.", {text}) : T("Nie, to nie \"{text}\". Próbuj dalej.", {text}); fb.className = "feedback bad"; g.select(); }
+      else if (r.duplicate) { fb.textContent = (auction ? T("Ta odpowiedź już była.") : T("Ten film już był.")); fb.className = "feedback bad"; g.select(); }
+      else { fb.textContent = auction ? T("\"{text}\" nie ma na liście.", {text}) : T("Nie, to nie \"{text}\". Próbuj dalej.", {text}); fb.className = "feedback bad"; g.select(); }
     } catch (e) { toast(e.message); }
   };
   $("#gf").onsubmit = e => { e.preventDefault(); ac.classList.add("hidden"); submit(); };
@@ -447,11 +450,12 @@ function renderReveal(v) {
     <ul class="guesses">${a.guesses.map(g => `<li><b>${esc(g.name)}</b><span>${g.year}</span><span class="d">${g.year === a.year ? T("dokładnie") : T("{d} lat różnicy", {d: Math.abs(g.year - a.year)})}</span><span class="sc">+${g.points}</span></li>`).join("") || `<li class="miss">${T("Nikt nie odpowiedział.")}</li>`}</ul>`;
   else if (mode === "kolejnosc") body = `<h2>${T("dobra kolejność")}</h2><ol class="orderlist done">${a.items.map(i => `<li>${i.img ? `<img src="${i.img}" alt="">` : `<span class="noimg"></span>`}<span class="ot">${showTitle(i)}</span><span class="oy">${i.year}</span></li>`).join("")}</ol>`;
   else if (mode === "licytacja") {
-    body = a.bidder_name ? `<h2>${a.success ? T("{name} dał radę", {name: esc(a.bidder_name)}) : T("{name} nie dał rady", {name: esc(a.bidder_name)})}</h2>
+    body = (a.prompt ? `<p class="muted qprompt-r">${esc(a.prompt)}</p>` : "") + (a.bidder_name ? `<h2>${a.success ? T("{name} dał radę", {name: esc(a.bidder_name)}) : T("{name} nie dał rady", {name: esc(a.bidder_name)})}</h2>
       <div class="year">${T("{f} z {b} zadeklarowanych", {f: a.found.length, b: a.bid})}</div>
       <p class="muted">${T("Deklaracje: {list}", {list: a.bids.map(b => esc(b.name) + " " + b.bid).join(", ")})}</p>
-      <ul class="found">${a.found.map(f => `<li>${showTitle(f)}${f.year ? ` <small>${f.year}</small>` : ""}</li>`).join("")}</ul>`
-      : `<h2>${T("nikt nie licytował")}</h2>`;
+      <ul class="found">${a.found.map(f => `<li>${showTitle(f)}</li>`).join("")}</ul>
+      ${a.missed && a.missed.length ? `<p class="muted" style="margin:10px 0 4px">${T("Inne poprawne odpowiedzi:")}</p><ul class="found missed">${a.missed.map(f => `<li>${showTitle(f)}</li>`).join("")}</ul>` : ""}`
+      : `<h2>${T("nikt nie licytował")}</h2>`);
   }
   v.innerHTML = `<div class="game"><div class="panel reveal">${head}${body}${roundResults()}
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:20px;flex-wrap:wrap">

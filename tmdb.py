@@ -68,8 +68,8 @@ def run(rows, progress, key, fill_pl=False, redo=False, db_path=None):
                     tid = hit["id"]
                 det = _get(key, f"/movie/{tid}", {"append_to_response": "credits"})
                 cast = sorted(det.get("credits", {}).get("cast", []), key=lambda c: c.get("order", 99))[:TOP_CAST]
-                cast = [{"name": c["name"], "popularity": round(c.get("popularity") or 0, 2),
-                         "character": c.get("character") or ""} for c in cast if c.get("name")]
+                cast = [{"name": c["name"], "character": c.get("character") or "", "billing": i + 1}
+                        for i, c in enumerate(c for c in cast if c.get("name"))][::-1]   # odsłanianie: od końca napisów
                 img = None
                 if det.get("poster_path"):
                     img = _get(key, det["poster_path"], base=IMG, raw=True)
@@ -79,13 +79,12 @@ def run(rows, progress, key, fill_pl=False, redo=False, db_path=None):
                     if db.norm_title(pl) == db.norm_title(r["title"]):
                         pl = ""
                 with con:
-                    con.execute("UPDATE movies SET tmdb_id=?, cast_json=? WHERE id=?",
+                    con.execute("UPDATE movies SET tmdb_id=?, cast_json=?, cast_source='tmdb' WHERE id=?",
                                 (tid, json.dumps(cast, ensure_ascii=False), r["id"]))
                     if not r["year"] and (det.get("release_date") or "")[:4].isdigit():
                         con.execute("UPDATE movies SET year=? WHERE id=?", (int(det["release_date"][:4]), r["id"]))
                     if img:
-                        con.execute("INSERT INTO posters (movie_id, image) VALUES (?,?) ON CONFLICT(movie_id) "
-                                    "DO UPDATE SET image=excluded.image", (r["id"], img))
+                        db.save_poster(con, r["id"], img, "tmdb", IMG + det["poster_path"])
                     if pl:
                         con.execute("UPDATE movies SET pl_title=? WHERE id=? AND pl_title=''", (pl, r["id"]))
                 progress.done += 1

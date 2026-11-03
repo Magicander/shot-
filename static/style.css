@@ -305,3 +305,13 @@ footer{padding:30px 0 50px;text-align:center;color:var(--muted);font-size:14px}
   .guesses li{grid-template-columns:1fr auto auto}.guesses .d{display:none}
   .bigbid{font-size:70px}
 }
+
+/* faza 4: licytacja */
+.qprompt{font-size:clamp(24px,4vw,34px);line-height:1.15;margin:8px 0 6px}
+.qprompt-r{font-weight:700;margin:0 0 6px}
+.aprog{max-width:420px;margin:8px auto 0}
+.aprog .prog{height:14px;border-radius:999px;background:var(--line);overflow:hidden}
+.aprog .prog i{display:block;height:100%;background:var(--orange);transition:width .4s}
+.aprog .progressn{margin:6px 0 0}
+.found li.slot{background:transparent;border:2px dashed var(--line);min-width:70px;min-height:36px}
+.found.missed li{background:transparent;border:2px solid var(--line);font-weight:600;color:var(--muted)}

@@ -44,7 +44,7 @@ scrape_thread = None
 
 
 # --------------------------------------------------------------------- pokoje gry
-from rooms import Room, norm_title, is_match, load_pack, availability, MODES  # noqa: E402,F401
+from rooms import Room, norm_title, is_match, load_pack, availability, pack_data, MODES  # noqa: E402,F401
 
 
 def new_code():
@@ -57,7 +57,7 @@ def new_code():
 
 def pack_avail(con, pack):
     movies = load_pack(con, pack["id"])
-    return movies, availability(dict(pack), movies, bool(db.tmdb_key()))
+    return movies, availability(pack_data(con, pack), movies, bool(db.tmdb_key()))
 
 
 def cleanup_rooms():
@@ -75,6 +75,14 @@ MIME = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
 
 
 EN_ERRORS = {
+    "Nie udało się pobrać": "Could not fetch",
+    "To nie jest obraz (JPEG, PNG albo WebP)": "This is not an image (JPEG, PNG or WebP)",
+    "Podaj treść cytatu": "Enter the quote text",
+    "Podaj pytanie (PL albo EN)": "Enter the question (PL or EN)",
+    "Pytanie potrzebuje co najmniej 2 odpowiedzi": "A question needs at least 2 answers",
+    "Nie ma cytatu": "Quote not found",
+    "Nie ma pytania": "Question not found",
+    "Nieznane źródło": "Unknown source",
     "Za duże żądanie": "Request too large",
     "Zły format danych": "Bad data format",
     "Nie ma takiej strony": "Page not found",
@@ -149,7 +157,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def body(self):
         n = int(self.headers.get("Content-Length") or 0)
-        if n > 2_000_000:
+        if n > 12_000_000:
             raise ApiError(413, "Za duże żądanie")
         try:
             return json.loads(self.rfile.read(n) or b"{}")
@@ -220,7 +228,9 @@ class Handler(BaseHTTPRequestHandler):
                 row = con.execute("SELECT image FROM posters WHERE movie_id=?", (int(m[1]),)).fetchone()
                 if not row:
                     raise ApiError(404, "Brak plakatu")
-                return self.send(200, bytes(row["image"]), "image/jpeg", {"Cache-Control": "max-age=86400"})
+                img = bytes(row["image"])
+                ctype = "image/png" if img[:4] == b"\x89PNG" else "image/webp" if img[8:12] == b"WEBP" else "image/jpeg"
+                return self.send(200, img, ctype, {"Cache-Control": "max-age=300"})
             if path.startswith("/api/admin"):
                 return self.admin_api(method, path, q, con)
             if path.startswith("/api/"):
@@ -269,7 +279,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError(400, "Ten pakiet nie ma jeszcze gotowych filmów")
             with rooms_lock:
                 code = new_code()
-                r = rooms[code] = Room(code, dict(pack), movies, int(d.get("rounds") or 10), avail)
+                r = rooms[code] = Room(code, pack_data(con, pack), movies, int(d.get("rounds") or 10), avail)
                 if d.get("modes"):
                     r.configure(modes=d["modes"])
                 p = r.add_player(d.get("name"))
@@ -418,6 +428,8 @@ class Handler(BaseHTTPRequestHandler):
                 pack = con.execute("SELECT * FROM packs WHERE id=?", (pid,)).fetchone()
                 _, avail = pack_avail(con, pack)
                 return self.json({"avail": avail, "modes": MODES, "tmdb_key": bool(db.tmdb_key()),
+                                  "questions": con.execute("SELECT COUNT(*) FROM questions WHERE pack_id=?",
+                                                           (pid,)).fetchone()[0],
                                   "modes_off": [k for k in (pack["modes_off"] or "").split(",") if k]})
             if sub == "pl_titles" and method == "POST":
                 d = self.body()
@@ -452,9 +464,14 @@ class Handler(BaseHTTPRequestHandler):
                                                daemon=True)
                 tmdb_thread.start()
                 return self.json({"ok": True, "count": len(rows)})
+            r = self.mode_editor_api(method, sub, pid, con)
+            if r is not None:
+                return r
             if sub == "movies" and method == "GET":
                 rows = con.execute("""SELECT m.id, m.title, m.year, m.query, m.yt_url, m.status, m.error,
-                    m.pl_title, m.aliases, m.quotes, m.tmdb_id, m.cast_json,
+                    m.pl_title, m.aliases, m.tmdb_id, m.cast_json, m.cast_source, m.imdb_id, m.filmweb_id,
+                    (SELECT COUNT(*) FROM quotes q WHERE q.movie_id=m.id) nquotes,
+                    (SELECT po.source || '|' || IFNULL(po.updated, 0) FROM posters po WHERE po.movie_id=m.id) poster_meta,
                     EXISTS(SELECT 1 FROM posters po WHERE po.movie_id=m.id) poster,
                     m.video_url, m.video_title, (SELECT COUNT(*) FROM frames f WHERE f.movie_id=m.id) nframes,
                     p.easy_frame_id easy, p.medium_frame_id medium, p.hard_frame_id hard
@@ -487,6 +504,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json({"added": len(added), "skipped": len(skipped), "parsed": len(items),
                                   "added_items": added, "skipped_items": skipped},
                                  409 if items and not added and skipped and "text" not in d else 200)
+        m = re.fullmatch(r"/api/admin/movies/(\d+)/(poster|cast|quotes)", path)
+        if m:
+            return self.movie_data_api(method, int(m[1]), m[2], con)
+        m = re.fullmatch(r"/api/admin/(quotes|questions)/(\d+)", path)
+        if m:
+            return self.item_api(method, m[1], int(m[2]), con)
         m = re.fullmatch(r"/api/admin/movies/(\d+)", path)
         if m:
             mid = int(m[1])
@@ -506,7 +529,14 @@ class Handler(BaseHTTPRequestHandler):
                 title = str(d.get("title") or mv["title"]).strip()[:120]
                 year = (int(d["year"]) if d.get("year") else None) if "year" in d else mv["year"]
                 extra = {k: "\n".join(db.split_list(d[k]))[:4000] if k != "pl_title" else str(d[k]).strip()[:160]
-                         for k in ("pl_title", "aliases", "quotes") if k in d}
+                         for k in ("pl_title", "aliases") if k in d}
+                if "quotes" in d:
+                    with con:
+                        con.execute("DELETE FROM quotes WHERE movie_id=?", (mid,))
+                        for qt in db.split_list(d["quotes"])[:200]:
+                            con.execute("INSERT INTO quotes (movie_id, text, lang) VALUES (?,?,'')", (mid, qt[:500]))
+                    if not extra and "title" not in d:
+                        return self.json({"ok": True})
                 if extra:
                     with con:
                         for k, v in extra.items():
@@ -591,6 +621,296 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, dump, "application/sql; charset=utf-8",
                              {"Content-Disposition": f'attachment; filename="quiz-{time.strftime("%Y%m%d")}.sql"'})
         raise ApiError(404, "Nie ma takiego adresu")
+
+
+    # --- edytory trybów (faza 4)
+    def start_web_job(self, kind, rows, source, n, fill_pl):
+        global scrape_progress, tmdb_thread
+        import scraper
+        import webscrape
+        scrape_progress = scraper.Progress(self.lang)
+        tmdb_thread = threading.Thread(target=webscrape.run, args=(rows, scrape_progress, kind, source, n, fill_pl),
+                                       daemon=True)
+        tmdb_thread.start()
+
+    def mode_editor_api(self, method, sub, pid, con):
+        import webscrape
+        if sub == "web" and method == "POST":
+            d = self.body()
+            kind = d.get("kind")
+            source = d.get("source") or "auto"
+            if kind not in ("poster", "cast") or source not in webscrape.SOURCES:
+                raise ApiError(400, "Nieznane źródło")
+            if source == "tmdb" and not db.tmdb_key():
+                raise ApiError(400, "Najpierw wpisz klucz TMDB w ustawieniach")
+            if job_busy():
+                raise ApiError(409, "Scraper już działa")
+            rows = movie_rows(con, pid, d.get("movie_ids"))
+            if not d.get("redo") and not d.get("movie_ids"):
+                if kind == "poster":
+                    have = {r[0] for r in con.execute("SELECT movie_id FROM posters")}
+                    rows = [r for r in rows if r["id"] not in have]
+                else:
+                    have = {r[0] for r in con.execute("SELECT id FROM movies WHERE cast_json NOT IN ('', '[]')")}
+                    rows = [r for r in rows if r["id"] not in have]
+            n = max(3, min(15, int(d.get("n") or webscrape.DEFAULT_N)))
+            self.start_web_job(kind, rows, source, n, bool(d.get("fill_pl")))
+            return self.json({"ok": True, "count": len(rows)})
+        if sub == "quotes" and method == "GET":
+            rows = con.execute("SELECT id, title, year, pl_title FROM movies WHERE pack_id=? ORDER BY title COLLATE NOCASE",
+                               (pid,)).fetchall()
+            qs = {}
+            for q in con.execute("SELECT q.* FROM quotes q JOIN movies m ON m.id=q.movie_id WHERE m.pack_id=? "
+                                 "ORDER BY q.id", (pid,)):
+                qs.setdefault(q["movie_id"], []).append({"id": q["id"], "text": q["text"], "lang": q["lang"]})
+            return self.json([dict(r, quotes=qs.get(r["id"], [])) for r in rows])
+        if sub == "quotes" and method == "POST":
+            d = self.body()
+            rows = parse_quotes(con, pid, str(d.get("text") or ""))
+            saved = 0
+            if d.get("apply"):
+                with con:
+                    for r in rows:
+                        if r["status"] == "matched":
+                            con.execute("INSERT INTO quotes (movie_id, text, lang) VALUES (?,?,?)",
+                                        (r["movie_id"], r["quote"], r["lang"]))
+                            saved += 1
+            return self.json({"rows": rows, "saved": saved, "matched": sum(r["status"] == "matched" for r in rows),
+                              "unmatched": sum(r["status"] != "matched" for r in rows)})
+        if sub == "questions" and method == "GET":
+            out = []
+            for r in con.execute("SELECT * FROM questions WHERE pack_id=? ORDER BY id", (pid,)):
+                out.append({"id": r["id"], "prompt_pl": r["prompt_pl"], "prompt_en": r["prompt_en"],
+                            "answers": json.loads(r["answers"] or "[]")})
+            return self.json(out)
+        if sub == "questions" and method == "POST":
+            d = self.body()
+            if "bulk" in d:
+                rows = parse_questions(d["bulk"])
+                saved = 0
+                if d.get("apply"):
+                    with con:
+                        for r in rows:
+                            if r["status"] == "ok":
+                                self.insert_question(con, pid, r)
+                                saved += 1
+                return self.json({"rows": rows, "saved": saved, "ok": sum(r["status"] == "ok" for r in rows)})
+            q = self.question_from(d)
+            with con:
+                qid = self.insert_question(con, pid, q)
+            return self.json({"id": qid})
+        if sub == "answers_auto" and method == "GET":
+            lines = []
+            for r in con.execute("SELECT title, pl_title, aliases FROM movies WHERE pack_id=? ORDER BY title COLLATE NOCASE",
+                                 (pid,)):
+                parts = [r["title"]] + ([r["pl_title"]] if r["pl_title"] else []) + db.split_aliases(r["aliases"])
+                lines.append("; ".join(dict.fromkeys(parts)))
+            return self.json({"text": "\n".join(lines)})
+        return None
+
+    @staticmethod
+    def question_from(d):
+        pl, en = str(d.get("prompt_pl") or "").strip()[:200], str(d.get("prompt_en") or "").strip()[:200]
+        if not pl and not en:
+            raise ApiError(400, "Podaj pytanie (PL albo EN)")
+        ans = db.parse_answers(d["answers_text"]) if "answers_text" in d else \
+            db.parse_answers("\n".join("; ".join([a["text"]] + list(a.get("aliases") or [])) for a in d.get("answers") or []))
+        if len(ans) < 2:
+            raise ApiError(400, "Pytanie potrzebuje co najmniej 2 odpowiedzi")
+        return {"prompt_pl": pl, "prompt_en": en, "answers": ans}
+
+    @staticmethod
+    def insert_question(con, pid, q):
+        return con.execute("INSERT INTO questions (pack_id, prompt_pl, prompt_en, answers, created) VALUES (?,?,?,?,?)",
+                           (pid, q["prompt_pl"], q["prompt_en"], json.dumps(q["answers"], ensure_ascii=False),
+                            time.time())).lastrowid
+
+    def movie_data_api(self, method, mid, what, con):
+        import base64
+        import webscrape
+        mv = con.execute("SELECT * FROM movies WHERE id=?", (mid,)).fetchone()
+        if not mv:
+            raise ApiError(404, "Nie ma filmu")
+        row = movie_rows(con, ids=[mid])[0]
+        if what == "poster":
+            if method == "DELETE":
+                with con:
+                    con.execute("DELETE FROM posters WHERE movie_id=?", (mid,))
+                return self.json({"ok": True})
+            d = self.body()
+            if method == "POST":            # pobierz z serwisu (od razu, bez kolejki)
+                src = d.get("source") or "auto"
+                if src not in webscrape.SOURCES:
+                    raise ApiError(400, "Nieznane źródło")
+                log = []
+                try:
+                    data, meta, used = webscrape.fetch_one("poster", src, row, log=log.append)
+                except Exception as e:  # noqa: BLE001
+                    return self.json({"ok": False, "error": str(e), "log": log}, 502)
+                webscrape.save(con, "poster", mid, data, meta, used)
+                return self.json({"ok": True, "source": used, "log": log, "note": meta.get("note") or ""})
+            if method == "PUT":             # ręcznie: link do obrazka albo plik (data URL)
+                if d.get("data"):
+                    raw = str(d["data"])
+                    data = base64.b64decode(raw.split(",", 1)[1] if raw.startswith("data:") else raw)
+                    src, url = "upload", ""
+                else:
+                    url = str(d.get("url") or "").strip()
+                    try:
+                        data = webscrape.fetch_image(url)
+                    except Exception as e:  # noqa: BLE001
+                        print("poster url failed:", e)
+                        raise ApiError(400, "Nie udało się pobrać")
+                    src = "url"
+                if not webscrape.is_image(data):
+                    raise ApiError(400, "To nie jest obraz (JPEG, PNG albo WebP)")
+                with con:
+                    db.save_poster(con, mid, data, src, url)
+                return self.json({"ok": True})
+        if what == "cast":
+            d = self.body()
+            if method == "POST":
+                src = d.get("source") or "auto"
+                if src not in webscrape.SOURCES:
+                    raise ApiError(400, "Nieznane źródło")
+                log = []
+                n = max(3, min(15, int(d.get("n") or webscrape.DEFAULT_N)))
+                try:
+                    data, meta, used = webscrape.fetch_one("cast", src, row, n, log=log.append)
+                except Exception as e:  # noqa: BLE001
+                    return self.json({"ok": False, "error": str(e), "log": log}, 502)
+                webscrape.save(con, "cast", mid, data, meta, used)
+                return self.json({"ok": True, "source": used, "log": log})
+            if method == "PUT":
+                cast = []
+                for c in (d.get("cast") or [])[:20]:
+                    name = str(c.get("name") or "").strip()[:80]
+                    if name:
+                        cast.append({"name": name, "character": str(c.get("character") or "").strip()[:80],
+                                     **({"billing": int(c["billing"])} if str(c.get("billing") or "").isdigit() else {})})
+                with con:
+                    con.execute("UPDATE movies SET cast_json=?, cast_source=CASE WHEN ?='' THEN '' ELSE "
+                                "COALESCE(NULLIF(cast_source,''),'manual') END WHERE id=?",
+                                (json.dumps(cast, ensure_ascii=False) if cast else "", "x" if cast else "", mid))
+                return self.json({"ok": True})
+        if what == "quotes" and method == "POST":
+            d = self.body()
+            text = str(d.get("text") or "").strip()[:500]
+            if not text:
+                raise ApiError(400, "Podaj treść cytatu")
+            lang = d.get("lang") if d.get("lang") in ("pl", "en") else ""
+            with con:
+                qid = con.execute("INSERT INTO quotes (movie_id, text, lang) VALUES (?,?,?)", (mid, text, lang)).lastrowid
+            return self.json({"id": qid})
+        raise ApiError(404, "Nie ma takiego adresu")
+
+    def item_api(self, method, kind, iid, con):
+        table = "quotes" if kind == "quotes" else "questions"
+        if not con.execute(f"SELECT 1 FROM {table} WHERE id=?", (iid,)).fetchone():
+            raise ApiError(404, "Nie ma cytatu" if kind == "quotes" else "Nie ma pytania")
+        if method == "DELETE":
+            with con:
+                con.execute(f"DELETE FROM {table} WHERE id=?", (iid,))
+            return self.json({"ok": True})
+        if method == "PUT":
+            d = self.body()
+            with con:
+                if kind == "quotes":
+                    text = str(d.get("text") or "").strip()[:500]
+                    if not text:
+                        raise ApiError(400, "Podaj treść cytatu")
+                    con.execute("UPDATE quotes SET text=?, lang=? WHERE id=?",
+                                (text, d.get("lang") if d.get("lang") in ("pl", "en") else "", iid))
+                else:
+                    q = self.question_from(d)
+                    con.execute("UPDATE questions SET prompt_pl=?, prompt_en=?, answers=? WHERE id=?",
+                                (q["prompt_pl"], q["prompt_en"], json.dumps(q["answers"], ensure_ascii=False), iid))
+            return self.json({"ok": True})
+        raise ApiError(404, "Nie ma takiego adresu")
+
+def job_busy():
+    return bool((scrape_thread and scrape_thread.is_alive()) or (tmdb_thread and tmdb_thread.is_alive()))
+
+
+def movie_rows(con, pack_id=None, ids=None):
+    sql = "SELECT id, title, year, pl_title, imdb_id, filmweb_id, tmdb_id FROM movies WHERE "
+    if ids:
+        rows = con.execute(sql + f"id IN ({','.join('?' * len(ids))}) ORDER BY id", [int(i) for i in ids])
+    else:
+        rows = con.execute(sql + "pack_id=? ORDER BY id", (pack_id,))
+    return [dict(r) for r in rows]
+
+
+def match_movie(movies, title, year):
+    """Dopasowanie po tytule oryginalnym albo polskim (+ opcjonalny rok)."""
+    nt = db.norm_title(title)
+    if not nt:
+        return None, "bad_format"
+    hits = [m for m in movies if nt in (m["norm_title"], db.norm_title(m["pl_title"]))
+            and (year is None or m["year"] == year)]
+    if not hits and year is None:
+        return None, "unmatched"
+    if len(hits) > 1:
+        return None, "ambiguous"
+    return (hits[0], "matched") if hits else (None, "unmatched")
+
+
+def parse_quotes(con, pack_id, text):
+    """Linie "Tytuł filmu (rok) = cytat", opcjonalnie z tagiem języka na początku cytatu: "[pl] ..."."""
+    movies = [dict(r) for r in con.execute("SELECT id, title, year, pl_title, norm_title FROM movies WHERE pack_id=?",
+                                           (pack_id,))]
+    existing = {(r["movie_id"], r["text"].strip().lower()) for r in con.execute(
+        "SELECT q.movie_id, q.text FROM quotes q JOIN movies m ON m.id=q.movie_id WHERE m.pack_id=?", (pack_id,))}
+    out, seen = [], set()
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        row = {"line": line[:600], "status": "unmatched", "movie_id": None}
+        if "=" not in line:
+            row["status"] = "bad_format"
+            out.append(row)
+            continue
+        left, qt = (x.strip() for x in line.split("=", 1))
+        lang = ""
+        mm = re.match(r"^\[(pl|en)\]\s*(.*)$", qt, re.I)
+        if mm:
+            lang, qt = mm[1].lower(), mm[2].strip()
+        qt = qt.strip().strip('"„”“').strip()
+        title, year = db.split_title_year(left)
+        row.update(title=title, year=year, quote=qt[:500], lang=lang)
+        if not qt:
+            row["status"] = "bad_format"
+            out.append(row)
+            continue
+        mv, st = match_movie(movies, title, year)
+        row["status"] = st
+        if mv:
+            key = (mv["id"], qt.lower())
+            if key in existing or key in seen:
+                row["status"] = "duplicate"
+            else:
+                seen.add(key)
+            row.update(movie_id=mv["id"], movie=mv["title"] + (f" ({mv['year']})" if mv["year"] else ""))
+        out.append(row)
+    return out
+
+
+def parse_questions(text):
+    """Bloki oddzielone pustą linią. Pierwsza linia: "Pytanie PL | Question EN", dalej odpowiedzi
+    (jedna w linii, aliasy po średniku)."""
+    out = []
+    for block in re.split(r"\n\s*\n", str(text or "").replace("\r", "").strip()):
+        lines = [x.strip() for x in block.split("\n") if x.strip()]
+        if not lines:
+            continue
+        head = lines[0]
+        pl, _, en = head.partition("|")
+        ans = db.parse_answers("\n".join(lines[1:]))
+        row = {"prompt_pl": pl.strip()[:200], "prompt_en": en.strip()[:200], "answers": ans,
+               "status": "ok" if len(ans) >= 2 and (pl.strip() or en.strip()) else "bad_format"}
+        out.append(row)
+    return out
 
 
 def parse_pl_titles(con, pack_id, text):

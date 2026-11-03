@@ -55,6 +55,25 @@ CREATE TABLE IF NOT EXISTS picks (
 );
 """
 
+SCHEMA4 = """
+CREATE TABLE IF NOT EXISTS quotes (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    movie_id INTEGER NOT NULL REFERENCES movies(id) ON DELETE CASCADE,
+    text     TEXT NOT NULL,
+    lang     TEXT NOT NULL DEFAULT ''          -- '', 'pl' albo 'en'
+);
+CREATE INDEX IF NOT EXISTS quotes_movie ON quotes(movie_id);
+CREATE TABLE IF NOT EXISTS questions (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    pack_id   INTEGER NOT NULL REFERENCES packs(id) ON DELETE CASCADE,
+    prompt_pl TEXT NOT NULL DEFAULT '',
+    prompt_en TEXT NOT NULL DEFAULT '',
+    answers   TEXT NOT NULL DEFAULT '[]',     -- JSON: [{"text": "...", "aliases": ["..."]}]
+    created   REAL
+);
+CREATE INDEX IF NOT EXISTS questions_pack ON questions(pack_id);
+"""
+
 HORRORS = [
     ("The Exorcist", 1973), ("Halloween", 1978), ("The Shining", 1980),
     ("A Nightmare on Elm Street", 1984), ("The Thing", 1982), ("Alien", 1979),
@@ -167,6 +186,22 @@ def migrate(con):
                 con.execute(f"ALTER TABLE movies ADD COLUMN {c} TEXT NOT NULL DEFAULT ''")
         if "tmdb_id" not in mc:
             con.execute("ALTER TABLE movies ADD COLUMN tmdb_id INTEGER")
+        # faza 4: identyfikatory IMDb/Filmweb, źródła danych, cytaty i pytania licytacji
+        for c, typ in (("imdb_id", "TEXT"), ("filmweb_id", "INTEGER"), ("cast_source", "TEXT")):
+            if c not in mc:
+                con.execute(f"ALTER TABLE movies ADD COLUMN {c} {typ}")
+        poc = _cols(con, "posters")
+        for c in ("source", "url"):
+            if c not in poc:
+                con.execute(f"ALTER TABLE posters ADD COLUMN {c} TEXT NOT NULL DEFAULT ''")
+        if "updated" not in poc:
+            con.execute("ALTER TABLE posters ADD COLUMN updated REAL")
+        con.executescript(SCHEMA4)
+        # stare cytaty (kolumna movies.quotes, jeden w linii) -> tabela quotes, jednorazowo
+        for r in con.execute("SELECT id, quotes FROM movies WHERE quotes<>''").fetchall():
+            for q in split_list(r["quotes"]):
+                con.execute("INSERT INTO quotes (movie_id, text, lang) VALUES (?,?,'')", (r["id"], q))
+            con.execute("UPDATE movies SET quotes='' WHERE id=?", (r["id"],))
         if "modes_off" not in pc:
             con.execute("ALTER TABLE packs ADD COLUMN modes_off TEXT NOT NULL DEFAULT ''")
         for slug, (n, d) in SEED_EN.items():
@@ -318,3 +353,24 @@ def split_list(s) -> list:
 
 def split_aliases(s) -> list:
     return [x.strip() for x in re.split(r"[\n;]", str(s or "")) if x.strip()]
+
+
+def save_poster(con, movie_id, data, source="", url=""):
+    con.execute("INSERT INTO posters (movie_id, image, source, url, updated) VALUES (?,?,?,?,?) "
+                "ON CONFLICT(movie_id) DO UPDATE SET image=excluded.image, source=excluded.source, "
+                "url=excluded.url, updated=excluded.updated", (movie_id, data, source, url, time.time()))
+
+
+def parse_answers(text):
+    """Odpowiedzi licytacji: jedna w linii, aliasy po średniku: "Iron Man; IM"."""
+    out, seen = [], set()
+    for line in str(text or "").replace("\r", "").split("\n"):
+        parts = [x.strip() for x in line.split(";") if x.strip()]
+        if not parts:
+            continue
+        k = norm_title(parts[0])
+        if not k or k in seen:
+            continue
+        seen.add(k)
+        out.append({"text": parts[0][:120], "aliases": [a[:120] for a in parts[1:6]]})
+    return out[:300]

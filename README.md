@@ -23,6 +23,7 @@ W panelu możesz:
 - tworzyć pakiety i edytować listy filmów (także wklejać wiele naraz w formacie `Tytuł (rok)`),
 - uruchamiać i zatrzymywać scraper i oglądać jego log na żywo,
 - wybierać kadry trudny, średni i łatwy. Skróty: strzałki, N, oraz 1/2/3 po najechaniu na kadr.
+- w edytorze trybów pobierać plakaty i obsadę z IMDb lub Filmwebu, wpisywać cytaty i pytania do licytacji (opis niżej).
 
 ## Scraper z konsoli
 
@@ -61,7 +62,7 @@ Wszystko trafia do jednego pliku `quiz.db`, który tworzy się przy pierwszym st
 Tytuły wpisuje się w oryginale (np. "The Shining"), a w wersji PL także po polsku, jeśli film ma polski tytuł. Literówki są wybaczane.
 
 Aktualizacja (`git pull`) jest bezpieczna: `quiz.db` i `config.local.json` są w .gitignore, więc pull ich nie nadpisze.
-Nowe kolumny (polski tytuł, aliasy, cytaty, obsada, plakaty, wyłączone tryby) dodają się same przy starcie (ALTER TABLE), istniejące dane zostają.
+Nowe kolumny i tabele (polski tytuł, aliasy, obsada, plakaty ze źródłem, cytaty, pytania do licytacji, wyłączone tryby) dodają się same przy starcie, istniejące dane zostają. Stare cytaty z kolumny `movies.quotes` przenoszą się do tabeli `quotes`.
 
 ## Tryby gry
 
@@ -71,23 +72,42 @@ Gospodarz wybiera pakiet, a w poczekalni zaznacza tryby i liczbę rund. Filmy lo
 |---|---|---|
 | Kadry | trzy kadry od trudnego do łatwego, wcześniej = więcej punktów | 1 film z kadrami |
 | Zoom | mocne zbliżenie kadru, które się oddala (30 s) | 1 film z kadrami |
-| Licytacja | każdy po cichu deklaruje, ile filmów z pakietu wymieni (15 s). Najwyższa oferta (remis: kto pierwszy) wpisuje tytuły na czas: 15 s + 5 s za film, max 90 s. Liczą się filmy z listy pakietu (tytuł, aliasy, w PL też polski tytuł), bez powtórek. Uda się: 200 pkt x deklaracja. Nie uda się: pozostali po 100 pkt x deklaracja | 5 filmów na liście |
+| Licytacja | pytanie admina z listą odpowiedzi (np. "Wymień filmy Carpentera"). Każdy po cichu deklaruje, ile poprawnych odpowiedzi poda (15 s). Najwyższa oferta (remis: kto pierwszy) wpisuje je na czas: 15 s + 5 s za odpowiedź, max 90 s. Dopasowanie po znormalizowanym tekście z aliasami i drobnymi literówkami, powtórki odrzucane, postęp widzą wszyscy. Uda się: 200 pkt x deklaracja. Nie uda się: pozostali po 100 pkt x deklaracja. Odsłona pokazuje pominięte odpowiedzi | 1 pytanie (bez pytań: zapasowe "wymień filmy z pakietu", gdy pakiet ma 5 filmów) |
 | Który rok | podaj rok premiery: dokładnie 1000 pkt, każdy rok różnicy około -30 procent, ponad 8 lat 0 | 3 filmy z rokiem |
 | Ułóż po kolei | 4 filmy od najstarszego do najnowszego, 250 pkt za każde dobre miejsce | 4 różne lata |
-| Plakat | plakat się wyostrza (pikseloza) albo odsłania kafelkami | 3 plakaty z TMDB |
-| Aktorzy | obsada pojawia się co 6 s, od najmniej znanych nazwisk; mniej nazwisk = więcej punktów | 3 filmy z obsadą z TMDB |
+| Plakat | plakat się wyostrza (pikseloza) albo odsłania kafelkami | 3 plakaty (IMDb, Filmweb, TMDB albo ręcznie) |
+| Aktorzy | obsada pojawia się co 6 s, od najmniej znanych nazwisk; mniej nazwisk = więcej punktów | 3 filmy z obsadą (Filmweb, IMDb, TMDB albo ręcznie) |
 | Cytat | cytat wpisany przez admina, w połowie czasu podpowiedź z rokiem | 5 cytatów w pakiecie |
 
 W trybach z tytułem pierwsza poprawna odpowiedź dostaje +100 pkt. Tryb bez wystarczających danych jest wyszarzony z podpowiedzią, czego brakuje.
-Admin może wyłączyć dowolny tryb dla pakietu (strona pakietu, panel "tryby gry").
+Admin może wyłączyć dowolny tryb dla pakietu (edytor trybów albo panel "tryby gry" na stronie pakietu).
 
-## TMDB (Plakat, Aktorzy)
+## Edytor trybów
+
+Strona pakietu, "edytor trybów" (`/admin#/modes/ID`): karta każdego trybu z gotowością (ile danych jest, ile trzeba), przełącznikiem włącz/wyłącz w tym pakiecie i linkiem do edytora.
+
+- **Plakaty** (`#/posters/ID`): siatka plakatów. "pobierz dla pakietu" w tle z logiem na żywo (źródło: auto, IMDb, Filmweb, TMDB; opcjonalnie od nowa i z uzupełnieniem polskich tytułów). Na każdym plakacie: pobierz ponownie (z wybranego źródła), link do obrazka, plik z dysku (max 6 MB), usuń. Plakaty są zapisywane lokalnie w bazie, ze źródłem i datą.
+- **Obsada** (`#/cast/ID`): pobieranie top N aktorów (3 do 15, domyślnie 6) w kolejności z napisów. W grze nazwiska pojawiają się od ostatniego na liście, gwiazda na końcu. Edytor: zmiana kolejności, edycja nazwiska i postaci, dodawanie, usuwanie, odwrócenie, przywrócenie kolejności z napisów, pobierz ponownie.
+- **Cytaty** (`#/quotes/ID`): cytaty przy każdym filmie (dodaj, edytuj, usuń, język PL/EN/oba). Wklejanie listy: `Tytuł (rok) = cytat`, tytuł oryginalny albo polski, rok opcjonalny, język tagiem `[pl]` albo `[en]` na początku cytatu. Podgląd pokazuje dopasowane, brak w pakiecie, niejednoznaczne, powtórki i zły format. Polska wersja gry woli cytaty `[pl]`, angielska `[en]`.
+- **Pytania do licytacji** (`#/questions/ID`): pytanie PL i EN, odpowiedzi jedna w linii, aliasy po średniku ("The Thing; Coś"). "wstaw filmy z pakietu" wypełnia odpowiedzi tytułami, polskimi tytułami i aliasami. Wklejanie wielu pytań: bloki oddzielone pustą linią, pierwsza linia `pytanie PL | pytanie EN`.
+
+## Źródła plakatów i obsady
+
+Auto próbuje po kolei i zapisuje, z którego źródła przyszły dane:
+
+- plakat: IMDb, Filmweb, TMDB
+- obsada: Filmweb, IMDb, TMDB
+
+IMDb: wyszukiwanie przez publiczny endpoint podpowiedzi. Strony tytułów IMDb są często zablokowane (AWS WAF, HTTP 202), wtedy plakat jest brany z podpowiedzi, a obsady z IMDb nie da się pobrać (podpowiedź ma tylko 2 nazwiska), więc auto przechodzi na Filmweb.
+Filmweb: publiczne API strony (wyszukiwanie, dane filmu, plakat z fwcdn.pl) i strona obsady.
+Blokady (403, 429, WAF) są zgłaszane w logu jako "blocked" z powodem. Scraper nie omija zabezpieczeń, wysyła zwykłe zapytania z przerwą między filmami. Gdy serwisy zmienią strony, zostaje TMDB albo ręczne uzupełnienie.
+
+## TMDB (opcjonalnie)
 
 1. Załóż darmowe konto na themoviedb.org i wygeneruj klucz API (v3) albo token (v4).
 2. Panel admina, Ustawienia: wklej klucz. Jest sprawdzany i zapisywany w `config.local.json` (poza gitem i poza eksportem .sql). Można też użyć zmiennej `TMDB_API_KEY`.
-3. Strona pakietu, "Pobierz dane TMDB": dla każdego filmu szuka go po tytule i roku, zapisuje plakat lokalnie w bazie i 8 głównych aktorów z popularnością. Opcjonalnie uzupełnia puste polskie tytuły. Postęp widać w logu "na żywo".
+3. TMDB staje się trzecim źródłem w trybie auto i można je wybrać wprost w edytorach.
 
-Bez klucza Plakat i Aktorzy są niedostępne. Nic nie jest zmyślane: dane pochodzą tylko z TMDB albo od admina.
 Ta aplikacja korzysta z API TMDB, ale nie jest przez TMDB wspierana ani certyfikowana.
 
 ## Polskie tytuły i aliasy
@@ -95,7 +115,7 @@ Ta aplikacja korzysta z API TMDB, ale nie jest przez TMDB wspierana ani certyfik
 - Strona pakietu, "polskie tytuły": wklej listę w formacie `Original Title (rok) = Polski tytuł` albo `Original Title = Polski tytuł`.
   "podgląd" pokazuje dopasowane i niedopasowane linie (brak w pakiecie, zły format, niejednoznaczne bez roku), "zapisz dopasowane" zapisuje tylko dopasowane.
 - Obok tabela do edycji polskiego tytułu i aliasów w miejscu (zapis po wyjściu z pola, aliasy po średniku).
-- Edycja filmu: polski tytuł, aliasy i cytaty (jeden w linii).
+- Edycja filmu: polski tytuł i aliasy. Cytaty są w edytorze trybów.
 - W wersji PL gra przyjmuje oryginał, aliasy, polski tytuł oraz jego główny człon ("Obcy" dla "Obcy - 8. pasażer Nostromo"). Wyniki i podpowiedzi pokazują polski tytuł, oryginał mniejszą czcionką.
 
 ## Testy
@@ -103,4 +123,5 @@ Ta aplikacja korzysta z API TMDB, ale nie jest przez TMDB wspierana ani certyfik
 ```
 python3 test_scraper_fallback.py
 python3 test_game.py            # na kopii quiz.db: migracje, wklejanie PL, atrapa TMDB, gra 2 graczy we wszystkich trybach
+python3 test_editors.py         # na kopii quiz.db: scraper IMDb/Filmweb na atrapie (blokady, fallback), edytory, licytacja z pytaniem
 ```
