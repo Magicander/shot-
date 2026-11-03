@@ -43,7 +43,7 @@ async function loadPacks() {
   try { packs = await api("/api/packs"); } catch (e) { box.textContent = e.message; return; }
   box.innerHTML = "";
   packs.forEach((p, i) => {
-    const rounds = {n: Math.min(10, p.playable) || 0};
+    const rounds = {n: 10};
     const w = document.createElement("div"); w.className = "packet-wrap";
     const imgs = p.thumbs.length >= 2 ? p.thumbs.map(id => `<img class="ph" src="/frame/${id}.jpg" alt="" loading="lazy">`).join("") : FLOWER;
     w.innerHTML = `
@@ -54,17 +54,18 @@ async function loadPacks() {
         <div class="stamp">${p.playable}<small>${T("gotowe")}</small></div>
         <div class="foot"><span>${esc(packDesc(p))}</span></div>
       </div>
+      <p class="pack-modes">${p.modes.length ? T("tryby: {list}", {list: p.modes.map(modeName).join(", ")}) : T("brak dostępnych trybów")}</p>
       <div class="pack-pills">
         <span class="chip-pill"><svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 5h18v14H3zM5 7v2h2V7zm0 4v2h2v-2zm0 4v2h2v-2zm12-8v2h2V7zm0 4v2h2v-2zm0 4v2h2v-2z"/></svg>${T("{total} filmów | {n} w grze", {total:p.total, n:p.playable})}</span>
         <div class="stepper" role="group" aria-label="${T("Liczba rund")}">
           <button type="button" class="minus" aria-label="${T("mniej rund")}">-</button>
           <span class="n">${plRounds(rounds.n)}</span>
           <button type="button" class="plus" aria-label="${T("więcej rund")}">+</button>
-          <button type="button" class="go" ${p.playable ? "" : "disabled"}>${p.playable ? T("graj") : T("wkrótce")}</button>
+          <button type="button" class="go" ${p.modes.length ? "" : "disabled"}>${p.modes.length ? T("graj") : T("wkrótce")}</button>
         </div>
       </div>`;
     const n = w.querySelector(".n");
-    const upd = d => { rounds.n = Math.max(1, Math.min(p.playable || 1, rounds.n + d)); n.textContent = plRounds(rounds.n); };
+    const upd = d => { rounds.n = Math.max(1, Math.min(30, rounds.n + d)); n.textContent = plRounds(rounds.n); };
     upd(0);
     w.querySelector(".minus").onclick = () => upd(-1);
     w.querySelector(".plus").onclick = () => upd(1);
@@ -127,18 +128,45 @@ function playerList(players, opts = {}) {
   return `<ul class="plist">${players.map(p => `<li class="${p.online ? "" : "off"}">
     <span class="avatar" style="background:${avColor(p.name)}">${esc([...p.name][0].toUpperCase())}</span>
     <span>${esc(p.name)}</span>${p.id === S.me ? `<span class="you">${T("ty")}</span>` : ""}${p.id === S.host ? `<span class="host">${T("gospodarz")}</span>` : ""}
-    ${opts.status && p.got ? `<span class="mark ok" title="${T("zgadł")}"></span>` : ""}
+    ${opts.status && (p.got || p.done) ? `<span class="mark ok" title="${T("zgadł")}"></span>` : ""}
     ${opts.score ? `<span class="sc">${p.score}</span>` : ""}</li>`).join("")}</ul>`;
 }
 
+/* ---------------- tryby ---------------- */
+const MODE_INFO = {
+  kadry: ["Kadry", "Trzy kadry z filmu, od najtrudniejszego. Im szybciej zgadniesz, tym więcej punktów."],
+  zoom: ["Zoom", "Mocne zbliżenie fragmentu kadru, które powoli się oddala. Zgadnij tytuł jak najwcześniej."],
+  licytacja: ["Licytacja", "Każdy deklaruje, ile filmów z pakietu wymieni. Najwyższa oferta wpisuje tytuły na czas. Uda się: 200 pkt za każdy zadeklarowany film. Nie uda się: pozostali dostają po 100 pkt za każdy."],
+  rok: ["Który rok", "Podaj rok premiery. Dokładny rok to 1000 pkt, każdy rok różnicy zabiera około 30 procent, ponad 8 lat to zero."],
+  kolejnosc: ["Ułóż po kolei", "Ułóż 4 filmy od najstarszego do najnowszego. 250 pkt za każde dobre miejsce."],
+  plakat: ["Plakat", "Plakat odsłania się stopniowo. Im wcześniej zgadniesz, tym więcej punktów."],
+  aktorzy: ["Aktorzy", "Obsada pojawia się po kolei, od najmniej znanych nazwisk. Mniej nazwisk na ekranie to więcej punktów."],
+  cytat: ["Cytat", "Cytat z filmu. W połowie czasu pojawia się rok premiery jako podpowiedź."],
+};
+const modeName = k => T(MODE_INFO[k][0]);
+function modeHint(k, a) {
+  const v = {need: a.need, have: a.have};
+  return T({disabled: "Wyłączony przez admina dla tego pakietu.",
+    tmdb_key: "Wymaga klucza TMDB (panel admina, ustawienia).",
+    frames: "Potrzebny co najmniej {need} film z kadrami (jest {have}).",
+    movies: "Potrzeba co najmniej {need} filmów w pakiecie (jest {have}).",
+    years: k === "kolejnosc" ? "Potrzeba {need} filmów z różnymi latami premiery (jest {have})." : "Potrzeba {need} filmów z rokiem premiery (jest {have}).",
+    posters: "Za mało plakatów ({have}/{need}). Admin: Pobierz dane TMDB.",
+    cast: "Za mało filmów z obsadą ({have}/{need}). Admin: Pobierz dane TMDB.",
+    quotes: "Za mało cytatów ({have}/{need}). Admin dopisuje je przy filmach."}[a.reason] || "", v);
+}
+const showTitle = o => o.pl_title && LANG === "pl" && fold(o.pl_title) !== fold(o.title) ? `${esc(o.pl_title)} <small class="orig">(${esc(o.title)})</small>` : esc(o.title);
+
 function renderMeta() {
   $("#roommeta").innerHTML = `<span class="tag" style="--c:${S.pack.color}"><span class="dot"></span>${esc(packName(S.pack))}</span>
-    <span class="tag dark">${T("pokój {code}", {code:S.code})}</span>${S.phase === "round" || S.phase === "reveal" ? `<span class="tag">${T("runda {r}/{n}", {r:S.round, n:S.rounds})}</span>` : ""}`;
+    <span class="tag dark">${T("pokój {code}", {code:S.code})}</span>${S.phase === "round" || S.phase === "reveal" ? `<span class="tag">${T("runda {r}/{n}", {r:S.round, n:S.rounds})}</span><span class="tag mode">${modeName(S.mode)}</span>` : ""}`;
 }
 
 function render() {
   renderMeta();
-  const key = [S.phase, S.round, S.stage, S.players.map(p => p.id + p.name + p.score + !!p.got + p.online).join(), S.host].join("|");
+  const extra = S.phase === "round" ? [S.mode, S.stage, (S.cast || []).length, S.hint_year, S.sub, (S.found || []).length, (S.bidders || []).length, S.my_bid, JSON.stringify(S.mine ?? null)].join(",") : "";
+  const key = [S.phase, S.round, extra, S.players.map(p => p.id + p.name + p.score + !!p.got + !!p.done + p.online).join(), S.host,
+    S.phase === "lobby" ? S.modes.join() + S.rounds : ""].join("|");
   if (S.phase === "round") updateClock();
   if (key === lastKey) return;
   const v = $("#view");
@@ -150,6 +178,18 @@ function render() {
   if (S.phase === "final") return renderFinal(v);
 }
 
+function modePicker() {
+  const host = isHost();
+  return `<div class="modes">${S.all_modes.map(k => {
+    const a = S.avail[k], on = S.modes.includes(k);
+    return `<label class="modecard ${a.ok ? "" : "off"} ${on ? "on" : ""}">
+      <input type="checkbox" value="${k}" ${on ? "checked" : ""} ${a.ok && host ? "" : "disabled"}>
+      <span class="mtop"><b>${modeName(k)}</b><span class="tick" aria-hidden="true"></span></span>
+      <span class="mdesc">${T(MODE_INFO[k][1])}</span>
+      ${a.ok ? "" : `<span class="mhint">${esc(modeHint(k, a))}</span>`}</label>`;
+  }).join("")}</div>`;
+}
+
 function renderLobby(v) {
   const link = `${location.origin}/r/${S.code}`;
   v.innerHTML = `<div class="lobby">
@@ -158,7 +198,6 @@ function renderLobby(v) {
       <div class="bigcode">${S.code}</div>
       <p style="margin:14px 0 0">${T("Wyślij znajomym link albo kod. Wpisują go na stronie głównej.")}</p>
       <div class="share"><input class="input" readonly value="${esc(link)}" id="link"><button class="pill" id="copy">${T("kopiuj link")}</button></div>
-      <p class="muted" style="margin:18px 0 0">${T("{rounds} · pakiet {pack} · kadr co {s} s", {rounds: plRounds(S.rounds), pack: esc(packName(S.pack)), s: S.stage_seconds})}</p>
     </div>
     <div class="panel">
       <h3 style="font-size:30px">${T("gracze")} <span class="ast">${S.players.length}</span></h3>
@@ -166,55 +205,195 @@ function renderLobby(v) {
       <div style="margin-top:20px">${isHost()
         ? `<button class="pill orange big" style="width:100%" id="start">${T("zaczynamy")}</button><p class="muted center" style="font-size:14px;margin:8px 0 0">${T("Możesz zacząć sam albo poczekać na resztę.")}</p>`
         : `<div class="wait"><span class="spin"></span>${T("Czekamy, aż gospodarz zacznie...")}</div>`}</div>
+    </div>
+    <div class="panel setup">
+      <div class="setup-head"><h3 style="font-size:30px">${T("tryby gry")}</h3>
+        ${isHost() ? `<div class="stepper small" role="group" aria-label="${T("Liczba rund")}"><button type="button" id="rminus" aria-label="${T("mniej rund")}">-</button><span class="n">${plRounds(S.rounds)}</span><button type="button" id="rplus" aria-label="${T("więcej rund")}">+</button></div>`
+          : `<span class="tag">${plRounds(S.rounds)}</span>`}</div>
+      <p class="muted" style="margin:4px 0 14px">${isHost() ? T("Zaznacz tryby. Rundy będą je przeplatać, filmy losujemy tylko z tego pakietu.") : T("Gospodarz wybiera tryby. Rundy będą je przeplatać.")}</p>
+      ${modePicker()}
     </div></div>`;
   $("#copy").onclick = async () => { try { await navigator.clipboard.writeText(link); toast(T("Skopiowano link")); } catch { $("#link").select(); document.execCommand("copy"); toast(T("Skopiowano link")); } };
-  if (isHost()) $("#start").onclick = () => act("start");
+  if (!isHost()) return;
+  $("#start").onclick = () => act("start");
+  const setup = (modes, rounds) => act("setup", {modes, rounds});
+  $("#rminus").onclick = () => setup(S.modes, S.rounds - 1);
+  $("#rplus").onclick = () => setup(S.modes, S.rounds + 1);
+  v.querySelectorAll(".modecard input").forEach(cb => cb.onchange = () => {
+    const modes = [...v.querySelectorAll(".modecard input:checked")].map(x => x.value);
+    if (!modes.length) { cb.checked = true; return toast(T("Zostaw co najmniej jeden tryb")); }
+    setup(modes, S.rounds);
+  });
 }
 
 function feedText(f) {
   if (f.text) return f.text;
-  return T({join:"{name} dołącza", guess:"{name} zgaduje (+{pts})", leave:"{name} wychodzi"}[f.k] || "{name}", {name:f.name, pts:f.pts});
+  return T({join:"{name} dołącza", guess:"{name} zgaduje (+{pts})", leave:"{name} wychodzi", bid:"{name} licytuje",
+    bidwin:"{name} wygrywa licytację: {pts}", answered:"{name} odpowiada"}[f.k] || "{name}", {name:f.name, pts:f.pts});
 }
 function me() { return S.players.find(p => p.id === S.me) || {}; }
 
+const board = () => `<aside class="panel board"><h3>${T("wyniki")}</h3>${playerList(S.players, {score:true, status:true})}
+  <div class="feed">${S.feed.slice().reverse().map(f => `<span>${esc(feedText(f))}</span>`).join("")}</div>
+  ${isHost() ? `<button class="pill ghost small" style="margin-top:14px" id="skip">${T("pomiń rundę")}</button>` : ""}</aside>`;
+const bar = () => `<div class="timeline one"><div class="cur"><i id="bar1"></i></div></div>`;
+const guessForm = ph => `<form class="guess" id="gf" autocomplete="off"><ul class="ac hidden" id="ac"></ul>
+  <input class="input" id="g" placeholder="${ph || T("Jaki to film?")}" enterkeyhint="send" autocapitalize="off" spellcheck="false" aria-label="${T("Tytuł filmu")}">
+  <button class="pill orange big">${T("zgaduję")}</button></form><div class="feedback" id="fb"></div>`;
+const gotBox = (m, sub) => `<div class="gotit"><span class="display">+${m.got.points}</span><div><b>${T("Brawo, zgadłeś!")}</b><br><span style="opacity:.75">${sub || T("Czekamy na resztę.")}</span></div></div>`;
+const waitBox = txt => `<div class="gotit wait-box"><div><b>${txt}</b><br><span style="opacity:.75">${T("Czekamy na resztę.")}</span></div></div>`;
+let ORDER = {round: 0, ids: []}, BID = {round: 0, n: 3};
+
 function renderRound(v, keepInput) {
   const prev = keepInput ? ($("#g")?.value || "") : "";
-  const hadFocus = keepInput && document.activeElement?.id === "g";
-  const lvl = LEVELS[S.stage], m = me();
-  v.innerHTML = `<div class="game">
-    <div>
-      <div class="stage"><img src="/frame/${S.frames[S.stage]}.jpg" alt="${T("Kadr z filmu")}"><span class="lvl">${T("kadr {lvl} · do {pts} pkt", {lvl:lvl[1], pts:lvl[2]})}</span><span class="clock" id="clock"></span></div>
+  const prevY = keepInput ? ($("#y")?.value || "") : "";
+  const hadFocus = keepInput && ["g", "y"].includes(document.activeElement?.id);
+  const m = me(), mode = S.mode;
+  let stage = "", input = "";
+  const titleInput = () => m.got ? gotBox(m) : guessForm();
+  if (mode === "kadry") {
+    const lvl = LEVELS[S.stage];
+    stage = `<div class="stage"><img src="/frame/${S.frames[S.stage]}.jpg" alt="${T("Kadr z filmu")}"><span class="lvl">${T("kadr {lvl} · do {pts} pkt", {lvl:lvl[1], pts:lvl[2]})}</span><span class="clock" id="clock"></span></div>
       <div class="timeline" id="tl">${LEVELS.map((l, i) => `<div class="${i === S.stage ? "cur" : ""}"><i></i></div>`).join("")}</div>
-      <div class="timeline-labels">${LEVELS.map((l, i) => `<span class="${i <= S.stage ? "on" : ""}">${l[1]}</span>`).join("")}</div>
-      ${m.got ? `<div class="gotit"><span class="display">+${m.got.points}</span><div><b>${T("Brawo, zgadłeś!")}</b><br><span style="opacity:.75">${LANG === "en" ? T("Na kadrze {lvl} po {secs} s. Czekamy na resztę.", {lvl: LEVELS[m.got.stage][1], secs: m.got.secs}) : `Na kadrze ${LEVELS[m.got.stage][1]}m po ${m.got.secs} s. Czekamy na resztę.`}</span></div></div>`
-        : `<form class="guess" id="gf" autocomplete="off"><ul class="ac hidden" id="ac"></ul>
-            <input class="input" id="g" placeholder="${T("Jaki to film?")}" enterkeyhint="send" autocapitalize="off" spellcheck="false" aria-label="${T("Tytuł filmu")}">
-            <button class="pill orange big">${T("zgaduję")}</button></form>
-           <div class="feedback" id="fb"></div>`}
-    </div>
-    <aside class="panel board"><h3>${T("wyniki")}</h3>${playerList(S.players, {score:true, status:true})}
-      <div class="feed">${S.feed.slice().reverse().map(f => `<span>${esc(feedText(f))}</span>`).join("")}</div>
-      ${isHost() ? `<button class="pill ghost small" style="margin-top:14px" id="skip">${T("pomiń rundę")}</button>` : ""}</aside>
-  </div>`;
+      <div class="timeline-labels">${LEVELS.map((l, i) => `<span class="${i <= S.stage ? "on" : ""}">${l[1]}</span>`).join("")}</div>`;
+    input = m.got ? gotBox(m, LANG === "en" ? T("Na kadrze {lvl} po {secs} s. Czekamy na resztę.", {lvl: LEVELS[m.got.stage][1], secs: m.got.secs}) : `Na kadrze ${LEVELS[m.got.stage][1]}m po ${m.got.secs} s. Czekamy na resztę.`) : guessForm();
+  } else if (mode === "zoom") {
+    stage = `<div class="stage zoom"><img id="zimg" src="${S.img}" alt="${T("Fragment kadru")}" style="transform-origin:${S.ox * 100}% ${S.oy * 100}%"><span class="lvl">${T("zoom · kadr się oddala")}</span><span class="clock" id="clock"></span></div>${bar()}`;
+    input = titleInput();
+  } else if (mode === "plakat") {
+    stage = `<div class="stage posterstage"><canvas id="pc" width="400" height="600" aria-label="${T("Plakat filmu")}"></canvas><span class="lvl">${S.style === "pix" ? T("plakat · wyostrza się") : T("plakat · odsłania się")}</span><span class="clock" id="clock"></span></div>${bar()}`;
+    input = titleInput();
+  } else if (mode === "aktorzy") {
+    stage = `<div class="stage textstage"><span class="lvl">${T("aktorzy · {k} z {n}", {k:S.cast.length, n:S.cast_total})}</span><span class="clock" id="clock"></span>
+      <ol class="castlist">${Array.from({length:S.cast_total}, (_, i) => S.cast[i] ? `<li class="in">${esc(S.cast[i])}</li>` : `<li class="hid">...</li>`).join("")}</ol>
+      <p class="muted small-note">${T("od najmniej do najbardziej znanych")}</p></div>${bar()}`;
+    input = titleInput();
+  } else if (mode === "cytat") {
+    stage = `<div class="stage textstage"><span class="lvl">${T("cytat")}</span><span class="clock" id="clock"></span>
+      <blockquote class="quote">${esc(S.quote)}</blockquote>${S.hint_year ? `<p class="hint">${T("podpowiedź: rok {y}", {y:S.hint_year})}</p>` : ""}</div>${bar()}`;
+    input = titleInput();
+  } else if (mode === "rok") {
+    stage = `<div class="stage textstage yearstage">${S.img ? `<img class="thumb" src="${S.img}" alt="">` : ""}<span class="lvl">${T("który rok?")}</span><span class="clock" id="clock"></span>
+      <h2 class="ytitle">${showTitle(S.movie)}</h2></div>${bar()}`;
+    input = S.mine ? waitBox(T("Twoja odpowiedź: {y}", {y:S.mine}))
+      : `<form class="guess" id="yf"><input class="input" id="y" type="number" inputmode="numeric" min="1900" max="2030" placeholder="${T("np. 1984")}" aria-label="${T("Rok premiery")}"><button class="pill orange big">${T("odpowiadam")}</button></form>`;
+  } else if (mode === "kolejnosc") {
+    if (ORDER.round !== S.round) ORDER = {round: S.round, ids: S.items.map(i => i.id)};
+    const byId = Object.fromEntries(S.items.map(i => [i.id, i]));
+    const ids = S.mine || ORDER.ids;
+    stage = `<div class="stage textstage orderstage"><span class="lvl">${T("od najstarszego do najnowszego")}</span><span class="clock" id="clock"></span>
+      <ol class="orderlist">${ids.map((id, i) => `<li>${byId[id].img ? `<img src="${byId[id].img}" alt="">` : `<span class="noimg"></span>`}<span class="ot">${showTitle(byId[id])}</span>
+        ${S.mine ? "" : `<span class="ob"><button type="button" class="pill small" data-up="${i}" ${i ? "" : "disabled"} aria-label="${T("wyżej")}">&uarr;</button><button type="button" class="pill small" data-dn="${i}" ${i < ids.length - 1 ? "" : "disabled"} aria-label="${T("niżej")}">&darr;</button></span>`}</li>`).join("")}</ol>
+      <div class="olabels"><span>${T("najstarszy")}</span><span>${T("najnowszy")}</span></div></div>${bar()}`;
+    input = S.mine ? waitBox(T("Kolejność wysłana")) : `<button class="pill orange big" id="osend" style="width:100%">${T("zatwierdzam kolejność")}</button>`;
+  } else if (mode === "licytacja") {
+    stage = renderAuction(m);
+  }
+  v.innerHTML = `<div class="game"><div>${stage}${input}</div>${board()}</div>`;
   if (isHost()) $("#skip").onclick = () => act("next");
-  updateClock();
-  if (!m.got) setupGuess(prev, hadFocus || !keepInput);
+  updateClock(true);
+  if ($("#gf")) setupGuess(prev, hadFocus || !keepInput, mode === "licytacja");
+  if ($("#yf")) {
+    const y = $("#y"); y.value = prevY; if ((hadFocus || !keepInput) && matchMedia("(pointer:fine)").matches) y.focus();
+    $("#yf").onsubmit = async e => { e.preventDefault(); const n = parseInt(y.value, 10); if (!(n >= 1880 && n <= 2100)) return toast(T("Podaj rok, np. 1984")); await guessAct({year:n}); };
+  }
+  if (mode === "kolejnosc" && !S.mine) {
+    v.querySelectorAll("[data-up],[data-dn]").forEach(b => b.onclick = () => {
+      const i = +(b.dataset.up ?? b.dataset.dn), j = b.dataset.up !== undefined ? i - 1 : i + 1;
+      [ORDER.ids[i], ORDER.ids[j]] = [ORDER.ids[j], ORDER.ids[i]]; lastKey = ""; render();
+    });
+    $("#osend").onclick = () => guessAct({order: ORDER.ids});
+  }
+  if (mode === "licytacja" && S.sub === "bid" && !S.my_bid) {
+    if (BID.round !== S.round) BID = {round: S.round, n: Math.min(3, S.total)};
+    const n = $("#bidn"), upd = d => { BID.n = Math.max(1, Math.min(S.total, BID.n + d)); n.textContent = BID.n; };
+    upd(0); $("#bminus").onclick = () => upd(-1); $("#bplus").onclick = () => upd(1);
+    $("#bsend").onclick = () => guessAct({bid: BID.n});
+  }
 }
 
-function updateClock() {
+function renderAuction(m) {
+  const rules = `<details class="rules" ${S.sub === "bid" ? "open" : ""}><summary>${T("zasady licytacji")}</summary><ol>
+    <li>${T("Każdy po cichu deklaruje, ile filmów z tego pakietu wymieni (pakiet ma {n}).", {n:S.total})}</li>
+    <li>${T("Najwyższa deklaracja wygrywa (przy remisie: kto pierwszy). Ta osoba wpisuje tytuły na czas: 15 s + 5 s za każdy film.")}</li>
+    <li>${T("Liczą się tylko filmy z pakietu, bez powtórek. W wersji PL można wpisywać polskie tytuły.")}</li>
+    <li>${T("Uda się: licytujący dostaje 200 pkt za każdy zadeklarowany film. Nie uda się: każdy z pozostałych dostaje po 100 pkt za każdy.")}</li></ol></details>`;
+  if (S.sub === "bid") {
+    return `<div class="stage textstage auction"><span class="lvl">${T("licytacja · deklaracje")}</span><span class="clock" id="clock"></span>
+      <h2 class="ytitle">${T("Ile filmów z pakietu wymienisz?")}</h2>
+      ${S.my_bid ? `<p class="bigbid">${S.my_bid}</p><p class="muted">${T("Twoja deklaracja. Czekamy na pozostałych.")}</p>`
+        : `<div class="bidrow"><div class="stepper" role="group"><button type="button" id="bminus" aria-label="${T("mniej")}">-</button><span class="n" id="bidn">3</span><button type="button" id="bplus" aria-label="${T("więcej")}">+</button></div>
+           <button class="pill orange big" id="bsend">${T("licytuję")}</button></div>`}
+      <p class="muted small-note">${S.bidders.length ? T("Zadeklarowali: {names}", {names: S.bidders.map(esc).join(", ")}) : T("Nikt jeszcze nie zadeklarował.")}</p>
+      ${rules}</div>${bar()}`;
+  }
+  const mine = S.bidder === S.me;
+  return `<div class="stage textstage auction"><span class="lvl">${T("licytacja · {name} wpisuje", {name: esc(S.bidder_name)})}</span><span class="clock" id="clock"></span>
+    <h2 class="ytitle">${mine ? T("Wpisz {n} filmów z pakietu", {n:S.bid}) : T("{name} musi wymienić {n} filmów", {name: esc(S.bidder_name), n:S.bid})}</h2>
+    <p class="progressn"><b>${S.found.length}</b> / ${S.bid}</p>
+    <ul class="found">${S.found.map(f => `<li>${showTitle(f)}${f.year ? ` <small>${f.year}</small>` : ""}</li>`).join("")}</ul>
+    ${rules}</div>${bar()}${mine ? guessForm(T("Tytuł z pakietu...")) : `<div class="feedback">${T("Patrzymy, czy da radę...")}</div>`}`;
+}
+
+async function guessAct(body) {
+  try { await api(`/api/rooms/${CODE}/guess`, {pid:ME.pid, token:ME.token, ...body}); lastKey = ""; poll(); }
+  catch (e) { toast(e.message); }
+}
+
+let drawn = "";
+function updateClock(force) {
   if (!S || S.phase !== "round") return;
   const el = S.elapsed + (performance.now() - localT0) / 1000;
-  const c = $("#clock"); if (c) c.textContent = Math.max(0, Math.ceil(S.stage_seconds * 3 - el)) + " s";
-  document.querySelectorAll("#tl i").forEach((bar, i) => {
-    const f = Math.max(0, Math.min(1, (el - i * S.stage_seconds) / S.stage_seconds));
-    bar.style.width = (f * 100) + "%";
-  });
+  const c = $("#clock");
+  if (S.mode === "kadry") {
+    if (c) c.textContent = Math.max(0, Math.ceil(S.stage_seconds * 3 - el)) + " s";
+    document.querySelectorAll("#tl i").forEach((bar, i) => {
+      const f = Math.max(0, Math.min(1, (el - i * S.stage_seconds) / S.stage_seconds));
+      bar.style.width = (f * 100) + "%";
+    });
+    return;
+  }
+  const dur = S.duration || 30, f = Math.max(0, Math.min(1, el / dur));
+  if (c) c.textContent = Math.max(0, Math.ceil(dur - el)) + " s";
+  const b = $("#bar1"); if (b) b.style.width = (f * 100) + "%";
+  if (S.mode === "zoom") { const z = $("#zimg"); if (z) z.style.transform = `scale(${(1 + 5 * Math.pow(1 - f, 1.5)).toFixed(3)})`; }
+  if (S.mode === "plakat") drawPoster(f, force);
+}
+
+let posterImg = null;
+function drawPoster(f, force) {
+  const cv = $("#pc"); if (!cv) return;
+  if (!posterImg || posterImg.dataset.src !== S.img) { posterImg = new Image(); posterImg.dataset.src = S.img; posterImg.onload = () => drawPoster(f, true); posterImg.src = S.img; return; }
+  if (!posterImg.complete || !posterImg.naturalWidth) return;
+  const ctx = cv.getContext("2d"), W = cv.width, H = cv.height;
+  if (S.style === "pix") {
+    const steps = [4, 6, 9, 13, 18, 26, 36, 52, 75, 110, 400];
+    const k = steps[Math.min(steps.length - 1, Math.floor(f * steps.length))];
+    const key = S.img + "p" + k; if (key === drawn && !force) return; drawn = key;
+    const w = Math.max(2, Math.round(k * W / 400)), h = Math.max(3, Math.round(w * H / W));
+    const tmp = document.createElement("canvas"); tmp.width = w; tmp.height = h;
+    tmp.getContext("2d").drawImage(posterImg, 0, 0, w, h);
+    ctx.imageSmoothingEnabled = false; ctx.drawImage(tmp, 0, 0, W, H);
+  } else {
+    const cols = 4, rows = 6, n = cols * rows;
+    const shown = Math.min(n, 1 + Math.floor(f * n * 0.95));
+    const key = S.img + "t" + shown; if (key === drawn && !force) return; drawn = key;
+    let s = S.seed; const rnd = () => (s = (s * 16807) % 2147483647) / 2147483647;
+    const order = [...Array(n).keys()].sort(() => rnd() - .5);
+    ctx.fillStyle = "#1B1712"; ctx.fillRect(0, 0, W, H);
+    const tw = W / cols, th = H / rows, sw = posterImg.naturalWidth / cols, sh = posterImg.naturalHeight / rows;
+    order.slice(0, shown).forEach(i => { const x = i % cols, y = Math.floor(i / cols);
+      ctx.drawImage(posterImg, x * sw, y * sh, sw, sh, x * tw, y * th, tw + .5, th + .5); });
+    ctx.strokeStyle = "#F26B1D"; ctx.lineWidth = 2;
+    for (let i = 1; i < cols; i++) { ctx.beginPath(); ctx.moveTo(i * tw, 0); ctx.lineTo(i * tw, H); ctx.stroke(); }
+    for (let i = 1; i < rows; i++) { ctx.beginPath(); ctx.moveTo(0, i * th); ctx.lineTo(W, i * th); ctx.stroke(); }
+  }
 }
 tickT = setInterval(updateClock, 200);
 
-function fold(s) { return s.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/ł/g, "l").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
+function fold(s) { return String(s || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/ł/g, "l").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
 
-function setupGuess(prev, focus) {
+function setupGuess(prev, focus, auction) {
   const g = $("#g"), ac = $("#ac"), fb = $("#fb");
   let sel = -1, items = [];
   g.value = prev;
@@ -242,22 +421,39 @@ function setupGuess(prev, focus) {
     const text = g.value.trim(); if (!text) return;
     try {
       const r = await api(`/api/rooms/${CODE}/guess`, {pid:ME.pid, token:ME.token, text});
-      if (r.correct) { lastKey = ""; poll(); }
-      else { fb.textContent = T("Nie, to nie \"{text}\". Próbuj dalej.", {text}); fb.className = "feedback bad"; g.select(); }
+      if (r.correct) { if (auction) { g.value = ""; toast(T("Zaliczone: {t}", {t: r.title})); } lastKey = ""; poll(); }
+      else if (r.duplicate) { fb.textContent = T("Ten film już był."); fb.className = "feedback bad"; g.select(); }
+      else { fb.textContent = auction ? T("\"{text}\" nie pasuje do żadnego filmu z pakietu.", {text}) : T("Nie, to nie \"{text}\". Próbuj dalej.", {text}); fb.className = "feedback bad"; g.select(); }
     } catch (e) { toast(e.message); }
   };
   $("#gf").onsubmit = e => { e.preventDefault(); ac.classList.add("hidden"); submit(); };
 }
 
+function roundResults() {
+  const last = p => p.history.length ? p.history[p.history.length - 1] : 0;
+  return `<ul class="results">${S.players.slice().sort((a, b) => last(b) - last(a)).map(p => `<li class="${last(p) ? "" : "miss"}">${esc(p.name)} ${last(p) ? "+" + last(p) : "0"}</li>`).join("")}</ul>`;
+}
+
 function renderReveal(v) {
-  const a = S.answer, m = me();
-  const got = S.players.filter(p => p.got).sort((x, y) => x.got.order - y.got.order);
-  const miss = S.players.filter(p => !p.got);
-  v.innerHTML = `<div class="game"><div class="panel reveal">
-      <p class="muted" style="margin:0;font-weight:700">${m.got ? T("zgadłeś, +{pts} pkt", {pts:m.got.points}) : T("tym razem nie wyszło")}</p>
-      <h2>${esc(a.title)}</h2><div class="year">${a.year || ""}</div>
-      <div class="trio">${a.frames.map((id, i) => `<figure><img src="/frame/${id}.jpg" alt=""><figcaption><span class="lv ${LEVELS[i][0]}"></span>${T("kadr {lvl}", {lvl:LEVELS[i][1]})}</figcaption></figure>`).join("")}</div>
-      <ul class="results">${got.map(p => `<li>${esc(p.name)} +${p.got.points}</li>`).join("")}${miss.map(p => `<li class="miss">${esc(p.name)} 0</li>`).join("")}</ul>
+  const a = S.answer, m = me(), mode = a.mode;
+  const last = m.history && m.history.length ? m.history[m.history.length - 1] : 0;
+  let head = `<p class="muted" style="margin:0;font-weight:700">${last ? T("+{pts} pkt w tej rundzie", {pts:last}) : T("tym razem nie wyszło")}</p>`, body = "";
+  const titleBlock = `<h2>${showTitle(a)}</h2><div class="year">${a.year || ""}</div>`;
+  if (mode === "kadry") body = titleBlock + `<div class="trio">${a.frames.map((id, i) => `<figure><img src="/frame/${id}.jpg" alt=""><figcaption><span class="lv ${LEVELS[i][0]}"></span>${T("kadr {lvl}", {lvl:LEVELS[i][1]})}</figcaption></figure>`).join("")}</div>`;
+  else if (mode === "zoom" || mode === "plakat") body = titleBlock + `<div class="revimg ${mode}"><img src="${a.img}" alt=""></div>`;
+  else if (mode === "aktorzy") body = titleBlock + `<ol class="castlist done">${a.cast.map(n => `<li class="in">${esc(n)}</li>`).join("")}</ol>`;
+  else if (mode === "cytat") body = titleBlock + `<blockquote class="quote small">${esc(a.quote)}</blockquote>`;
+  else if (mode === "rok") body = `<h2>${showTitle(a)}</h2><div class="year big">${a.year}</div>
+    <ul class="guesses">${a.guesses.map(g => `<li><b>${esc(g.name)}</b><span>${g.year}</span><span class="d">${g.year === a.year ? T("dokładnie") : T("{d} lat różnicy", {d: Math.abs(g.year - a.year)})}</span><span class="sc">+${g.points}</span></li>`).join("") || `<li class="miss">${T("Nikt nie odpowiedział.")}</li>`}</ul>`;
+  else if (mode === "kolejnosc") body = `<h2>${T("dobra kolejność")}</h2><ol class="orderlist done">${a.items.map(i => `<li>${i.img ? `<img src="${i.img}" alt="">` : `<span class="noimg"></span>`}<span class="ot">${showTitle(i)}</span><span class="oy">${i.year}</span></li>`).join("")}</ol>`;
+  else if (mode === "licytacja") {
+    body = a.bidder_name ? `<h2>${a.success ? T("{name} dał radę", {name: esc(a.bidder_name)}) : T("{name} nie dał rady", {name: esc(a.bidder_name)})}</h2>
+      <div class="year">${T("{f} z {b} zadeklarowanych", {f: a.found.length, b: a.bid})}</div>
+      <p class="muted">${T("Deklaracje: {list}", {list: a.bids.map(b => esc(b.name) + " " + b.bid).join(", ")})}</p>
+      <ul class="found">${a.found.map(f => `<li>${showTitle(f)}${f.year ? ` <small>${f.year}</small>` : ""}</li>`).join("")}</ul>`
+      : `<h2>${T("nikt nie licytował")}</h2>`;
+  }
+  v.innerHTML = `<div class="game"><div class="panel reveal">${head}${body}${roundResults()}
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:20px;flex-wrap:wrap">
         <div class="wait"><span class="spin"></span>${S.round >= S.rounds ? T("Zaraz wyniki końcowe...") : T("Za chwilę kolejna runda...")}</div>
         ${isHost() ? `<button class="pill orange" id="nx">${S.round >= S.rounds ? T("pokaż wyniki") : T("dalej")}</button>` : ""}

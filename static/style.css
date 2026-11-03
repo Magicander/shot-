@@ -229,3 +229,79 @@ footer{padding:30px 0 50px;text-align:center;color:var(--muted);font-size:14px}
 .langsw button.on{background:var(--ink);color:var(--bone)}
 .langsw button:not(.on):hover{background:rgba(0,0,0,.08)}
 #roommeta{display:inline-flex;gap:8px;flex-wrap:wrap;align-items:center}
+
+/* ---------- faza 3: tryby gry ---------- */
+.pack-modes{margin:8px 4px 0;font-size:13px;color:var(--muted);font-weight:600;line-height:1.35;max-width:300px}
+.lobby .setup{grid-column:1/-1}
+.setup-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.stepper.small{height:44px}.stepper.small .n{min-width:90px;font-size:16px}
+.modes{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
+.modecard{position:relative;display:flex;flex-direction:column;gap:6px;background:var(--card);border:2px solid var(--line);border-radius:22px;padding:14px 16px;cursor:pointer;transition:border-color .15s,background .15s}
+.modecard input{position:absolute;opacity:0;pointer-events:none}
+.modecard .mtop{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.modecard b{font-family:var(--display);font-size:21px}
+.modecard .tick{width:26px;height:26px;border-radius:50%;border:2px solid var(--line);flex:none;position:relative}
+.modecard.on{border-color:var(--orange);background:#FFF4EA}
+.modecard.on .tick{background:var(--orange);border-color:var(--orange)}
+.modecard.on .tick::after{content:"";position:absolute;left:8px;top:3px;width:6px;height:12px;border:solid #fff;border-width:0 3px 3px 0;transform:rotate(45deg)}
+.modecard .mdesc{font-size:14px;line-height:1.4;color:var(--muted)}
+.modecard .mhint{font-size:13px;font-weight:700;color:var(--ink);background:var(--bone);border-radius:12px;padding:6px 10px}
+.modecard.off{cursor:not-allowed;opacity:.62}
+.modecard input:focus-visible ~ .mtop .tick{box-shadow:0 0 0 4px var(--orange-l)}
+.tag.mode{background:var(--orange);color:#fff;border-color:var(--orange)}
+.timeline.one{grid-template-columns:1fr}
+.stage.zoom img{transition:none;will-change:transform}
+.stage.posterstage{aspect-ratio:auto;display:flex;justify-content:center;background:var(--ink);padding:56px 0 18px}
+.stage.posterstage canvas{width:min(100%,340px);height:auto;aspect-ratio:2/3;border-radius:12px;display:block}
+.stage.textstage{aspect-ratio:auto;min-height:300px;background:var(--card);color:var(--ink);padding:64px 26px 26px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;border:2px solid var(--line)}
+.stage.textstage .lvl{background:var(--orange);color:#fff}
+.castlist{list-style:none;counter-reset:c;margin:0;padding:0;display:grid;gap:8px;width:100%;max-width:460px}
+.castlist li{counter-increment:c;border-radius:16px;padding:10px 16px;font-family:var(--display);font-weight:700;font-size:22px;text-align:left;display:flex;gap:12px;align-items:center}
+.castlist li::before{content:counter(c);display:inline-grid;place-items:center;width:30px;height:30px;border-radius:50%;background:var(--ink);color:var(--paper);font-size:15px;flex:none}
+.castlist li.in{background:var(--bone);animation:fadein .4s}
+.castlist li.hid{background:transparent;border:2px dashed var(--line);color:var(--muted)}
+.castlist.done{margin:14px auto 4px}
+.small-note{font-size:13px;margin:12px 0 0}
+.quote{font-family:var(--display);font-size:clamp(24px,3.4vw,38px);line-height:1.2;margin:0;max-width:640px;font-weight:700}
+.quote::before{content:"\201E";color:var(--orange)}.quote::after{content:"\201D";color:var(--orange)}
+.quote.small{font-size:22px;margin:14px 0}
+.hint{margin:16px 0 0;background:var(--ink);color:var(--paper);border-radius:999px;padding:6px 16px;font-weight:700}
+.yearstage .thumb{width:min(100%,420px);aspect-ratio:16/9;object-fit:cover;border-radius:18px;margin-bottom:14px}
+.ytitle{font-family:var(--display);font-size:clamp(26px,3.6vw,40px);line-height:1.1;margin:0 0 6px}
+.ytitle small.orig,.orig{font-size:.55em;color:var(--muted);font-weight:600}
+.orderlist{list-style:none;margin:0;padding:0;display:grid;gap:10px;width:100%;max-width:560px;counter-reset:o}
+.orderlist li{counter-increment:o;display:flex;align-items:center;gap:12px;background:var(--bone);border-radius:18px;padding:8px 10px;text-align:left}
+.orderlist li::before{content:counter(o);font-family:var(--display);font-weight:700;font-size:22px;width:26px;text-align:center;color:var(--orange);flex:none}
+.orderlist img,.orderlist .noimg{width:86px;aspect-ratio:16/9;object-fit:cover;border-radius:10px;flex:none;background:var(--line)}
+.orderlist .ot{flex:1;font-weight:700;line-height:1.25}
+.orderlist .ob{display:flex;gap:6px;flex:none}
+.orderlist .ob .pill{min-width:44px;height:44px;padding:0;justify-content:center;font-size:20px}
+.orderlist .oy{font-family:var(--display);font-weight:700;font-size:22px;flex:none}
+.orderlist.done{margin:14px 0}
+.olabels{display:flex;justify-content:space-between;width:100%;max-width:560px;font-size:13px;font-weight:700;color:var(--muted);margin-top:8px}
+.auction .bidrow{display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;margin:10px 0}
+.auction .stepper .n{min-width:70px;font-size:28px}
+.bigbid{font-family:var(--display);font-size:90px;line-height:1;margin:6px 0;color:var(--orange);font-weight:700}
+.progressn{font-family:var(--display);font-size:46px;margin:4px 0}.progressn b{color:var(--orange)}
+.found{list-style:none;padding:0;margin:8px 0;display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+.found li{background:var(--bone);border-radius:999px;padding:6px 14px;font-weight:700;animation:fadein .3s}
+.found small{color:var(--muted);font-weight:600}
+.rules{margin-top:16px;text-align:left;width:100%;max-width:600px;background:var(--bone);border-radius:18px;padding:10px 16px;font-size:14px}
+.rules summary{font-weight:700;cursor:pointer}
+.rules ol{margin:8px 0 2px;padding-left:20px}.rules li{margin:4px 0}
+.revimg{margin:16px auto 6px;max-width:520px}.revimg img{width:100%;border-radius:18px;display:block}
+.revimg.plakat{max-width:260px}
+.year.big{font-size:60px;color:var(--orange)}
+.guesses{list-style:none;padding:0;margin:14px 0;display:grid;gap:8px}
+.guesses li{display:grid;grid-template-columns:1fr auto auto auto;gap:12px;align-items:center;background:var(--bone);border-radius:14px;padding:8px 14px}
+.guesses .d{color:var(--muted);font-size:14px}.guesses .sc{font-family:var(--display);font-weight:700}
+.wait-box{background:var(--card);color:var(--ink);border:2px solid var(--line)}
+@media (max-width:560px){
+  .stage.textstage{padding:58px 14px 18px;min-height:240px}
+  .castlist li{font-size:18px;padding:8px 12px}
+  .orderlist img,.orderlist .noimg{width:58px}
+  .orderlist li{gap:8px;padding:6px 8px}
+  .modes{grid-template-columns:1fr}
+  .guesses li{grid-template-columns:1fr auto auto}.guesses .d{display:none}
+  .bigbid{font-size:70px}
+}

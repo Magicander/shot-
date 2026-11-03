@@ -1,6 +1,6 @@
 # kadr* - quiz filmowy dla znajomych
 
-Zgadujcie film po kadrze z trailera. Najpierw trudny kadr, potem średni, na końcu łatwy. Im szybciej, tym więcej punktów.
+Zgadujcie filmy z wybranego pakietu w kilku trybach: po kadrze, zbliżeniu, plakacie, obsadzie, cytacie, roku premiery, kolejności i w licytacji. Im szybciej, tym więcej punktów.
 
 ## Start
 
@@ -58,4 +58,49 @@ Test bez sieci: `python3 test_scraper_fallback.py`.
 
 Wszystko trafia do jednego pliku `quiz.db`, który tworzy się przy pierwszym starcie. Jeśli obok leży stary `horror_quiz.db`, zostanie przeniesiony do pakietu Horrory.
 
-Tytuły wpisuje się w oryginale (np. "The Shining"). Literówki są wybaczane.
+Tytuły wpisuje się w oryginale (np. "The Shining"), a w wersji PL także po polsku, jeśli film ma polski tytuł. Literówki są wybaczane.
+
+Aktualizacja (`git pull`) jest bezpieczna: `quiz.db` i `config.local.json` są w .gitignore, więc pull ich nie nadpisze.
+Nowe kolumny (polski tytuł, aliasy, cytaty, obsada, plakaty, wyłączone tryby) dodają się same przy starcie (ALTER TABLE), istniejące dane zostają.
+
+## Tryby gry
+
+Gospodarz wybiera pakiet, a w poczekalni zaznacza tryby i liczbę rund. Filmy losowane są tylko z tego pakietu, rundy przeplatają zaznaczone tryby, punkty sumują się w jednym rankingu.
+
+| Tryb | Zasady | Wymaga |
+|---|---|---|
+| Kadry | trzy kadry od trudnego do łatwego, wcześniej = więcej punktów | 1 film z kadrami |
+| Zoom | mocne zbliżenie kadru, które się oddala (30 s) | 1 film z kadrami |
+| Licytacja | każdy po cichu deklaruje, ile filmów z pakietu wymieni (15 s). Najwyższa oferta (remis: kto pierwszy) wpisuje tytuły na czas: 15 s + 5 s za film, max 90 s. Liczą się filmy z listy pakietu (tytuł, aliasy, w PL też polski tytuł), bez powtórek. Uda się: 200 pkt x deklaracja. Nie uda się: pozostali po 100 pkt x deklaracja | 5 filmów na liście |
+| Który rok | podaj rok premiery: dokładnie 1000 pkt, każdy rok różnicy około -30 procent, ponad 8 lat 0 | 3 filmy z rokiem |
+| Ułóż po kolei | 4 filmy od najstarszego do najnowszego, 250 pkt za każde dobre miejsce | 4 różne lata |
+| Plakat | plakat się wyostrza (pikseloza) albo odsłania kafelkami | 3 plakaty z TMDB |
+| Aktorzy | obsada pojawia się co 6 s, od najmniej znanych nazwisk; mniej nazwisk = więcej punktów | 3 filmy z obsadą z TMDB |
+| Cytat | cytat wpisany przez admina, w połowie czasu podpowiedź z rokiem | 5 cytatów w pakiecie |
+
+W trybach z tytułem pierwsza poprawna odpowiedź dostaje +100 pkt. Tryb bez wystarczających danych jest wyszarzony z podpowiedzią, czego brakuje.
+Admin może wyłączyć dowolny tryb dla pakietu (strona pakietu, panel "tryby gry").
+
+## TMDB (Plakat, Aktorzy)
+
+1. Załóż darmowe konto na themoviedb.org i wygeneruj klucz API (v3) albo token (v4).
+2. Panel admina, Ustawienia: wklej klucz. Jest sprawdzany i zapisywany w `config.local.json` (poza gitem i poza eksportem .sql). Można też użyć zmiennej `TMDB_API_KEY`.
+3. Strona pakietu, "Pobierz dane TMDB": dla każdego filmu szuka go po tytule i roku, zapisuje plakat lokalnie w bazie i 8 głównych aktorów z popularnością. Opcjonalnie uzupełnia puste polskie tytuły. Postęp widać w logu "na żywo".
+
+Bez klucza Plakat i Aktorzy są niedostępne. Nic nie jest zmyślane: dane pochodzą tylko z TMDB albo od admina.
+Ta aplikacja korzysta z API TMDB, ale nie jest przez TMDB wspierana ani certyfikowana.
+
+## Polskie tytuły i aliasy
+
+- Strona pakietu, "polskie tytuły": wklej listę w formacie `Original Title (rok) = Polski tytuł` albo `Original Title = Polski tytuł`.
+  "podgląd" pokazuje dopasowane i niedopasowane linie (brak w pakiecie, zły format, niejednoznaczne bez roku), "zapisz dopasowane" zapisuje tylko dopasowane.
+- Obok tabela do edycji polskiego tytułu i aliasów w miejscu (zapis po wyjściu z pola, aliasy po średniku).
+- Edycja filmu: polski tytuł, aliasy i cytaty (jeden w linii).
+- W wersji PL gra przyjmuje oryginał, aliasy, polski tytuł oraz jego główny człon ("Obcy" dla "Obcy - 8. pasażer Nostromo"). Wyniki i podpowiedzi pokazują polski tytuł, oryginał mniejszą czcionką.
+
+## Testy
+
+```
+python3 test_scraper_fallback.py
+python3 test_game.py            # na kopii quiz.db: migracje, wklejanie PL, atrapa TMDB, gra 2 graczy we wszystkich trybach
+```

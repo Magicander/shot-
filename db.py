@@ -1,4 +1,5 @@
 """db.py - schemat bazy quiz.db, pakiety startowe i import starej horror_quiz.db."""
+import os
 import re
 import sqlite3
 import time
@@ -6,7 +7,7 @@ import unicodedata
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
-DB_PATH = BASE / "quiz.db"
+DB_PATH = Path(os.environ.get("QUIZ_DB") or BASE / "quiz.db")
 LEGACY_DB = BASE / "horror_quiz.db"
 
 SCHEMA = """
@@ -42,6 +43,10 @@ CREATE TABLE IF NOT EXISTS frames (
     image       BLOB NOT NULL
 );
 CREATE INDEX IF NOT EXISTS frames_movie ON frames(movie_id);
+CREATE TABLE IF NOT EXISTS posters (
+    movie_id INTEGER PRIMARY KEY REFERENCES movies(id) ON DELETE CASCADE,
+    image BLOB NOT NULL
+);
 CREATE TABLE IF NOT EXISTS picks (
     movie_id        INTEGER PRIMARY KEY REFERENCES movies(id) ON DELETE CASCADE,
     easy_frame_id   INTEGER REFERENCES frames(id) ON DELETE SET NULL,
@@ -156,6 +161,14 @@ def migrate(con):
             con.execute("ALTER TABLE movies ADD COLUMN norm_title TEXT")
         if "tried_ids" not in mc:
             con.execute("ALTER TABLE movies ADD COLUMN tried_ids TEXT NOT NULL DEFAULT ''")
+        # faza 3: polskie tytuły, aliasy, cytaty, dane z TMDB
+        for c in ("pl_title", "aliases", "quotes", "cast_json"):
+            if c not in mc:
+                con.execute(f"ALTER TABLE movies ADD COLUMN {c} TEXT NOT NULL DEFAULT ''")
+        if "tmdb_id" not in mc:
+            con.execute("ALTER TABLE movies ADD COLUMN tmdb_id INTEGER")
+        if "modes_off" not in pc:
+            con.execute("ALTER TABLE packs ADD COLUMN modes_off TEXT NOT NULL DEFAULT ''")
         for slug, (n, d) in SEED_EN.items():
             con.execute("UPDATE packs SET name_en=? WHERE slug=? AND name_en=''", (n, slug))
             con.execute("UPDATE packs SET description_en=? WHERE slug=? AND description_en=''", (d, slug))
@@ -268,3 +281,40 @@ def game_frames(con, movie_id):
     easy = (p and p["easy_frame_id"]) or rest[-1]
     medium = (p and p["medium_frame_id"]) or rest[len(rest) // 2]
     return [hard, medium, easy]
+
+
+# ---------------------------------------------------------- lokalna konfiguracja (poza gitem)
+CONFIG_PATH = BASE / "config.local.json"
+
+
+def get_config() -> dict:
+    import json
+    try:
+        return json.loads(CONFIG_PATH.read_text("utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def set_config(**kw):
+    import json
+    c = get_config()
+    c.update(kw)
+    c = {k: v for k, v in c.items() if v not in (None, "")}
+    CONFIG_PATH.write_text(json.dumps(c, indent=2), "utf-8")
+    try:
+        os.chmod(CONFIG_PATH, 0o600)
+    except OSError:
+        pass
+
+
+def tmdb_key() -> str:
+    return os.environ.get("TMDB_API_KEY") or get_config().get("tmdb_key", "")
+
+
+def split_list(s) -> list:
+    """Aliasy / cytaty: jeden na linię (aliasy można też rozdzielać średnikiem)."""
+    return [x.strip() for x in str(s or "").replace("\r", "").split("\n") if x.strip()]
+
+
+def split_aliases(s) -> list:
+    return [x.strip() for x in re.split(r"[\n;]", str(s or "")) if x.strip()]

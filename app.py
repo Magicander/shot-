@@ -32,10 +32,8 @@ import db
 STATIC = db.BASE / "static"
 ADMIN_PASSWORD = os.environ.get("QUIZ_ADMIN_PASSWORD", "SK45jh@WP")
 SESSION_TTL = 12 * 3600
-STAGE_SECONDS = 15          # trudny -> średni -> łatwy, co 15 s
-REVEAL_SECONDS = 9
-STAGE_POINTS = [1000, 600, 300]
 MAX_PLAYERS = 16
+tmdb_thread = None
 
 sessions = {}               # token -> expiry
 sessions_lock = threading.Lock()
@@ -45,40 +43,10 @@ scrape_progress = None      # scraper.Progress, tworzony leniwie (import cv2 tyl
 scrape_thread = None
 
 
-# ------------------------------------------------------------ dopasowanie odpowiedzi
-def norm_title(s: str) -> str:
-    s = unicodedata.normalize("NFKD", (s or "").replace("ł", "l").replace("Ł", "L"))
-    s = "".join(c for c in s if not unicodedata.combining(c)).lower()
-    s = s.replace("&", " and ")
-    s = re.sub(r"[^a-z0-9]+", " ", s).strip()
-    s = re.sub(r"^(the|a|an) ", "", s)
-    s = re.sub(r" (19|20)\d\d$", "", s)
-    return s.replace(" ", "")
-
-
-def lev(a, b, cap=3):
-    if abs(len(a) - len(b)) > cap:
-        return cap + 1
-    prev = list(range(len(b) + 1))
-    for i, ca in enumerate(a, 1):
-        cur = [i]
-        for j, cb in enumerate(b, 1):
-            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
-        prev = cur
-    return prev[-1]
-
-
-def is_match(guess, title):
-    g, t = norm_title(guess), norm_title(title)
-    if not g:
-        return False
-    if g == t:
-        return True
-    allowed = 0 if len(t) < 4 else 1 if len(t) < 9 else 2 if len(t) < 16 else 3
-    return lev(g, t, allowed) <= allowed
-
-
 # --------------------------------------------------------------------- pokoje gry
+from rooms import Room, norm_title, is_match, load_pack, availability, MODES  # noqa: E402,F401
+
+
 def new_code():
     alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
     while True:
@@ -87,135 +55,9 @@ def new_code():
             return c
 
 
-def playable_movies(con, pack_id):
-    out = []
-    for m in con.execute("SELECT id, title, year FROM movies WHERE pack_id=? AND status='ok'", (pack_id,)):
-        fr = db.game_frames(con, m["id"])
-        if fr:
-            out.append({"id": m["id"], "title": m["title"], "year": m["year"], "frames": fr})
-    return out
-
-
-class Room:
-    def __init__(self, code, pack, movies, rounds):
-        self.code, self.pack, self.all_movies = code, pack, movies
-        self.rounds = max(1, min(rounds, len(movies)))
-        self.players = {}
-        self.host = None
-        self.phase = "lobby"
-        self.round = 0
-        self.queue = []
-        self.t0 = 0
-        self.feed = []
-        self.created = self.touched = time.time()
-        self.version = 0
-
-    def add_player(self, name):
-        name = re.sub(r"\s+", " ", name or "").strip()[:18] or "Gracz"
-        taken = {p["name"].lower() for p in self.players.values()}
-        base, n = name, 2
-        while name.lower() in taken:
-            name, n = f"{base} {n}", n + 1
-        pid = secrets.token_hex(4)
-        self.players[pid] = {"id": pid, "name": name, "score": 0, "token": secrets.token_urlsafe(12),
-                             "seen": time.time(), "got": None, "wrong": 0, "history": []}
-        if not self.host:
-            self.host = pid
-        self.event("join", name)
-        return self.players[pid]
-
-    def event(self, kind, name, pts=None):
-        self.feed.append({"t": time.time(), "k": kind, "name": name, "pts": pts})
-        del self.feed[:-12]
-        self.version += 1
-
-    def start(self):
-        self.queue = random.sample(self.all_movies, self.rounds)
-        for p in self.players.values():
-            p.update(score=0, history=[])
-        self.round = 0
-        self.feed = []
-        self.begin_round()
-
-    def begin_round(self):
-        self.phase, self.t0 = "round", time.time()
-        for p in self.players.values():
-            p["got"], p["wrong"] = None, 0
-        self.version += 1
-
-    @property
-    def movie(self):
-        return self.queue[self.round] if self.phase in ("round", "reveal") else None
-
-    def tick(self):
-        now = time.time()
-        if self.phase == "round":
-            el = now - self.t0
-            active = [p for p in self.players.values() if now - p["seen"] < 20]
-            if el >= 3 * STAGE_SECONDS or (active and all(p["got"] for p in active)):
-                self.end_round()
-        elif self.phase == "reveal" and now - self.t0 >= REVEAL_SECONDS:
-            self.next()
-
-    def end_round(self):
-        for p in self.players.values():
-            p["history"].append(p["got"]["points"] if p["got"] else 0)
-        self.phase, self.t0 = "reveal", time.time()
-        self.version += 1
-
-    def next(self):
-        if self.phase == "round":
-            return self.end_round()
-        if self.round + 1 >= len(self.queue):
-            self.phase = "final"
-            self.version += 1
-        else:
-            self.round += 1
-            self.begin_round()
-
-    def guess(self, p, text):
-        if self.phase != "round" or p["got"]:
-            return {"ok": False}
-        el = time.time() - self.t0
-        stage = min(2, int(el // STAGE_SECONDS))
-        if is_match(text, self.movie["title"]):
-            within = (el - stage * STAGE_SECONDS) / STAGE_SECONDS
-            pts = int(STAGE_POINTS[stage] * (1 - 0.5 * min(1, within)))
-            order = sum(1 for q in self.players.values() if q["got"])
-            if order == 0:
-                pts += 100                       # premia za bycie pierwszym
-            p["got"] = {"points": pts, "stage": stage, "secs": round(el, 1), "order": order + 1}
-            p["score"] += pts
-            self.event("guess", p["name"], pts)
-            self.tick()
-            return {"ok": True, "correct": True, "points": pts}
-        p["wrong"] += 1
-        self.version += 1
-        return {"ok": True, "correct": False}
-
-    def state(self, me):
-        self.tick()
-        now = time.time()
-        players = sorted(self.players.values(), key=lambda p: (-p["score"], p["name"].lower()))
-        out = {
-            "code": self.code, "phase": self.phase, "round": self.round + 1, "rounds": self.rounds,
-            "pack": {k: self.pack.get(k) for k in ("id", "name", "name_en", "slug", "color")},
-            "host": self.host, "me": me["id"] if me else None, "feed": self.feed[-6:],
-            "stage_seconds": STAGE_SECONDS, "reveal_seconds": REVEAL_SECONDS,
-            "players": [{"id": p["id"], "name": p["name"], "score": p["score"],
-                         "online": now - p["seen"] < 20, "got": p["got"], "wrong": p["wrong"],
-                         "history": p["history"]} for p in players],
-        }
-        if self.phase == "round":
-            el = now - self.t0
-            stage = min(2, int(el // STAGE_SECONDS))
-            out.update(stage=stage, elapsed=round(el, 2), frames=self.movie["frames"][:stage + 1],
-                       left=round(3 * STAGE_SECONDS - el, 1))
-        elif self.phase == "reveal":
-            m = self.movie
-            out.update(answer={"title": m["title"], "year": m["year"], "frames": m["frames"]},
-                       left=round(REVEAL_SECONDS - (now - self.t0), 1))
-        return out
+def pack_avail(con, pack):
+    movies = load_pack(con, pack["id"])
+    return movies, availability(dict(pack), movies, bool(db.tmdb_key()))
 
 
 def cleanup_rooms():
@@ -253,6 +95,9 @@ EN_ERRORS = {
     "Kadr nie należy do tego filmu": "This frame does not belong to this movie",
     "Scraper już działa": "The scraper is already running",
     "Podaj tytuł": "Enter a title",
+    "Brak plakatu": "Poster not found",
+    "Najpierw wpisz klucz TMDB w ustawieniach": "Enter a TMDB key in the settings first",
+    "Klucz TMDB nie działa": "This TMDB key does not work",
 }
 
 
@@ -370,6 +215,12 @@ class Handler(BaseHTTPRequestHandler):
                 if not row:
                     raise ApiError(404, "Brak kadru")
                 return self.send(200, bytes(row["image"]), "image/jpeg", {"Cache-Control": "max-age=86400"})
+            m = re.fullmatch(r"/poster/(\d+)\.jpg", path)
+            if m and method == "GET":
+                row = con.execute("SELECT image FROM posters WHERE movie_id=?", (int(m[1]),)).fetchone()
+                if not row:
+                    raise ApiError(404, "Brak plakatu")
+                return self.send(200, bytes(row["image"]), "image/jpeg", {"Cache-Control": "max-age=86400"})
             if path.startswith("/api/admin"):
                 return self.admin_api(method, path, q, con)
             if path.startswith("/api/"):
@@ -390,31 +241,37 @@ class Handler(BaseHTTPRequestHandler):
         if method == "GET" and path == "/api/packs":
             out = []
             for p in con.execute("SELECT * FROM packs ORDER BY sort, id"):
-                movies = playable_movies(con, p["id"])
-                total = con.execute("SELECT COUNT(*) FROM movies WHERE pack_id=?", (p["id"],)).fetchone()[0]
+                allm, avail = pack_avail(con, p)
+                movies = [mv for mv in allm if mv["frames"]]
+                total = len(allm)
                 thumbs = ([p["cover_frame_id"]] if p["cover_frame_id"] else []) + \
                          [mv["frames"][2] for mv in movies]
                 out.append({"id": p["id"], "slug": p["slug"], "name": p["name"],
                             "description": p["description"], "color": p["color"],
                             "name_en": p["name_en"] or p["name"], "description_en": p["description_en"] or p["description"],
-                            "playable": len(movies), "total": total, "thumbs": list(dict.fromkeys(thumbs))[:3]})
+                            "playable": len(movies), "total": total, "thumbs": list(dict.fromkeys(thumbs))[:3],
+                            "modes": [k for k in MODES if avail[k]["ok"]]})
             return self.json(out)
         m = re.fullmatch(r"/api/packs/(\d+)/titles", path)
         if m:
-            rows = con.execute("SELECT DISTINCT title FROM movies WHERE pack_id=? ORDER BY title",
-                               (int(m[1]),)).fetchall()
-            return self.json([r["title"] for r in rows])
+            rows = con.execute("SELECT title, pl_title FROM movies WHERE pack_id=?", (int(m[1]),)).fetchall()
+            out = {r["title"] for r in rows}
+            if self.lang == "pl":
+                out |= {r["pl_title"] for r in rows if r["pl_title"]}
+            return self.json(sorted(out, key=str.lower))
         if method == "POST" and path == "/api/rooms":
             d = self.body()
             pack = con.execute("SELECT * FROM packs WHERE id=?", (int(d["pack_id"]),)).fetchone()
             if not pack:
                 raise ApiError(404, "Nie ma takiego pakietu")
-            movies = playable_movies(con, pack["id"])
-            if not movies:
+            movies, avail = pack_avail(con, pack)
+            if not any(v["ok"] for v in avail.values()):
                 raise ApiError(400, "Ten pakiet nie ma jeszcze gotowych filmów")
             with rooms_lock:
                 code = new_code()
-                r = rooms[code] = Room(code, dict(pack), movies, int(d.get("rounds") or 10))
+                r = rooms[code] = Room(code, dict(pack), movies, int(d.get("rounds") or 10), avail)
+                if d.get("modes"):
+                    r.configure(modes=d["modes"])
                 p = r.add_player(d.get("name"))
             return self.json({"code": code, "pid": p["id"], "token": p["token"]})
         m = re.fullmatch(r"/api/rooms/([A-Za-z0-9]{4})(?:/(\w+))?", path)
@@ -442,14 +299,15 @@ class Handler(BaseHTTPRequestHandler):
             p["seen"] = time.time()
             is_host = p["id"] == r.host
             if method == "GET" and action is None:
-                return self.json(r.state(p))
+                return self.json(r.state(p, self.lang))
             if method == "POST" and action == "guess":
-                res = r.guess(p, str(d.get("text") or "")[:120])
-                return self.json(res)
-            if method == "POST" and action in ("start", "next", "again", "kick"):
+                return self.json(r.answer(p, d, self.lang))
+            if method == "POST" and action in ("start", "next", "again", "kick", "setup"):
                 if not is_host:
                     raise ApiError(403, "Tylko gospodarz może to zrobić")
-                if action == "start" and r.phase in ("lobby", "final"):
+                if action == "setup":
+                    r.configure(d.get("modes"), d.get("rounds"))
+                elif action == "start" and r.phase in ("lobby", "final"):
                     r.start()
                 elif action == "next" and r.phase in ("round", "reveal"):
                     r.next()
@@ -462,7 +320,7 @@ class Handler(BaseHTTPRequestHandler):
                     victim = d.get("victim")
                     if victim in r.players and victim != r.host:
                         r.event("leave", r.players.pop(victim)["name"])
-                return self.json(r.state(p))
+                return self.json(r.state(p, self.lang))
             if method == "POST" and action == "leave":
                 r.players.pop(p["id"], None)
                 r.event("leave", p["name"])
@@ -473,7 +331,7 @@ class Handler(BaseHTTPRequestHandler):
 
     # --- admin
     def admin_api(self, method, path, q, con):
-        global scrape_progress, scrape_thread
+        global scrape_progress, scrape_thread, tmdb_thread
         if path == "/api/admin/login" and method == "POST":
             d = self.body()
             time.sleep(0.4)                   # spowalnia zgadywanie hasła
@@ -538,6 +396,12 @@ class Handler(BaseHTTPRequestHandler):
                 raise ApiError(404, "Nie ma pakietu")
             if sub is None and method == "PUT":
                 d = self.body()
+                if "modes_off" in d:
+                    off = ",".join(k for k in MODES if k in (d.get("modes_off") or []))
+                    with con:
+                        con.execute("UPDATE packs SET modes_off=? WHERE id=?", (off, pid))
+                    if "name" not in d:
+                        return self.json({"ok": True})
                 with con:
                     con.execute("UPDATE packs SET name=?, description=?, color=?, cover_frame_id=?, name_en=?, "
                                 "description_en=? WHERE id=?",
@@ -550,8 +414,48 @@ class Handler(BaseHTTPRequestHandler):
                 with con:
                     con.execute("DELETE FROM packs WHERE id=?", (pid,))
                 return self.json({"ok": True})
+            if sub == "modes" and method == "GET":
+                pack = con.execute("SELECT * FROM packs WHERE id=?", (pid,)).fetchone()
+                _, avail = pack_avail(con, pack)
+                return self.json({"avail": avail, "modes": MODES, "tmdb_key": bool(db.tmdb_key()),
+                                  "modes_off": [k for k in (pack["modes_off"] or "").split(",") if k]})
+            if sub == "pl_titles" and method == "POST":
+                d = self.body()
+                rows = parse_pl_titles(con, pid, str(d.get("text") or ""))
+                saved = 0
+                if d.get("apply"):
+                    with con:
+                        for r in rows:
+                            if r["status"] == "matched":
+                                con.execute("UPDATE movies SET pl_title=? WHERE id=?", (r["pl_title"], r["movie_id"]))
+                                saved += 1
+                return self.json({"rows": rows, "saved": saved,
+                                  "matched": sum(r["status"] == "matched" for r in rows),
+                                  "unmatched": sum(r["status"] != "matched" for r in rows)})
+            if sub == "tmdb" and method == "POST":
+                key = db.tmdb_key()
+                if not key:
+                    raise ApiError(400, "Najpierw wpisz klucz TMDB w ustawieniach")
+                if (scrape_thread and scrape_thread.is_alive()) or (tmdb_thread and tmdb_thread.is_alive()):
+                    raise ApiError(409, "Scraper już działa")
+                import scraper
+                import tmdb
+                d = self.body()
+                rows = [dict(r) for r in con.execute("SELECT id, title, year, tmdb_id FROM movies WHERE pack_id=? "
+                                                     "ORDER BY id", (pid,))]
+                if not d.get("redo"):
+                    have = {r[0] for r in con.execute("SELECT movie_id FROM posters")}
+                    rows = [r for r in rows if not (r["id"] in have and r["tmdb_id"])]
+                scrape_progress = scraper.Progress(self.lang)
+                tmdb_thread = threading.Thread(target=tmdb.run, args=(rows, scrape_progress, key,
+                                                                      bool(d.get("fill_pl")), bool(d.get("redo"))),
+                                               daemon=True)
+                tmdb_thread.start()
+                return self.json({"ok": True, "count": len(rows)})
             if sub == "movies" and method == "GET":
                 rows = con.execute("""SELECT m.id, m.title, m.year, m.query, m.yt_url, m.status, m.error,
+                    m.pl_title, m.aliases, m.quotes, m.tmdb_id, m.cast_json,
+                    EXISTS(SELECT 1 FROM posters po WHERE po.movie_id=m.id) poster,
                     m.video_url, m.video_title, (SELECT COUNT(*) FROM frames f WHERE f.movie_id=m.id) nframes,
                     p.easy_frame_id easy, p.medium_frame_id medium, p.hard_frame_id hard
                     FROM movies m LEFT JOIN picks p ON p.movie_id=m.id WHERE m.pack_id=? ORDER BY m.id""",
@@ -600,7 +504,15 @@ class Handler(BaseHTTPRequestHandler):
             if method == "PUT":
                 d = self.body()
                 title = str(d.get("title") or mv["title"]).strip()[:120]
-                year = int(d["year"]) if d.get("year") else None
+                year = (int(d["year"]) if d.get("year") else None) if "year" in d else mv["year"]
+                extra = {k: "\n".join(db.split_list(d[k]))[:4000] if k != "pl_title" else str(d[k]).strip()[:160]
+                         for k in ("pl_title", "aliases", "quotes") if k in d}
+                if extra:
+                    with con:
+                        for k, v in extra.items():
+                            con.execute(f"UPDATE movies SET {k}=? WHERE id=?", (v, mid))
+                    if "title" not in d:
+                        return self.json({"ok": True})
                 dup = db.find_duplicate(con, mv["pack_id"], title, year, exclude_id=mid)
                 if dup:
                     ex = dup["title"] + (f" ({dup['year']})" if dup["year"] else "")
@@ -610,7 +522,8 @@ class Handler(BaseHTTPRequestHandler):
                 with con:
                     con.execute("UPDATE movies SET title=?, year=?, query=?, yt_url=?, norm_title=? WHERE id=?",
                                 (title, year,
-                                 (d.get("query") or "").strip() or None, (d.get("yt_url") or "").strip() or None,
+                                 (d.get("query") or "").strip() or None if "query" in d else mv["query"],
+                                 (d.get("yt_url") or "").strip() or None if "yt_url" in d else mv["yt_url"],
                                  db.norm_title(title), mid))
                 return self.json({"ok": True})
             if method == "DELETE":
@@ -632,6 +545,21 @@ class Handler(BaseHTTPRequestHandler):
                     easy_frame_id=excluded.easy_frame_id, medium_frame_id=excluded.medium_frame_id,
                     hard_frame_id=excluded.hard_frame_id""", (mid, ids["easy"], ids["medium"], ids["hard"]))
             return self.json({"ok": True})
+        if path == "/api/admin/settings":
+            if method == "PUT":
+                d = self.body()
+                key = str(d.get("tmdb_key") or "").strip()
+                if key and d.get("check", True):
+                    import tmdb
+                    try:
+                        tmdb.check_key(key)
+                    except Exception as e:  # noqa: BLE001
+                        print("TMDB key check failed:", e)
+                        raise ApiError(400, "Klucz TMDB nie działa")
+                db.set_config(tmdb_key=key)
+            k = db.tmdb_key()
+            return self.json({"tmdb_key": bool(k), "tmdb_masked": (k[:4] + "..." + k[-4:]) if len(k) > 10 else "",
+                              "from_env": bool(os.environ.get("TMDB_API_KEY"))})
         if path == "/api/admin/scrape":
             if method == "GET":
                 return self.json(scrape_progress.snapshot() if scrape_progress else
@@ -641,7 +569,7 @@ class Handler(BaseHTTPRequestHandler):
                     import scraper, cv2, yt_dlp  # noqa: F401
                 except ImportError as e:
                     raise ApiError(500, (f"Missing library ({e.name}). Run" if self.lang == "en" else f"Brak biblioteki ({e.name}). Uruchom") + ': pip install -U "yt-dlp[default]" opencv-python')
-                if scrape_thread and scrape_thread.is_alive():
+                if (scrape_thread and scrape_thread.is_alive()) or (tmdb_thread and tmdb_thread.is_alive()):
                     raise ApiError(409, "Scraper już działa")
                 d = self.body()
                 rows = scraper.select_rows(con, d.get("pack_id"), d.get("movie_ids") or None,
@@ -663,6 +591,43 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, dump, "application/sql; charset=utf-8",
                              {"Content-Disposition": f'attachment; filename="quiz-{time.strftime("%Y%m%d")}.sql"'})
         raise ApiError(404, "Nie ma takiego adresu")
+
+
+def parse_pl_titles(con, pack_id, text):
+    """Linie "Original Title (rok) = Polski tytuł" albo "Original Title = Polski tytuł" -> podgląd dopasowań."""
+    movies = [dict(r) for r in con.execute("SELECT id, title, year, pl_title, norm_title FROM movies WHERE pack_id=?",
+                                           (pack_id,))]
+    out, seen = [], set()
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        row = {"line": line[:300], "status": "unmatched", "movie_id": None}
+        if "=" not in line:
+            row["status"] = "bad_format"
+            out.append(row)
+            continue
+        left, pl = (x.strip() for x in line.split("=", 1))
+        title, year = db.split_title_year(left)
+        row.update(title=title, year=year, pl_title=pl[:160])
+        if not pl:
+            row["status"] = "bad_format"
+            out.append(row)
+            continue
+        nt = db.norm_title(title)
+        hits = [m for m in movies if m["norm_title"] == nt and (year is None or m["year"] == year)]
+        if len(hits) > 1:
+            row["status"] = "ambiguous"
+        elif hits:
+            m = hits[0]
+            if m["id"] in seen:
+                row["status"] = "repeated"
+            else:
+                seen.add(m["id"])
+                row.update(status="matched", movie_id=m["id"], movie=m["title"] + (f" ({m['year']})" if m["year"] else ""),
+                           current=m["pl_title"])
+        out.append(row)
+    return out
 
 
 def valid_color(c):

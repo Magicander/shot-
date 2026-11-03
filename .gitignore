@@ -9,3 +9,5 @@ __pycache__/
 screenshots/
 .venv/
 venv/
+# Klucz TMDB i inne lokalne ustawienia
+config.local.json

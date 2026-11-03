@@ -2,6 +2,66 @@
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 Object.assign(EN, {
+  "Ustawienia": "Settings",
+  "polskie tytuły": "Polish titles",
+  "PL: {x}": "PL: {x}",
+  "plakat": "poster",
+  "obsada {n}": "cast {n}",
+  "cytaty {n}": "quotes {n}",
+  "Wczytuję...": "Loading...",
+  "Polski tytuł (opcjonalnie)": "Polish title (optional)",
+  "Aliasy, też akceptowane (jeden w linii albo po średniku)": "Aliases, also accepted (one per line or separated by semicolons)",
+  "Cytaty do trybu Cytat (jeden w linii, bez tytułu filmu)": "Quotes for Quote mode (one per line, without the film title)",
+  "Odznacz, żeby wyłączyć tryb w tym pakiecie. Tryb bez danych jest niedostępny w grze.": "Untick to disable a mode for this pack. A mode without enough data is unavailable in the game.",
+  "za mało": "not enough",
+  "dane TMDB (plakaty, obsada)": "TMDB data (posters, cast)",
+  "uzupełnij puste polskie tytuły z TMDB": "fill empty Polish titles from TMDB",
+  "pobierz od nowa także filmy, które już mają dane": "refetch films that already have data",
+  "Pobierz dane TMDB": "Fetch TMDB data",
+  "Plakat i Aktorzy wymagają klucza API TMDB.": "Poster and Cast need a TMDB API key.",
+  "Wpisz klucz w ustawieniach.": "Enter the key in settings.",
+  "TMDB: {n} filmów w kolejce": "TMDB: {n} films queued",
+  "ustawienia": "settings",
+  "klucz API TMDB": "TMDB API key",
+  "Potrzebny do trybów Plakat i Aktorzy. Darmowy klucz założysz na themoviedb.org (Ustawienia konta, API). Działa klucz v3 albo token v4. Zapisuję go lokalnie w config.local.json, poza gitem i poza eksportem .sql.": "Needed for the Poster and Cast modes. Get a free key at themoviedb.org (Account settings, API). A v3 key or a v4 token both work. It is stored locally in config.local.json, outside git and outside the .sql export.",
+  "Stan": "Status",
+  "klucz zapisany ({m})": "key saved ({m})",
+  "(ze zmiennej TMDB_API_KEY)": "(from the TMDB_API_KEY variable)",
+  "brak klucza": "no key",
+  "wklej klucz API": "paste the API key",
+  "sprawdź i zapisz": "check and save",
+  "usuń klucz": "remove key",
+  "Dane pochodzą z TMDB. Ta aplikacja korzysta z API TMDB, ale nie jest przez TMDB wspierana ani certyfikowana.": "Data comes from TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.",
+  "Klucz działa, zapisano": "Key works, saved",
+  "Usunąć klucz TMDB?": "Remove the TMDB key?",
+  "{a} z {b} ma polski tytuł": "{a} of {b} have a Polish title",
+  "Jedna linia na film: <b>Original Title (rok) = Polski tytuł</b> albo <b>Original Title = Polski tytuł</b>. Dopasowuję po znormalizowanym tytule. Najpierw podgląd, potem zapis.": "One line per film: <b>Original Title (year) = Polish title</b> or <b>Original Title = Polish title</b>. Matched by normalized title. Preview first, then save.",
+  "podgląd": "preview",
+  "zapisz dopasowane": "save matched",
+  "edycja w tabeli": "inline editing",
+  "Zmiana zapisuje się po wyjściu z pola. Aliasy rozdzielaj średnikiem.": "Changes save when you leave the field. Separate aliases with semicolons.",
+  "Polski tytuł": "Polish title",
+  "Aliasy": "Aliases",
+  "Brak filmów.": "No films.",
+  "Wklej listę": "Paste a list",
+  "dopasowane: {n}": "matched: {n}",
+  "niedopasowane: {n}": "unmatched: {n}",
+  "zapisano: {n}": "saved: {n}",
+  "Linia": "Line",
+  "Film w pakiecie": "Film in the pack",
+  "było: {x}": "was: {x}",
+  "Zapisano {n} polskich tytułów": "Saved {n} Polish titles",
+  "filmy z kadrami": "films with frames",
+  "filmy w pakiecie": "films in the pack",
+  "filmy z rokiem": "films with a year",
+  "plakaty": "posters",
+  "filmy z obsadą": "films with cast",
+  "cytaty": "quotes",
+  "dopasowano": "matched",
+  "nie ma w pakiecie": "not in the pack",
+  "kilka filmów, dopisz rok": "several films, add the year",
+  "film już był wyżej": "film already listed above",
+  "zły format": "bad format",
   "Panel admina. Wpisz hasło.": "Admin panel. Enter the password.", "hasło": "password", "wejdź": "log in", "panel": "admin",
   "eksport .sql": "export .sql", "strona gry": "game site", "wyloguj": "log out", "Błąd": "Error", "Zaloguj się": "Please log in",
   "Pulpit": "Dashboard", "Scraper": "Scraper", "Pakiety": "Packs", "+ nowy pakiet": "+ new pack",
@@ -110,8 +170,9 @@ function renderNav() {
   const h = location.hash;
   $("#sidenav").innerHTML = `<a href="#/" class="${h === "" || h === "#/" ? "on" : ""}">${T("Pulpit")}</a>
     <a href="#/scraper" class="${h === "#/scraper" ? "on" : ""}">${T("Scraper")}</a>
+    <a href="#/settings" class="${h === "#/settings" ? "on" : ""}">${T("Ustawienia")}</a>
     <span class="lbl">${T("Pakiety")}</span>
-    ${packs.map(p => `<a href="#/pack/${p.id}" class="${h.startsWith("#/pack/" + p.id) ? "on" : ""}"><span class="dot" style="background:${p.color}"></span>${esc(packName(p))}<span class="cnt">${p.ok || 0}/${p.total}</span></a>`).join("")}
+    ${packs.map(p => `<a href="#/pack/${p.id}" class="${h.startsWith("#/pack/" + p.id) || h === "#/pl/" + p.id ? "on" : ""}"><span class="dot" style="background:${p.color}"></span>${esc(packName(p))}<span class="cnt">${p.ok || 0}/${p.total}</span></a>`).join("")}
     <a href="#/new"${h === "#/new" ? ' class="on"' : ""}>${T("+ nowy pakiet")}</a>`;
 }
 window.onhashchange = route;
@@ -123,6 +184,8 @@ async function route() {
   let m;
   if (h === "/") return dashboard();
   if (h === "/scraper") return scraperPage();
+  if (h === "/settings") return settingsPage();
+  if ((m = h.match(/^\/pl\/(\d+)$/))) return plTitlesPage(+m[1]);
   if (h === "/new") return packForm(null);
   if ((m = h.match(/^\/pack\/(\d+)$/))) return packPage(+m[1]);
   if ((m = h.match(/^\/pick\/(\d+)\/(\d+)$/))) return picker(+m[1], +m[2]);
@@ -159,6 +222,7 @@ async function dashboard() {
 
 /* log scrapera */
 function startLog() {
+  clearInterval(logTimer);
   const tick = async () => {
     const box = $("#scrapebox"); if (!box) return;
     let s; try { s = await api("/api/admin/scrape"); } catch { return; }
@@ -247,11 +311,13 @@ async function packPage(id) {
     <div class="grid2">
       <div class="panel">
         <div class="row" style="justify-content:space-between;margin-bottom:10px"><h2 style="margin:0">${T("filmy")}</h2>
-          <div class="row"><button class="pill small orange" id="add">${T("dodaj film")}</button><button class="pill small light" id="bulk">${T("wklej listę")}</button>
+          <div class="row"><button class="pill small orange" id="add">${T("dodaj film")}</button><button class="pill small light" id="bulk">${T("wklej listę")}</button><a class="pill small light" href="#/pl/${id}">${T("polskie tytuły")}</a>
           ${movies.some(m => m.status === "ok") ? `<a class="pill small" href="#/pick/${id}/${(movies.find(m => m.status === "ok" && !(m.easy && m.medium && m.hard)) || movies.find(m => m.status === "ok")).id}">${T("wybieraj kadry")}</a>` : ""}</div></div>
         <div style="overflow-x:auto"><table class="ptable"><thead><tr><th><input type="checkbox" id="all" aria-label="${T("zaznacz wszystkie")}"></th><th>${T("Film")}</th><th>${T("Status")}</th><th class="hide-m">${T("Kadry")}</th><th></th></tr></thead><tbody>
         ${movies.map(m => `<tr data-id="${m.id}"><td><input type="checkbox" class="sel" value="${m.id}" aria-label="${T("zaznacz")}"></td>
           <td><div class="t">${esc(m.title)} <span class="muted">(${m.year || "?"})</span></div>
+            ${m.pl_title ? `<div class="sub">${T("PL: {x}", {x: esc(m.pl_title)})}</div>` : ""}
+            <div class="dbadges">${m.poster ? `<span>${T("plakat")}</span>` : ""}${castN(m) ? `<span>${T("obsada {n}", {n: castN(m)})}</span>` : ""}${quoteN(m) ? `<span>${T("cytaty {n}", {n: quoteN(m)})}</span>` : ""}</div>
             ${m.yt_url ? `<div class="sub">${T("link: {x}", {x: esc(m.yt_url)})}</div>` : m.query ? `<div class="sub">${T("zapytanie: {x}", {x: esc(m.query)})}</div>` : ""}
             ${m.status === "error" ? `<div class="sub" style="color:var(--err)">${esc(errText(m.error))}</div>` : ""}
             ${m.video_title && m.status === "ok" ? `<div class="sub"><a href="${esc(m.video_url)}" target="_blank" rel="noopener">${esc(m.video_title)}</a></div>` : ""}</td>
@@ -265,6 +331,7 @@ async function packPage(id) {
         </tbody></table></div>
       </div>
       <div style="display:flex;flex-direction:column;gap:20px">
+        <div class="panel" id="modespanel"><h2>${T("tryby gry")}</h2><div class="muted">${T("Wczytuję...")}</div></div>
         <div class="panel"><h2>${T("pobierz kadry")}</h2>${scrapeForm(false)}<p class="muted" style="font-size:14px;margin:10px 0 0" id="selinfo">${T("Zaznacz filmy w tabeli, żeby pobrać tylko je (od nowa).")}</p></div>
         <div class="panel"><h2>${T("na żywo")}</h2><div id="scrapebox"></div></div>
       </div>
@@ -275,6 +342,7 @@ async function packPage(id) {
   $("#all").onchange = e => { document.querySelectorAll(".sel").forEach(c => c.checked = e.target.checked); updSel(); };
   bindScrapeForm(id, selected); startLog();
   $("#scrapebox").dataset.reload = "1";
+  modesPanel(id);
   $("#editp").onclick = () => packForm(p);
   $("#delp").onclick = async () => { if (confirm(T("Usunąć pakiet \"{name}\" razem z {n} filmami i kadrami?", {name: packName(p), n: p.total}))) { await api(`/api/admin/packs/${id}`, "DELETE"); location.hash = "#/"; } };
   $("#add").onclick = () => movieModal(id, null);
@@ -297,6 +365,9 @@ function movieModal(packId, m) {
       <span></span>
       <label class="field full">${T("Własne zapytanie YouTube (opcjonalnie)")}<input class="input sm" name="query" value="${esc(m?.query || "")}" placeholder="${T("np. IT 2017 official trailer Pennywise")}"></label>
       <label class="field full">${T("Bezpośredni link YouTube (opcjonalnie, ma pierwszeństwo)")}<input class="input sm" name="yt_url" value="${esc(m?.yt_url || "")}" placeholder="https://www.youtube.com/watch?v=..."></label>
+      ${m ? `<label class="field full">${T("Polski tytuł (opcjonalnie)")}<input class="input sm" name="pl_title" value="${esc(m.pl_title || "")}"></label>
+      <label class="field full">${T("Aliasy, też akceptowane (jeden w linii albo po średniku)")}<textarea class="input sm" name="aliases" rows="2">${esc(m.aliases || "")}</textarea></label>
+      <label class="field full">${T("Cytaty do trybu Cytat (jeden w linii, bez tytułu filmu)")}<textarea class="input sm" name="quotes" rows="4">${esc(m.quotes || "")}</textarea></label>` : ""}
     </div>
     <div class="actions"><button type="button" class="pill ghost" data-close>${T("anuluj")}</button><button class="pill orange">${T("zapisz")}</button></div>`,
     async fd => {
@@ -384,3 +455,105 @@ function bulkReport(r) {
     <div class="actions"><button class="pill orange">${T("ok")}</button></div>`, async () => {}), 0);
 }
 boot();
+
+
+/* faza 3: tryby, TMDB, polskie tytuły */
+const castN = m => { try { return JSON.parse(m.cast_json || "[]").length; } catch { return 0; } };
+const quoteN = m => (m.quotes || "").split("\n").filter(x => x.trim()).length;
+const MODE_NAMES = {kadry: "Kadry", zoom: "Zoom", licytacja: "Licytacja", rok: "Który rok", kolejnosc: "Ułóż po kolei", plakat: "Plakat", aktorzy: "Aktorzy", cytat: "Cytat"};
+const NEED_TXT = {frames: "filmy z kadrami", movies: "filmy w pakiecie", years: "filmy z rokiem", posters: "plakaty", cast: "filmy z obsadą", quotes: "cytaty"};
+const MODE_NEED = {kadry: "frames", zoom: "frames", licytacja: "movies", rok: "years", kolejnosc: "years", plakat: "posters", aktorzy: "cast", cytat: "quotes"};
+
+async function modesPanel(id) {
+  const box = $("#modespanel"); if (!box) return;
+  const d = await api(`/api/admin/packs/${id}/modes`);
+  box.innerHTML = `<h2>${T("tryby gry")}</h2>
+    <p class="muted" style="font-size:14px;margin:0 0 10px">${T("Odznacz, żeby wyłączyć tryb w tym pakiecie. Tryb bez danych jest niedostępny w grze.")}</p>
+    <div class="mtoggles">${d.modes.map(k => { const a = d.avail[k], on = !d.modes_off.includes(k), enough = a.have >= a.need;
+      return `<label class="mt ${enough ? "" : "lack"}"><input type="checkbox" value="${k}" ${on ? "checked" : ""}><b>${T(MODE_NAMES[k])}</b>
+        <span class="sub">${T(NEED_TXT[MODE_NEED[k]])}: ${a.have}/${a.need}${enough ? "" : " - " + T("za mało")}</span></label>`; }).join("")}</div>
+    <div class="tmdb">
+      <h3>${T("dane TMDB (plakaty, obsada)")}</h3>
+      ${d.tmdb_key ? `<label class="chk"><input type="checkbox" id="fillpl"> ${T("uzupełnij puste polskie tytuły z TMDB")}</label>
+        <label class="chk"><input type="checkbox" id="tmdbredo"> ${T("pobierz od nowa także filmy, które już mają dane")}</label>
+        <button class="pill orange small" id="tmdbgo">${T("Pobierz dane TMDB")}</button>`
+      : `<p class="muted" style="font-size:14px">${T("Plakat i Aktorzy wymagają klucza API TMDB.")} <a href="#/settings">${T("Wpisz klucz w ustawieniach.")}</a></p>`}
+    </div>`;
+  box.querySelectorAll(".mt input").forEach(cb => cb.onchange = async () => {
+    const off = [...box.querySelectorAll(".mt input")].filter(x => !x.checked).map(x => x.value);
+    await api(`/api/admin/packs/${id}`, "PUT", {modes_off: off}); toast(T("Zapisano"));
+  });
+  const go = $("#tmdbgo");
+  if (go) go.onclick = async () => {
+    try { const r = await api(`/api/admin/packs/${id}/tmdb`, "POST", {fill_pl: $("#fillpl").checked, redo: $("#tmdbredo").checked});
+      toast(T("TMDB: {n} filmów w kolejce", {n: r.count})); startLog(); $("#scrapebox").scrollIntoView({behavior: "smooth", block: "center"}); }
+    catch (e) { toast(e.message); }
+  };
+}
+
+async function settingsPage() {
+  const s = await api("/api/admin/settings");
+  $("#main").innerHTML = `<div class="ph1"><h1>${T("ustawienia")}<span class="ast">*</span></h1></div>
+    <div class="panel" style="max-width:720px"><h2>${T("klucz API TMDB")}</h2>
+      <p class="muted" style="font-size:15px">${T("Potrzebny do trybów Plakat i Aktorzy. Darmowy klucz założysz na themoviedb.org (Ustawienia konta, API). Działa klucz v3 albo token v4. Zapisuję go lokalnie w config.local.json, poza gitem i poza eksportem .sql.")}</p>
+      <p><b>${T("Stan")}:</b> ${s.tmdb_key ? T("klucz zapisany ({m})", {m: esc(s.tmdb_masked)}) + (s.from_env ? " " + T("(ze zmiennej TMDB_API_KEY)") : "") : T("brak klucza")}</p>
+      <form id="kf" class="row" style="flex-wrap:wrap;gap:10px" autocomplete="off">
+        <input class="input sm" name="k" id="tk" type="password" style="flex:1;min-width:240px" placeholder="${T("wklej klucz API")}" autocomplete="off">
+        <button class="pill orange">${T("sprawdź i zapisz")}</button>
+        ${s.tmdb_key && !s.from_env ? `<button type="button" class="pill ghost" id="kdel">${T("usuń klucz")}</button>` : ""}
+      </form>
+      <p class="muted" style="font-size:13px;margin-top:14px">${T("Dane pochodzą z TMDB. Ta aplikacja korzysta z API TMDB, ale nie jest przez TMDB wspierana ani certyfikowana.")}</p>
+    </div>`;
+  $("#kf").onsubmit = async e => { e.preventDefault(); const k = $("#tk").value.trim(); if (!k) return;
+    try { await api("/api/admin/settings", "PUT", {tmdb_key: k}); toast(T("Klucz działa, zapisano")); settingsPage(); } catch (err) { toast(err.message); } };
+  if ($("#kdel")) $("#kdel").onclick = async () => { if (confirm(T("Usunąć klucz TMDB?"))) { await api("/api/admin/settings", "PUT", {tmdb_key: ""}); settingsPage(); } };
+}
+
+const PL_STATUS = {matched: "dopasowano", unmatched: "nie ma w pakiecie", ambiguous: "kilka filmów, dopisz rok", repeated: "film już był wyżej", bad_format: "zły format"};
+async function plTitlesPage(id) {
+  const p = packs.find(x => x.id === id); if (!p) return (location.hash = "#/");
+  const movies = await api(`/api/admin/packs/${id}/movies`);
+  const withPl = movies.filter(m => m.pl_title).length;
+  $("#main").innerHTML = `<div class="ph1"><div><a href="#/pack/${id}" class="muted" style="font-weight:700;text-decoration:none">&larr; ${esc(packName(p))}</a><h1>${T("polskie tytuły")}</h1></div>
+      <span class="tag">${T("{a} z {b} ma polski tytuł", {a: withPl, b: movies.length})}</span></div>
+    <div class="grid2 pl-grid">
+      <div class="panel"><h2>${T("wklej listę")}</h2>
+        <p class="muted" style="font-size:14px;margin:0 0 10px">${T("Jedna linia na film: <b>Original Title (rok) = Polski tytuł</b> albo <b>Original Title = Polski tytuł</b>. Dopasowuję po znormalizowanym tytule. Najpierw podgląd, potem zapis.")}</p>
+        <textarea class="input" id="pltext" rows="9" placeholder="The Thing (1982) = Coś\nAlien = Obcy - 8. pasażer Nostromo"></textarea>
+        <div class="row" style="margin-top:10px"><button class="pill light" id="plprev">${T("podgląd")}</button><button class="pill orange" id="plsave" disabled>${T("zapisz dopasowane")}</button></div>
+        <div id="plres"></div>
+      </div>
+      <div class="panel"><h2>${T("edycja w tabeli")}</h2>
+        <p class="muted" style="font-size:14px;margin:0 0 10px">${T("Zmiana zapisuje się po wyjściu z pola. Aliasy rozdzielaj średnikiem.")}</p>
+        <div style="overflow-x:auto"><table class="ptable pltable"><thead><tr><th>${T("Film")}</th><th>${T("Polski tytuł")}</th><th class="hide-m">${T("Aliasy")}</th></tr></thead><tbody>
+        ${movies.map(m => `<tr data-id="${m.id}"><td><div class="t">${esc(m.title)}</div><span class="muted">${m.year || "?"}</span></td>
+          <td><input class="input sm" data-f="pl_title" value="${esc(m.pl_title || "")}" aria-label="${T("Polski tytuł")}"></td>
+          <td class="hide-m"><input class="input sm" data-f="aliases" value="${esc((m.aliases || "").split("\n").join("; "))}" aria-label="${T("Aliasy")}"></td></tr>`).join("") || `<tr><td colspan="3" class="empty">${T("Brak filmów.")}</td></tr>`}
+        </tbody></table></div>
+      </div>
+    </div>`;
+  let lastText = "";
+  const preview = async apply => {
+    const text = $("#pltext").value; if (!text.trim()) return toast(T("Wklej listę"));
+    const r = await api(`/api/admin/packs/${id}/pl_titles`, "POST", {text, apply});
+    lastText = text;
+    $("#plres").innerHTML = `<p class="plsum"><b>${T("dopasowane: {n}", {n: r.matched})}</b> · ${T("niedopasowane: {n}", {n: r.unmatched})}${apply ? " · " + T("zapisano: {n}", {n: r.saved}) : ""}</p>
+      <table class="ptable plprev"><thead><tr><th>${T("Linia")}</th><th>${T("Film w pakiecie")}</th><th>${T("Polski tytuł")}</th></tr></thead><tbody>
+      ${r.rows.map(x => `<tr class="${x.status}"><td>${esc(x.line)}</td><td>${x.status === "matched" ? esc(x.movie) : `<span class="badge error">${T(PL_STATUS[x.status])}</span>`}</td>
+        <td>${x.status === "matched" ? `<b>${esc(x.pl_title)}</b>${x.current && x.current !== x.pl_title ? `<div class="sub">${T("było: {x}", {x: esc(x.current)})}</div>` : ""}` : ""}</td></tr>`).join("")}</tbody></table>`;
+    $("#plsave").disabled = apply || !r.matched;
+    if (apply) { toast(T("Zapisano {n} polskich tytułów", {n: r.saved})); setTimeout(() => plTitlesPage(id).then(() => { $("#pltext").value = text; }), 900); }
+  };
+  $("#plprev").onclick = () => preview(false).catch(e => toast(e.message));
+  $("#plsave").onclick = () => { if ($("#pltext").value !== lastText) return preview(false); preview(true).catch(e => toast(e.message)); };
+  $("#pltext").oninput = () => { $("#plsave").disabled = true; };
+  document.querySelectorAll(".pltable input").forEach(inp => {
+    inp.dataset.orig = inp.value;
+    inp.onchange = async () => {
+      const mid = +inp.closest("tr").dataset.id, f = inp.dataset.f;
+      const val = f === "aliases" ? inp.value.split(";").map(x => x.trim()).filter(Boolean).join("\n") : inp.value.trim();
+      try { await api(`/api/admin/movies/${mid}`, "PUT", {[f]: val}); inp.classList.add("saved"); setTimeout(() => inp.classList.remove("saved"), 1200); toast(T("Zapisano")); }
+      catch (e) { toast(e.message); inp.value = inp.dataset.orig; }
+    };
+  });
+}
