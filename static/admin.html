@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="{{LANG}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>{{ADMIN_TITLE}}</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/admin.css">
+</head>
+<body class="admin">
+<div id="login" class="login hidden">
+  <form class="blob joinbox" id="lf">
+    <div class="logo" style="font-size:54px">{{BRAND}}<span class="ast">*</span></div>
+    <p class="muted" style="margin:4px 0 18px" data-t>Panel admina. Wpisz hasło.</p>
+    <input class="input" type="password" id="pw" data-tp placeholder="hasło" autocomplete="current-password" required>
+    <p class="err" id="lerr"></p>
+    <button class="pill orange big" style="width:100%" data-t>wejdź</button>
+    <div style="margin-top:14px;text-align:center" data-langsw></div>
+  </form>
+</div>
+<div id="app" class="shell hidden">
+  <aside class="side">
+    <a class="logo" href="#/">{{BRAND}}<span class="ast">*</span> <small data-t>panel</small></a>
+    <nav id="sidenav"></nav>
+    <div class="side-foot">
+      <a class="pill light small" href="/api/admin/export" data-t>eksport .sql</a>
+      <a class="pill ghost small" href="/" target="_blank" data-t>strona gry</a>
+      <button class="pill ghost small" id="logout" data-t>wyloguj</button>
+      <div data-langsw></div>
+    </div>
+  </aside>
+  <main class="main" id="main"></main>
+</div>
+<div class="modal hidden" id="modal"><form class="box" id="mform" autocomplete="off"></form></div>
+<script src="/static/i18n.js"></script>
+<script src="/static/admin.js"></script>
+</body>
+</html>

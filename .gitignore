@@ -1,0 +1,11 @@
+# Baza z pobranymi kadrami zostaje tylko lokalnie
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sql
+__pycache__/
+*.pyc
+screenshots/
+.venv/
+venv/

@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="{{LANG}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#F26B1D">
+<title>{{TITLE}}</title>
+<meta name="description" content="{{DESC}}">
+<meta property="og:title" content="{{TITLE}}">
+<meta property="og:description" content="{{DESC}}">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="home">
+  <header class="hero">
+    <svg class="hero-deco" viewBox="0 0 100 100" aria-hidden="true"><g fill="#1B1712"><rect x="44" y="0" width="12" height="100" rx="6"/><rect x="44" y="0" width="12" height="100" rx="6" transform="rotate(60 50 50)"/><rect x="44" y="0" width="12" height="100" rx="6" transform="rotate(120 50 50)"/></g></svg>
+    <div class="wrap">
+      <div class="topnav">
+        <a class="logo" href="/">{{BRAND}}*</a>
+        <nav>
+          <a class="pill light" href="#pakiety" data-t>graj</a>
+          <a class="pill" href="#dolacz" data-t>dołącz</a>
+          <a class="pill" href="#jak" data-t>jak grać</a>
+          <span data-langsw></span>
+        </nav>
+      </div>
+      <div class="hero-grid">
+        <div>
+          <h1 class="wordmark">{{BRAND}}<sup>*</sup></h1>
+          <p class="tagline" data-t>zgadnij film po jednym kadrze. ze znajomymi.</p>
+        </div>
+        <form class="blob joinbox" id="dolacz" autocomplete="off">
+          <h2 data-t>masz kod pokoju?</h2>
+          <div class="row">
+            <label class="field"><span data-t>Kod</span><input class="input code" id="jcode" maxlength="4" placeholder="ABCD" required></label>
+            <label class="field"><span data-t>Twój nick</span><input class="input" id="jname" maxlength="18" data-tp placeholder="np. Ola" required></label>
+          </div>
+          <button class="pill orange big" style="width:100%" data-t>dołącz do gry</button>
+        </form>
+      </div>
+    </div>
+  </header>
+  <div class="marquee" aria-hidden="true"><span id="marq"></span></div>
+
+  <main class="wrap">
+    <div class="section-head" id="pakiety">
+      <h2><span data-t>pakiety</span><span class="ast">*</span></h2>
+      <p class="muted" style="max-width:380px;margin:0" data-t>Wybierz pakiet, ustaw liczbę rund i kliknij <b>graj</b>. Dostaniesz kod do wysłania znajomym.</p>
+    </div>
+    <div class="packs" id="packs"><div class="wait"><span class="spin"></span><span data-t>Ładuję pakiety...</span></div></div>
+
+    <section class="howto" id="jak">
+      <div class="blob">
+        <h2><span data-t>jak grać</span><span class="ast">*</span></h2>
+        <div class="steps">
+          <div><i>1</i><b data-t>trudny kadr</b><span data-t>Najpierw widzicie najtrudniejszy kadr z trailera. Zgadniesz teraz, masz najwięcej punktów.</span></div>
+          <div><i>2</i><b data-t>coraz łatwiej</b><span data-t>Co 15 sekund pojawia się łatwiejszy kadr. Pisz tytuł, podpowiedzi pomogą z pisownią.</span></div>
+          <div><i>3</i><b data-t>szybciej = więcej</b><span data-t>Liczy się kadr i czas. Pierwsza dobra odpowiedź dostaje premię. Literówki wybaczamy.</span></div>
+        </div>
+      </div>
+    </section>
+  </main>
+  <footer>{{BRAND}}* - <span data-t>quiz filmowy dla znajomych</span></footer>
+</div>
+
+<div id="room" class="hidden">
+  <div class="wrap">
+    <div class="roombar">
+      <a class="logo" href="/">{{BRAND}}<span class="ast">*</span></a>
+      <div class="meta"><span id="roommeta"></span><span data-langsw></span></div>
+    </div>
+    <div id="view"></div>
+  </div>
+</div>
+
+<div class="modal hidden" id="modal"><form class="box" id="mform" autocomplete="off"></form></div>
+<script src="/static/i18n.js"></script>
+<script src="/static/game.js"></script>
+</body>
+</html>
