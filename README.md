@@ -82,6 +82,30 @@ Gospodarz wybiera pakiet, a w poczekalni zaznacza tryby i liczbę rund. Filmy lo
 W trybach z tytułem pierwsza poprawna odpowiedź dostaje +100 pkt. Tryb bez wystarczających danych jest wyszarzony z podpowiedzią, czego brakuje.
 Admin może wyłączyć dowolny tryb dla pakietu (edytor trybów albo panel "tryby gry" na stronie pakietu).
 
+## Ustawienia gry (lobby)
+
+Gospodarz ustawia grę w lobby; pozostali gracze widzą ustawienia tylko do odczytu. Ostatnie ustawienia zapisują się w przeglądarce gospodarza i wracają przy kolejnej grze.
+
+Podstawowe:
+- **rundy** – liczba rund (tryby się przeplatają),
+- **czas na rundę** – `domyślny` (każdy tryb swój, np. Kadry 3 x 15 s, Zoom 30 s) albo stały 10–120 s,
+- **odpowiedzi** – `Wpisywanie` (gra sprawdza sama) albo `Na głos` (gracz klika *Mam!*, mówi tytuł, ktoś ocenia),
+- **kto ocenia** (przy odpowiedziach na głos) – `kolejny gracz` (sędzia rotuje co rundę), `gospodarz` albo `głosowanie` (decyduje większość pozostałych),
+- **licytacja** – czas na odpowiedź zwycięzcy (domyślnie 30 s) i czas na jedną turę licytacji (domyślnie 10 s).
+
+Zaawansowane: czas osobno dla trybu, odpowiedzi osobno dla trybu (np. Kadry na głos, reszta wpisywana), liczba rund każdego trybu, kolejność trybów (losowa albo Twoja), podpowiedzi tytułów (wł./wył.), mnożnik punktów w finale (x1/x2/x3).
+
+### Odpowiedzi na głos
+Sędzia widzi poprawną odpowiedź i duże przyciski `dobrze` / `źle`, a zgłoszenia ocenia po kolei (liczy się kolejność kliknięcia *Mam!*). Sędzia nie zgaduje i nie ocenia sam siebie. Gdy sędzia się rozłączy, ocenia gospodarz. W trybie głosowania można podejrzeć odpowiedź, ale wtedy nie zdobywa się punktów w tej rundzie.
+
+### Licytacja w turach
+Gra losuje, kto zaczyna. Gracze po kolei podbijają ofertę albo pasują (brak ruchu w czasie tury = pas). Gdy zostaje jedna osoba, wygrywa najwyższa oferta, a zwycięzca ma **tylko 30 s na odpowiedź** (informacja jest w zasadach i na ekranie odpowiedzi z dużym zegarem). Przy odpowiedziach na głos sędzia liczy poprawne przyciskiem `+1` (z `cofnij`) albo zaznacza je na liście.
+
+### Wersja mobilna
+Duże przyciski *stwórz grę* / *dołącz* na stronie głównej, przyciski akcji zawsze na dole ekranu, wyniki w wysuwanym panelu, ekran nie skacze przy klawiaturze, a animacje wyłączają się przy ustawieniu „ogranicz ruch”.
+
+Aktualizacja wersji na Cloudflare: `git pull`, potem `python deploy_cloudflare.py` (bez nowych migracji).
+
 ## Edytor trybów
 
 Strona pakietu, "edytor trybów" (`/admin#/modes/ID`): karta każdego trybu z gotowością (ile danych jest, ile trzeba), przełącznikiem włącz/wyłącz w tym pakiecie i linkiem do edytora.

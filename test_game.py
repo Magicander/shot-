@@ -192,9 +192,16 @@ def main():
             a.req("POST", f"/api/rooms/{code}/guess", {**A, "order": right})
             b.req("POST", f"/api/rooms/{code}/guess", {**B, "order": right[::-1]})
         elif mode == "licytacja":
+            check(sa.get("sub") == "bid" and sa.get("turn") in (A["pid"], B["pid"]) and sa.get("starter"), "licytacja: losowy gracz zaczyna")
+            t["order"] = [A["pid"], B["pid"]]; t["turn"] = 0          # deterministycznie: zaczyna Ala
+            nb = b.req("POST", f"/api/rooms/{code}/guess", {**B, "bid": 1})
+            check(nb.get("turn") is False, "licytacja: ruch poza turą odrzucony")
             a.req("POST", f"/api/rooms/{code}/guess", {**A, "bid": 2})
-            b.req("POST", f"/api/rooms/{code}/guess", {**B, "bid": 1})
-            check(t["bidder"] == A["pid"] and t["bid"] == 2, "licytację wygrywa wyższa oferta")
+            low = b.req("POST", f"/api/rooms/{code}/guess", {**B, "bid": 2})
+            check(low.get("low"), "licytacja: oferta musi być wyższa")
+            b.req("POST", f"/api/rooms/{code}/guess", {**B, "pass": True})
+            st_ = a.req("GET", f"/api/rooms/{code}?pid={A['pid']}&token={A['token']}")
+            check(t["bidder"] == A["pid"] and t["bid"] == 2 and st_["sub"] == "type" and st_["duration"] == 30, "licytację wygrywa Ala, 30 s na odpowiedź")
             first = ok_movies[0]
             r1 = a.req("POST", f"/api/rooms/{code}/guess", {**A, "text": first["title"]})
             dup = a.req("POST", f"/api/rooms/{code}/guess", {**A, "text": first["title"]})

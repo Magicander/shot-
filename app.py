@@ -282,6 +282,8 @@ class Handler(BaseHTTPRequestHandler):
                 r = rooms[code] = Room(code, pack_data(con, pack), movies, int(d.get("rounds") or 10), avail)
                 if d.get("modes"):
                     r.configure(modes=d["modes"])
+                if d.get("settings"):
+                    r.configure(settings=d["settings"])
                 p = r.add_player(d.get("name"))
             return self.json({"code": code, "pid": p["id"], "token": p["token"]})
         m = re.fullmatch(r"/api/rooms/([A-Za-z0-9]{4})(?:/(\w+))?", path)
@@ -316,7 +318,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not is_host:
                     raise ApiError(403, "Tylko gospodarz może to zrobić")
                 if action == "setup":
-                    r.configure(d.get("modes"), d.get("rounds"))
+                    r.configure(d.get("modes"), d.get("rounds"), d.get("settings"))
                 elif action == "start" and r.phase in ("lobby", "final"):
                     r.start()
                 elif action == "next" and r.phase in ("round", "reveal"):

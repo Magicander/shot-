@@ -53,9 +53,13 @@ for (;;) {
     await A.rpc("guess", { order: ids }); await B.rpc("guess", { order: ids.slice().reverse() });
   } else if (mode === "licytacja") {
     const q = data.pack.questions.find(q => q.prompt_pl === s.prompt || q.prompt_en === s.prompt);
-    await A.rpc("guess", { bid: 2 }); await B.rpc("guess", { bid: 1 });
+    check(s.sub === "bid" && [cr.pid, jn.pid].includes(s.turn) && s.starter, `licytacja: random starter ${s.starter}`);
+    const wrongTurn = s.turn === cr.pid ? B : A;
+    const wt = await wrongTurn.rpc("guess", { bid: 1 }); check(wt.ok && wt.d.turn === false, "licytacja: out-of-turn bid rejected");
+    if (s.turn === cr.pid) { await A.rpc("guess", { bid: 2 }); const lo = await B.rpc("guess", { bid: 1 }); check(lo.d.low, "licytacja: lower bid rejected"); await B.rpc("guess", { pass: true }); }
+    else { await B.rpc("guess", { pass: true }); await A.rpc("guess", { bid: 2 }); }
     await until(A, s => s.phase !== "round" || s.sub === "type");
-    check(A.s.sub === "type" && A.s.bidder === cr.pid, "licytacja: highest bidder (Ala, 2) wins");
+    check(A.s.sub === "type" && A.s.bidder === cr.pid && A.s.duration === 30, "licytacja: Ala wins with 2, 30 s to answer");
     const nb = await B.rpc("guess", { text: q.answers[0].text }); check(nb.ok && nb.d.ok === false, "licytacja: non-bidder cannot answer");
     const ans = q.answers.map(a => a.pl || a.text);
     for (const t of ans.slice(0, 2)) { const r = await A.rpc("guess", { text: t }); check(r.d.correct, `licytacja: answer "${t}"`); }
@@ -80,4 +84,44 @@ const bogus = new WebSocket(`${BASE.replace("http", "ws")}/api/rooms/${cr.code}/
 const closeCode = await new Promise(r => bogus.on("close", c => r(c)));
 check(closeCode === 4403, "bad token closed with 4403");
 A.ws.close(); B2.ws.close();
+
+// druga gra: odpowiedzi na głos, ocenia gospodarz
+{
+  const vm = ["kadry", "licytacja"].filter(k => data.avail[k].ok);
+  const c2 = await post("/api/rooms", { pack_id: PACK, rounds: vm.length, modes: vm, name: "Ala", settings: { answer: "voice", judge: "host", order: "fixed" } });
+  const j2 = await post(`/api/rooms/${c2.code}/join`, { name: "Bob" });
+  const VA = client(c2.code, c2, "pl"), VB = client(c2.code, j2, "pl");
+  await Promise.all([VA.open, VB.open]);
+  await until(VA, s => s && s.players.length === 2);
+  check(VA.s.settings.answer === "voice" && VA.s.settings.judge === "host", "voice room: settings applied at create");
+  await VA.rpc("start");
+  for (;;) {
+    await until(VA, s => ["round", "final"].includes(s.phase));
+    const s = VA.s; if (s.phase === "final") break;
+    const round = s.round;
+    if (s.mode === "kadry") {
+      await until(VB, s => s.phase === "round");
+      check(VA.s.voice && VA.s.judge === c2.pid && VA.s.solution && VA.s.solution.title, "voice: host is judge and sees the solution");
+      check(!VB.s.solution && VB.s.can_claim, "voice: player sees no solution and can claim");
+      const self = await VA.rpc("guess", { claim: true }); check(!(self.d && self.d.ok), "voice: judge cannot claim");
+      await VB.rpc("guess", { claim: true });
+      await until(VA, s => (s.claims || []).some(c => c.pid === j2.pid && c.can));
+      check(true, "voice: claim visible to judge");
+      await VA.rpc("guess", { judge: j2.pid, verdict: true });
+    } else {
+      if (s.turn === c2.pid) { await VA.rpc("guess", { pass: true }); await VB.rpc("guess", { bid: 1 }); }
+      else { await VB.rpc("guess", { bid: 1 }); await VA.rpc("guess", { pass: true }); }
+      await until(VA, s => s.sub === "type");
+      check(VA.s.can_count && VA.s.bidder === j2.pid, "voice licytacja: host counts Bob's answers");
+      await VA.rpc("guess", { count: 1 });
+    }
+    await until(VA, s => s.phase === "reveal" || s.round !== round, 8000);
+    if (VA.s.phase === "reveal") {
+      const bob = VA.s.players.find(p => p.name === "Bob").score;
+      check(bob > 0, `voice ${s.mode}: Bob scored (${bob})`);
+      await VA.rpc("next");
+    }
+  }
+  VA.ws.close(); VB.ws.close();
+}
 console.log(log.join("\n"));

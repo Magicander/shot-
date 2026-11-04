@@ -59,7 +59,7 @@ export class Room extends DurableObject {
   }
 
   // ---------------------------------------------------------------- RPC z Workera
-  async create(code, packId, rounds, modes, name) {
+  async create(code, packId, rounds, modes, name, settings = null) {
     if (this.room) return { error: "exists" };
     const res = await this.env.ASSETS.fetch(`https://assets.local/data/pack-${packId}.json`);
     if (!res.ok) throw new GameError(404, "Nie ma takiego pakietu");
@@ -68,7 +68,7 @@ export class Room extends DurableObject {
     this.movies = data.movies;
     this.room = newRoom(code, data, rounds);
     const g = this.game();
-    if (modes && modes.length) g.configure(modes, null);
+    if ((modes && modes.length) || settings) g.configure(modes && modes.length ? modes : null, null, settings);
     const p = g.addPlayer(name);
     await this.ctx.storage.put("movies", this.movies);
     await this.save();
@@ -132,7 +132,7 @@ export class Room extends DurableObject {
       else if (m.a === "guess") out = g.answer(p, b, a.lang);
       else if (ACTIONS_HOST.has(m.a)) {
         if (p.id !== r.host) throw new GameError(403, "Tylko gospodarz może to zrobić");
-        if (m.a === "setup") g.configure(b.modes, b.rounds);
+        if (m.a === "setup") g.configure(b.modes, b.rounds, b.settings);
         else if (m.a === "start" && ["lobby", "final"].includes(r.phase)) g.start();
         else if (m.a === "next" && ["round", "reveal"].includes(r.phase)) g.next();
         else if (m.a === "again") g.again();

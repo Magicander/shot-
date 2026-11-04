@@ -106,7 +106,7 @@ async function gameApi(req, env, path, url) {
     if (!(packId > 0)) throw new ApiError(400, "Zły format danych");
     for (let i = 0; i < 8; i++) {
       const code = newCode();
-      const out = await roomStub(env, code).create(code, packId, parseInt(d.rounds, 10) || 10, d.modes || null, d.name);
+      const out = await roomStub(env, code).create(code, packId, parseInt(d.rounds, 10) || 10, d.modes || null, d.name, d.settings || null);
       if (!out.error) return json(out);
     }
     throw new ApiError(503, "Nie ma takiego adresu");
