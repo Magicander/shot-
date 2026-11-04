@@ -1,0 +1,14 @@
+{
+  "name": "shot-quiz-cloudflare",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "python ../deploy_cloudflare.py --build-only",
+    "dev": "wrangler dev",
+    "deploy": "python ../deploy_cloudflare.py",
+    "test": "node test/ws_game.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4.45.0"
+  }
+}

@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="{{LANG}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>{{ADMIN_TITLE}}</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/admin.css">
+<style>
+.cwrap{max-width:980px;margin:0 auto;padding:24px 16px 60px}
+.note{background:#f3e7d3;border-left:6px solid #e8682a;border-radius:14px;padding:14px 18px;margin:16px 0;line-height:1.5}
+.note code{background:#fff8ec;padding:1px 6px;border-radius:6px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin:16px 0}
+.stat{background:#fff8ec;border-radius:16px;padding:14px}
+.stat b{display:block;font-size:28px;color:#e8682a}
+table.ct{width:100%;border-collapse:collapse;background:#fff8ec;border-radius:16px;overflow:hidden}
+table.ct th,table.ct td{padding:9px 10px;text-align:left;border-bottom:1px solid #eadcc4;font-size:14px}
+.tw{overflow-x:auto}
+.ok{color:#2f7a3a;font-weight:700}.no{color:#b23a1e;opacity:.55;text-decoration:line-through}
+.stat b.sm{font-size:17px;line-height:1.3}
+.top{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+</style>
+</head>
+<body class="admin">
+<div id="login" class="login hidden">
+  <form class="blob joinbox" id="lf">
+    <div class="logo" style="font-size:54px">{{BRAND}}<span class="ast">*</span></div>
+    <p class="muted" style="margin:4px 0 18px" data-k="intro"></p>
+    <input class="input" type="password" id="pw" autocomplete="current-password" required>
+    <p class="err" id="lerr"></p>
+    <button class="pill orange big" style="width:100%" data-k="enter"></button>
+    <p style="margin-top:14px;text-align:center"><a href="#" class="sw">PL / EN</a></p>
+  </form>
+</div>
+<div id="app" class="cwrap hidden">
+  <div class="top">
+    <div class="logo" style="font-size:40px">{{BRAND}}<span class="ast">*</span> <span class="muted" style="font-size:18px" data-k="cloud"></span></div>
+    <div><a href="#" class="sw pill">PL / EN</a> <a href="/" class="pill" data-k="play"></a> <button class="pill" id="out" data-k="logout"></button></div>
+  </div>
+  <div class="note" id="note"></div>
+  <div class="stats" id="stats"></div>
+  <div class="tw"><table class="ct" id="tbl"></table></div>
+</div>
+<script>
+"use strict";
+(function () {
+  const L = (document.cookie.match(/(?:^|;\s*)kadr_lang=(pl|en)/) || [])[1] || document.documentElement.lang || "en";
+  const D = {
+    pl: {intro: "Panel admina (chmura, tylko odczyt). Wpisz hasło.", enter: "wejdź", cloud: "chmura", play: "graj", logout: "wyloguj",
+      ph: "hasło", bad: "Złe hasło",
+      note: "To jest wersja w chmurze, <b>tylko do odczytu</b>. Synchronizacja działa w jedną stronę: lokalne studio (scraping, edycja pakietów w <code>python app.py</code>) &rarr; Cloudflare. Zmiany wprowadzasz lokalnie, a potem wysyłasz je poleceniem <code>python deploy_cloudflare.py</code>. Każde wysłanie zastępuje dane w chmurze.",
+      built: "ostatnia synchronizacja", frames: "kadry", posters: "plakaty", files: "pliki (limit 20 000)", mb: "MB obrazów",
+      pack: "pakiet", movies: "filmy", framed: "z kadrami", cast: "z obsadą", quotes: "cytaty", questions: "pytania", modes: "tryby"},
+    en: {intro: "Admin panel (cloud, read-only). Enter the password.", enter: "enter", cloud: "cloud", play: "play", logout: "log out",
+      ph: "password", bad: "Wrong password",
+      note: "This is the cloud copy and it is <b>read-only</b>. Sync is one-way: the local studio (scraping and pack editing in <code>python app.py</code>) &rarr; Cloudflare. Make changes locally, then push them with <code>python deploy_cloudflare.py</code>. Every push replaces the cloud data.",
+      built: "last sync", frames: "frames", posters: "posters", files: "files (limit 20,000)", mb: "MB of images",
+      pack: "pack", movies: "movies", framed: "with frames", cast: "with cast", quotes: "quotes", questions: "questions", modes: "modes"}
+  }[L];
+  const $ = s => document.querySelector(s);
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+  document.querySelectorAll("[data-k]").forEach(e => e.textContent = D[e.dataset.k]);
+  $("#pw").placeholder = D.ph;
+  document.querySelectorAll(".sw").forEach(a => a.onclick = e => { e.preventDefault();
+    const n = L === "pl" ? "en" : "pl"; localStorage.setItem("kadr_lang", n);
+    document.cookie = `kadr_lang=${n}; Path=/; Max-Age=31536000; SameSite=Lax`; location.reload(); });
+  async function show() {
+    const r = await fetch("/api/admin/overview");
+    if (!r.ok) { $("#login").classList.remove("hidden"); $("#app").classList.add("hidden");
+      if (r.status === 503) $("#lerr").textContent = (await r.json()).error; return; }
+    const m = await r.json();
+    $("#login").classList.add("hidden"); $("#app").classList.remove("hidden");
+    $("#note").innerHTML = D.note;
+    $("#stats").innerHTML = [[D.built, m.built], [D.frames, m.frames], [D.posters, m.posters], [D.files, m.files], [D.mb, (m.bytes / 1e6).toFixed(1)]]
+      .map(([k, v], i) => `<div class="stat"><b${i ? "" : ' class="sm"'}>${esc(v)}</b>${esc(k)}</div>`).join("");
+    $("#tbl").innerHTML = `<tr><th>${D.pack}</th><th>${D.movies}</th><th>${D.framed}</th><th>${D.posters}</th><th>${D.cast}</th><th>${D.quotes}</th><th>${D.questions}</th><th>${D.modes}</th></tr>` +
+      m.packs.map(p => `<tr><td>${esc(L === "pl" ? p.name : p.name_en)}</td><td>${p.movies}</td><td>${p.framed}</td><td>${p.posters}</td><td>${p.cast}</td><td>${p.quotes}</td><td>${p.questions}</td><td>${
+        Object.entries(p.avail).map(([k, a]) => `<span class="${a.ok ? "ok" : "no"}">${esc(k)}</span>`).join(" ")}</td></tr>`).join("");
+  }
+  $("#lf").onsubmit = async e => { e.preventDefault();
+    const r = await fetch("/api/admin/login", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({password: $("#pw").value})});
+    if (r.ok) show(); else $("#lerr").textContent = r.status === 403 ? D.bad : (await r.json()).error; };
+  $("#out").onclick = async () => { await fetch("/api/admin/logout", {method: "POST"}); location.reload(); };
+  show();
+})();
+</script>
+</body>
+</html>

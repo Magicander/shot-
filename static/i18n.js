@@ -3,7 +3,9 @@
 (function () {
   const cookieLang = (document.cookie.match(/(?:^|;\s*)kadr_lang=(pl|en)/) || [])[1];
   const stored = localStorage.getItem("kadr_lang");
-  const detected = (navigator.languages && navigator.languages[0] || navigator.language || "en").toLowerCase().startsWith("pl") ? "pl" : "en";
+  // wersja na Cloudflare podaje kraj (data-geo): Polska -> PL, reszta -> EN
+  const geo = document.documentElement.dataset.geo;
+  const detected = geo === "pl" || geo === "en" ? geo : (navigator.languages && navigator.languages[0] || navigator.language || "en").toLowerCase().startsWith("pl") ? "pl" : "en";
   const lang = stored || cookieLang || detected;
   const setCookie = l => { document.cookie = `kadr_lang=${l}; Path=/; Max-Age=31536000; SameSite=Lax`; };
   // serwer renderuje HTML wg ciasteczka/Accept-Language; gdy się różni od zapamiętanego wyboru - wyrównaj
@@ -19,7 +21,7 @@
 
 const EN = {
   // wspólne
-  "Coś poszło nie tak": "Something went wrong",
+  "Coś poszło nie tak": "Something went wrong", "Łączę ponownie...": "Reconnecting...",
   "anuluj": "cancel", "dalej": "next", "zapisz": "save", "usuń": "delete", "zamknij": "close",
   // strona główna
   "graj": "play", "dołącz": "join", "jak grać": "how to play",

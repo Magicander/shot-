@@ -105,19 +105,63 @@ async function enterRoom(code) {
   poll();
 }
 
+const WS_MODE = window.KADR_RT === "ws";
+let ws = null, wsRetry = 0, wsSeq = 0, wsPending = {}, wsPing = null, wsDead = false;
+
+async function gotState(s) {
+  if (!titles.length || (S && S.pack.id !== s.pack.id)) titles = await api(`/api/packs/${s.pack.id}/titles`);
+  S = s; localT0 = performance.now(); render();
+}
+function roomGone(msg) {
+  wsDead = true; localStorage.removeItem("kadr_room_" + CODE);
+  $("#view").innerHTML = `<div class="panel center"><h2>${T("pokój wygasł")}</h2><p class="muted">${esc(msg)}</p><a class="pill orange" href="/">${T("na start")}</a></div>`;
+}
+/* WebSocket (Cloudflare Durable Object): serwer sam wysyła stan, klient łączy się ponownie po zerwaniu */
+function wsConnect() {
+  if (wsDead || (ws && ws.readyState <= 1)) return;
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const sock = ws = new WebSocket(`${proto}//${location.host}/api/rooms/${CODE}/ws?pid=${encodeURIComponent(ME.pid)}&token=${encodeURIComponent(ME.token)}&lang=${LANG}`);
+  sock.onopen = () => { wsRetry = 0; clearInterval(wsPing); wsPing = setInterval(() => { if (sock.readyState === 1) sock.send("ping"); }, 25000); };
+  sock.onmessage = ev => {
+    if (ev.data === "pong") return;
+    let m; try { m = JSON.parse(ev.data); } catch { return; }
+    if (m.t === "state") gotState(m.s).catch(() => {});
+    else if (m.t === "r") { const p = wsPending[m.id]; delete wsPending[m.id]; if (p) m.ok ? p.ok(m.d) : p.fail(Object.assign(new Error(m.error || T("Coś poszło nie tak")), {key: m.key})); }
+    else if (m.t === "err") roomGone(m.error);
+  };
+  sock.onclose = ev => {
+    clearInterval(wsPing);
+    for (const id in wsPending) { wsPending[id].fail(new Error(T("Coś poszło nie tak"))); delete wsPending[id]; }
+    if (ev.code === 4403 || ev.code === 4404 || wsDead || ws !== sock) return;
+    const wait = Math.min(5000, 400 * 2 ** wsRetry++);
+    setTimeout(wsConnect, wait);
+  };
+}
+function rpc(a, b = {}) {
+  return new Promise((ok, fail) => {
+    if (!ws || ws.readyState !== 1) { wsConnect(); return fail(new Error(T("Łączę ponownie..."))); }
+    const id = ++wsSeq; wsPending[id] = {ok, fail};
+    ws.send(JSON.stringify({id, a, b}));
+    setTimeout(() => { if (wsPending[id]) { delete wsPending[id]; fail(new Error(T("Coś poszło nie tak"))); } }, 8000);
+  });
+}
+if (WS_MODE) document.addEventListener("visibilitychange", () => { if (!document.hidden && CODE && ME) wsConnect(); });
+/* jedno wywołanie akcji pokoju, niezależnie od transportu */
+const roomCall = (action, body = {}) => WS_MODE ? rpc(action, body) : api(`/api/rooms/${CODE}/${action}`, {pid:ME.pid, token:ME.token, ...body});
+
 async function poll() {
+  if (WS_MODE) return wsConnect();
   clearTimeout(pollT);
   try {
     const s = await api(`/api/rooms/${CODE}?pid=${ME.pid}&token=${encodeURIComponent(ME.token)}`);
-    if (!titles.length || (S && S.pack.id !== s.pack.id)) titles = await api(`/api/packs/${s.pack.id}/titles`);
-    S = s; localT0 = performance.now(); render();
+    await gotState(s);
   } catch (e) {
-    if (/Nie jesteś|Nie ma pokoju/.test(e.key || e.message)) { localStorage.removeItem("kadr_room_" + CODE); $("#view").innerHTML = `<div class="panel center"><h2>${T("pokój wygasł")}</h2><p class="muted">${esc(e.message)}</p><a class="pill orange" href="/">${T("na start")}</a></div>`; return; }
+    if (/Nie jesteś|Nie ma pokoju/.test(e.key || e.message)) { roomGone(e.message); return; }
   }
   pollT = setTimeout(poll, S && S.phase === "round" ? 800 : 1200);
 }
 async function act(action, body = {}) {
-  try { S = await api(`/api/rooms/${CODE}/${action}`, {pid:ME.pid, token:ME.token, ...body}); localT0 = performance.now(); lastKey = ""; render(); }
+  try { const d = await roomCall(action, body); lastKey = ""; if (!WS_MODE) { S = d; localT0 = performance.now(); render(); } }
   catch (e) { toast(e.message); }
 }
 
@@ -339,7 +383,7 @@ function renderAuction(m) {
 }
 
 async function guessAct(body) {
-  try { await api(`/api/rooms/${CODE}/guess`, {pid:ME.pid, token:ME.token, ...body}); lastKey = ""; poll(); }
+  try { await roomCall("guess", body); lastKey = ""; if (!WS_MODE) poll(); }
   catch (e) { toast(e.message); }
 }
 
@@ -423,8 +467,8 @@ function setupGuess(prev, focus, auction) {
   const submit = async () => {
     const text = g.value.trim(); if (!text) return;
     try {
-      const r = await api(`/api/rooms/${CODE}/guess`, {pid:ME.pid, token:ME.token, text});
-      if (r.correct) { if (auction) { g.value = ""; toast(T("Zaliczone: {t}", {t: r.title})); } lastKey = ""; poll(); }
+      const r = await roomCall("guess", {text});
+      if (r.correct) { if (auction) { g.value = ""; toast(T("Zaliczone: {t}", {t: r.title})); } lastKey = ""; if (!WS_MODE) poll(); }
       else if (r.duplicate) { fb.textContent = (auction ? T("Ta odpowiedź już była.") : T("Ten film już był.")); fb.className = "feedback bad"; g.select(); }
       else { fb.textContent = auction ? T("\"{text}\" nie ma na liście.", {text}) : T("Nie, to nie \"{text}\". Próbuj dalej.", {text}); fb.className = "feedback bad"; g.select(); }
     } catch (e) { toast(e.message); }

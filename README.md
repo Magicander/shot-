@@ -125,3 +125,76 @@ python3 test_scraper_fallback.py
 python3 test_game.py            # na kopii quiz.db: migracje, wklejanie PL, atrapa TMDB, gra 2 graczy we wszystkich trybach
 python3 test_editors.py         # na kopii quiz.db: scraper IMDb/Filmweb na atrapie (blokady, fallback), edytory, licytacja z pytaniem
 ```
+
+## Wdrożenie na Cloudflare
+
+Wersja w chmurze służy do grania ze znajomymi przez internet. Scraping i edycja zostają w lokalnym studiu (`python app.py`), a do chmury wysyłasz gotowe dane jednym poleceniem. Synchronizacja działa w jedną stronę (lokalnie → Cloudflare). Każde wysłanie zastępuje dane w chmurze, a panel `/admin` w chmurze jest tylko do odczytu.
+
+Architektura (wszystko mieści się w planie Free):
+- **Worker** `shot-quiz` (`cloudflare/src/index.js`) obsługuje strony, API pakietów i logowanie do panelu. Na start wybiera język po kraju: Polska → kadr* PL, reszta świata → shot* EN. Przełącznik PL/EN i ciasteczko działają jak lokalnie.
+- **Durable Object** `Room` (backend SQLite), czyli jeden obiekt na pokój. Trzyma stan gry i rozsyła go graczom przez **WebSocket**, bez odpytywania serwera. Zegar rund obsługują alarmy, a połączenia są hibernowane, więc pokój bez ruchu nic nie kosztuje. Logika 8 trybów to port `rooms.py` (`cloudflare/src/game.js`) z tymi samymi zasadami i punktacją. Nieużywany pokój kasuje się po 6 h.
+- **Workers Static Assets**: kadry, plakaty i dane pakietów w JSON (bez D1). Buduje je `deploy_cloudflare.py` z twojej `quiz.db` do `cloudflare/build/`, który nie trafia do gita. Pliki `/data/*` nie są publiczne.
+
+Nie dotyka istniejącego workera ani bazy `mozg`, bo używa osobnej nazwy `shot-quiz`.
+
+### Pierwsze wdrożenie (Windows, PowerShell)
+
+1. Zainstaluj Node.js LTS (wersja 20 lub nowsza):
+   ```powershell
+   winget install OpenJS.NodeJS.LTS
+   ```
+   Potem zamknij i otwórz ponownie PowerShell, a następnie sprawdź: `node -v`.
+2. Pobierz najnowszy kod i zainstaluj wranglera:
+   ```powershell
+   cd C:\sciezka\do\shot-
+   git pull
+   cd cloudflare
+   npm install
+   ```
+3. Zaloguj się do Cloudflare (otworzy się przeglądarka):
+   ```powershell
+   npx wrangler login
+   npx wrangler whoami
+   ```
+4. Wyślij grę razem z danymi (z katalogu głównego repo):
+   ```powershell
+   cd ..
+   python deploy_cloudflare.py
+   ```
+   Skrypt migruje `quiz.db` (jak zwykłe uruchomienie aplikacji), buduje `cloudflare\build\` i uruchamia `npx wrangler deploy`. Za pierwszym razem Cloudflare sam utworzy Durable Object, bo nie trzeba ręcznie zakładać żadnych zasobów. Jeśli wrangler zapyta o subdomenę `workers.dev`, wybierz dowolną.
+5. Na końcu wyniku pojawi się adres, np. `https://shot-quiz.TWOJA-SUBDOMENA.workers.dev`. Znajdziesz go też w panelu Cloudflare: Workers & Pages → shot-quiz.
+6. Ustaw hasło do panelu `/admin` w chmurze (jednorazowo, wpisujesz je w konsoli i nie trafia do repo):
+   ```powershell
+   cd cloudflare
+   npx wrangler secret put ADMIN_PASSWORD
+   cd ..
+   ```
+   Bez sekretu panel w chmurze jest wyłączony, a gra działa normalnie.
+
+### Aktualizacja po nowym scrapingu
+
+Dodajesz filmy lokalnie (`python app.py`), a potem:
+```powershell
+cd C:\sciezka\do\shot-
+git pull
+python deploy_cloudflare.py
+```
+Po zmianach w kodzie (`git pull`) warto też odświeżyć zależności: `cd cloudflare; npm install; cd ..`. Inna baza: `python deploy_cloudflare.py --db D:\inna\quiz.db`. Samo zbudowanie bez wysyłania: `python deploy_cloudflare.py --build-only`. Lokalny podgląd wersji chmurowej: `python deploy_cloudflare.py --dev`, potem otwórz http://127.0.0.1:8787. Do testu panelu lokalnie utwórz plik `cloudflare\.dev.vars` z linią `ADMIN_PASSWORD=cos`; plik jest poza gitem.
+
+Wysłanie nowej wersji na chwilę rozłącza trwające gry. Przeglądarki łączą się same ponownie i stan pokoju zostaje. Nowe dane trafiają do nowych pokoi, bo pokój pamięta swój pakiet z chwili założenia.
+
+### Własna domena (opcjonalnie)
+
+Domena musi być dodana do twojego konta Cloudflare. Wtedy w panelu: Workers & Pages → shot-quiz → Settings → Domains & Routes → Add → Custom domain (np. `quiz.twojadomena.pl`). Możesz też dopisać w `cloudflare/wrangler.jsonc`:
+```jsonc
+"routes": [{ "pattern": "quiz.twojadomena.pl", "custom_domain": true }]
+```
+i ponownie uruchomić `python deploy_cloudflare.py`.
+
+### Limity planu Free
+
+- 20 000 plików statycznych na wersję. Przy 3 kadrach i plakacie na film to około 4 900 filmów. Skrypt przerwie wysyłkę, gdy limit zostanie przekroczony.
+- 100 000 żądań dziennie do Workera (kadry i plakaty jako pliki statyczne są darmowe i się nie liczą).
+- Dla Durable Objects: 100 000 żądań dziennie i 13 000 GB-s dziennie. Wiadomości WebSocket liczą się 20:1. Wieczór ze znajomymi to drobny ułamek tego limitu.
+
+Test end-to-end (dwóch graczy po WebSocket, wszystkie tryby): uruchom `npx wrangler dev --port 8788` w `cloudflare\`, a w drugim oknie `node test\ws_game.mjs`.

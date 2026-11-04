@@ -1,0 +1,23 @@
+// Konfiguracja Workera kadr*/shot*. Nazwa "shot-quiz" - nie dotyka istniejącego workera "mozg".
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "shot-quiz",
+  "main": "src/index.js",
+  "compatibility_date": "2026-04-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  // Kadry, plakaty i dane pakietów buduje deploy_cloudflare.py do katalogu build/ (poza gitem)
+  "assets": {
+    "directory": "./build",
+    "binding": "ASSETS",
+    "not_found_handling": "none",
+    "run_worker_first": ["/", "/r/*", "/admin", "/api/*", "/data/*", "/static/index.html", "/static/cloud-admin.html"]
+  },
+  // Jeden Durable Object na pokój, SQLite (jedyny backend na planie Free)
+  "durable_objects": {
+    "bindings": [{ "name": "ROOMS", "class_name": "Room" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }]
+  // Hasło admina: npx wrangler secret put ADMIN_PASSWORD (lokalnie: plik .dev.vars, poza gitem)
+}
