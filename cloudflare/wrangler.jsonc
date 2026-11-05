@@ -12,12 +12,18 @@
     "directory": "./build",
     "binding": "ASSETS",
     "not_found_handling": "none",
-    "run_worker_first": ["/", "/r/*", "/admin", "/api/*", "/data/*", "/static/index.html", "/static/cloud-admin.html"]
+    "run_worker_first": ["/", "/r/*", "/admin", "/api/*", "/data/*", "/poster/*", "/static/index.html", "/static/admin.html", "/static/cloud-admin.html"]
   },
-  // Jeden Durable Object na pokój, SQLite (jedyny backend na planie Free)
+  // Room = pokój gry; Content = singleton z nakładką edycji w chmurze (SQLite, plan Free)
   "durable_objects": {
-    "bindings": [{ "name": "ROOMS", "class_name": "Room" }]
+    "bindings": [
+      { "name": "ROOMS", "class_name": "Room" },
+      { "name": "CONTENT", "class_name": "Content" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }]
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["Room"] },
+    { "tag": "v2", "new_sqlite_classes": ["Content"] }
+  ]
   // Hasło admina: npx wrangler secret put ADMIN_PASSWORD (lokalnie: plik .dev.vars, poza gitem)
 }

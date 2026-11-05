@@ -104,7 +104,7 @@ Gra losuje, kto zaczyna. Gracze po kolei podbijają ofertę albo pasują (brak r
 ### Wersja mobilna
 Duże przyciski *stwórz grę* / *dołącz* na stronie głównej, przyciski akcji zawsze na dole ekranu, wyniki w wysuwanym panelu, ekran nie skacze przy klawiaturze, a animacje wyłączają się przy ustawieniu „ogranicz ruch”.
 
-Aktualizacja wersji na Cloudflare: `git pull`, potem `python deploy_cloudflare.py` (bez nowych migracji).
+Aktualizacja wersji na Cloudflare: zobacz sekcję **Aktualizacja do wersji z edycją w chmurze** poniżej.
 
 ## Edytor trybów
 
@@ -186,18 +186,70 @@ python pull_from_cloudflare.py --from-file kadr-export.json --url https://shot-q
 
 Przed pełnym deployem skrypt ostrzega, gdy lokalna baza ma mniej filmów/cytatów/pytań niż live (`--force` pomija pytanie).
 
-**Czego nie da się odzyskać z chmury:** tylko 3 kadry na film (hard/medium/easy); reszta kadrów ze scrapingu, historia yt/trailer (`yt_url`, `video_id`, `tried_ids`, query/status), ręczne `modes_off` admina.
+**Czego nie da się odzyskać z chmury:** tylko 3 kadry na film (hard/medium/easy); pełna historia scrapingu yt/trailer (`yt_url`, `video_id`, `tried_ids`, query/status). Edycje z nakładki Content (cytaty, pytania, PL, modes_off, obsada, plakaty) są w eksporcie i w merge przed deployem.
 
 ## Wdrożenie na Cloudflare
 
-Wersja w chmurze służy do grania ze znajomymi przez internet. Scraping i edycja zostają w lokalnym studiu (`python app.py`), a do chmury wysyłasz gotowe dane jednym poleceniem. Synchronizacja działa w jedną stronę (lokalnie → Cloudflare). Każde wysłanie zastępuje dane w chmurze, a panel `/admin` w chmurze jest tylko do odczytu.
+Wersja w chmurze służy do grania ze znajomymi przez internet. **Scraping** (YouTube, nowe kadry) zostaje w lokalnym studiu (`python app.py`). **Edycja treści** działa też w chmurze w `/admin` (ten sam UI co lokalnie, bez scrapera).
 
-Architektura (wszystko mieści się w planie Free):
-- **Worker** `shot-quiz` (`cloudflare/src/index.js`) obsługuje strony, API pakietów i logowanie do panelu. Na start wybiera język po kraju: Polska → kadr* PL, reszta świata → shot* EN. Przełącznik PL/EN i ciasteczko działają jak lokalnie.
-- **Durable Object** `Room` (backend SQLite), czyli jeden obiekt na pokój. Trzyma stan gry i rozsyła go graczom przez **WebSocket**, bez odpytywania serwera. Zegar rund obsługują alarmy, a połączenia są hibernowane, więc pokój bez ruchu nic nie kosztuje. Logika 8 trybów to port `rooms.py` (`cloudflare/src/game.js`) z tymi samymi zasadami i punktacją. Nieużywany pokój kasuje się po 6 h.
-- **Workers Static Assets**: kadry, plakaty i dane pakietów w JSON (bez D1). Buduje je `deploy_cloudflare.py` z twojej `quiz.db` do `cloudflare/build/`, który nie trafia do gita. Pliki `/data/*` nie są publiczne.
+### Co edytujesz w chmurze
 
-Nie dotyka istniejącego workera ani bazy `mozg`, bo używa osobnej nazwy `shot-quiz`.
+Po zalogowaniu hasłem `ADMIN_PASSWORD` (sekret wranglera):
+
+- cytaty (CRUD + wklejanie listy z podglądem)
+- pytania licytacji (CRUD + hurtem + auto-uzupełnianie odpowiedzi z filmów pakietu)
+- polskie tytuły i aliasy (inline + wklejanie listy)
+- włączanie/wyłączanie trybów w pakiecie
+- plakat: podmiana URL albo upload do 1,5 MB
+- obsada: edycja i kolejność
+- metadane filmu (np. rok)
+
+Scraper, nowe pakiety i ustawienia TMDB w chmurze są ukryte / zwracają 405 z krótką notką.
+
+### Jak przechowywane są edycje (Content DO)
+
+Static Assets są niemutowalne między deployami, więc zapisy idą do singletonowego Durable Object **Content** (SQLite, `idFromName("content")`):
+
+- niski koszt żądań (jeden obiekt, nie D1 — bez `wrangler d1 create`)
+- migracja `v2` w `wrangler.jsonc` tworzy klasę automatycznie przy deployu
+- skuteczne dane = baza ze Static Assets + nakładka (overlay); nowe pokoje ładują merge
+
+### Synchronizacja lokalnie ↔ chmura (bez utraty edycji)
+
+| Kierunek | Zachowanie |
+|---|---|
+| **Pobierz bazę** / `pull_from_cloudflare.py` | eksport `kadr-export-v1` już ze **scaloną** nakładką |
+| **Pełny deploy** | przed buildem: backup `quiz.db`, pobranie overlay, merge do lokalnej bazy (podsumowanie + konflikty), potem build+deploy; po sukcesie **czyszczenie overlay** (edycje są już w assetach) |
+| **`--code-only`** | bez ruszania assetów; binding CONTENT zostaje; safety check działa |
+| **Konflikty** | nowszy `updated_at` wygrywa; cytaty bez lokalnego timestampu → chmura + wpis w konfliktach |
+
+### Aktualizacja do wersji z edycją w chmurze (PowerShell)
+
+Jednorazowo (Content DO powstaje sam przy deployu — bez ręcznego D1):
+
+```powershell
+cd C:\sciezka\do\shot-
+git pull
+cd cloudflare
+npm install
+cd ..
+# jeśli na live jest stary Worker bez eksportu, najpierw sam kod:
+python deploy_cloudflare.py --code-only
+python pull_from_cloudflare.py --url https://shot-quiz.<twoje>.workers.dev
+python deploy_cloudflare.py --url https://shot-quiz.<twoje>.workers.dev
+# ADMIN_PASSWORD już ustawione? pomiń; inaczej:
+cd cloudflare; npx wrangler secret put ADMIN_PASSWORD; cd ..
+```
+
+Potem zwykłe aktualizacje: `git pull` → (opcjonalnie edycje w chmurze albo lokalnie) → `python deploy_cloudflare.py` (skrypt sam zmerguje nakładkę przed wysłaniem).
+
+Architektura (plan Free):
+- **Worker** `shot-quiz` — strony, API, admin z zapisem, geo PL/EN
+- **Durable Object `Room`** — pokój + WebSocket (jak wcześniej)
+- **Durable Object `Content`** — nakładka edycji (SQLite)
+- **Workers Static Assets** — kadry / plakaty / JSON pakietów z `quiz.db` → `cloudflare/build/` (poza gitem)
+
+Nie dotyka workera ani bazy `mozg` (osobna nazwa `shot-quiz`).
 
 ### Pierwsze wdrożenie (Windows, PowerShell)
 
@@ -223,7 +275,7 @@ Nie dotyka istniejącego workera ani bazy `mozg`, bo używa osobnej nazwy `shot-
    cd ..
    python deploy_cloudflare.py
    ```
-   Skrypt migruje `quiz.db` (jak zwykłe uruchomienie aplikacji), buduje `cloudflare\build\` i uruchamia `npx wrangler deploy`. Za pierwszym razem Cloudflare sam utworzy Durable Object, bo nie trzeba ręcznie zakładać żadnych zasobów. Jeśli wrangler zapyta o subdomenę `workers.dev`, wybierz dowolną.
+   Skrypt migruje `quiz.db` (jak zwykłe uruchomienie aplikacji), buduje `cloudflare\build\` i uruchamia `npx wrangler deploy`. Za pierwszym razem Cloudflare sam utworzy Durable Objecty Room i Content (migracje w wrangler.jsonc) — bez ręcznego zakładania D1 ani innych zasobów. Jeśli wrangler zapyta o subdomenę `workers.dev`, wybierz dowolną.
 5. Na końcu wyniku pojawi się adres, np. `https://shot-quiz.TWOJA-SUBDOMENA.workers.dev`. Znajdziesz go też w panelu Cloudflare: Workers & Pages → shot-quiz.
 6. Ustaw hasło do panelu `/admin` w chmurze (jednorazowo, wpisujesz je w konsoli i nie trafia do repo):
    ```powershell

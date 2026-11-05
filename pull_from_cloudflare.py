@@ -1,9 +1,8 @@
 """pull_from_cloudflare.py - odbudowuje lokalny quiz.db z danych Workera Cloudflare.
 
-Dane quizu w chmurze to Workers Static Assets (JSON pakietów + kadry + plakaty), nie D1.
-Aktualnie wdrożony Worker (commit 287a12b / 951a404) BLOKUJE /data/pack-*.json i nie ma
-endpointu eksportu - z samego tego wdrożenia NIE da się odbudować bazy. Najpierw trzeba
-wgrać sam kod Workera bez ruszania assetów:
+Eksport /api/admin/export zwraca Static Assets + nakładkę Content DO już SCALONĄ
+(format kadr-export-v1, pole overlay + packs po merge). Stary Worker bez eksportu:
+najpierw wgraj sam kod bez ruszania assetów:
 
   python deploy_cloudflare.py --code-only
 

@@ -1,7 +1,10 @@
-// index.js - Worker: strony (PL/EN wg kraju), API pokoi -> Durable Object, lekki panel admina tylko do odczytu.
-// Kadry, plakaty i dane pakietów to Workers Static Assets (katalog build/ z deploy_cloudflare.py).
+// index.js - Worker: strony (PL/EN), API pokoi -> Room DO, panel admina z zapisem do Content DO.
+// Kadry/plakaty/pakiety bazowe = Workers Static Assets. Edycje w chmurze = overlay w Content DO.
 import { errText } from "./i18n.js";
+import { handleAdmin, ApiError as AdminApiError, loadMergedPack, contentOp } from "./admin_api.js";
+import { contentStub } from "./content.js";
 export { Room } from "./room.js";
+export { Content } from "./content.js";
 
 const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const META = {
@@ -16,7 +19,6 @@ function cookie(req, name) {
   return m ? decodeURIComponent(m[1]) : null;
 }
 
-// język: wybór z przełącznika (ciasteczko) > kraj z Cloudflare (PL -> kadr*) > Accept-Language
 export function detectLang(req) {
   const c = cookie(req, "kadr_lang");
   if (c === "pl" || c === "en") return c;
@@ -37,19 +39,22 @@ async function asset(env, req, path) {
   return env.ASSETS.fetch(new Request(new URL(path, req.url), { headers: req.headers }));
 }
 
-async function page(env, req, file) {
+async function page(env, req, file, extraScript = "") {
   const lang = detectLang(req);
   const res = await env.ASSETS.fetch(new URL("/static/" + file, req.url));
   if (!res.ok) return res;
   let html = await res.text();
   for (const [k, v] of Object.entries(META[lang])) html = html.replaceAll(`{{${k}}}`, v);
   html = html.replace(/<html lang="(pl|en)"/, `<html lang="$1" data-geo="${geoLang(req)}"`);
+  if (extraScript) {
+    html = html.replace("</head>", `<script>${extraScript}</script></head>`);
+  }
   return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache", Vary: "Cookie" } });
 }
 
 async function body(req) {
   const t = await req.text();
-  if (t.length > 20000) throw new ApiError(413, "Za duże żądanie");
+  if (t.length > 2500000) throw new ApiError(413, "Za duże żądanie");
   try { return t ? JSON.parse(t) : {}; } catch { throw new ApiError(400, "Zły format danych"); }
 }
 
@@ -59,7 +64,6 @@ function newCode() {
   return [...b].map(x => ALPHABET[x % ALPHABET.length]).join("");
 }
 
-// ------------------------------------------------------------------ admin (tylko odczyt)
 async function hmac(secret, msg) {
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(msg));
@@ -85,49 +89,66 @@ async function adminApi(req, env, path) {
   }
   if (path === "/api/admin/logout" && req.method === "POST")
     return json({ ok: true }, 200, { "Set-Cookie": "kadr_admin=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0" });
-  if (!await isAdmin(req, env)) throw new ApiError(403, "Zaloguj się");
-  if (path === "/api/admin/me") return json({ ok: true, cloud: true });
-  if (path === "/api/admin/overview") return asset(env, req, "/data/meta.json").then(r => new Response(r.body, { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } }));
-  if (path === "/api/admin/export" && req.method === "GET") return exportDb(env, req);
-  throw new ApiError(405, "Panel w chmurze jest tylko do odczytu. Zmiany rób lokalnie i wyślij je skryptem deploy_cloudflare.py.");
+
+  if (path === "/api/admin/export" && req.method === "GET") {
+    if (!await isAdmin(req, env)) throw new ApiError(403, "Zaloguj się");
+    return exportDb(env, req);
+  }
+
+  const res = await handleAdmin(req, env, path, { isAdmin, body, detectLang });
+  if (res === null) return exportDb(env, req);
+  return res;
 }
 
-
-// Pełny eksport do odbudowy quiz.db lokalnie. Kadry i plakaty są osobnymi URL-ami (/frame, /poster).
 async function exportDb(env, req) {
   const packsRes = await asset(env, req, "/data/packs.json");
   const metaRes = await asset(env, req, "/data/meta.json");
   if (!packsRes.ok || !metaRes.ok) throw new ApiError(500, "Nie ma takiego adresu");
   const packsList = await packsRes.json();
   const meta = await metaRes.json();
+  const overlay = await contentOp(env, { op: "dump" });
   const packs = [];
   for (const p of packsList) {
-    const r = await asset(env, req, `/data/pack-${p.id}.json`);
-    if (!r.ok) throw new ApiError(500, "Nie ma takiego pakietu");
-    const data = await r.json();
+    const data = await loadMergedPack(env, req, p.id);
     packs.push({
       id: data.pack.id, slug: data.pack.slug, name: data.pack.name, name_en: data.pack.name_en,
       description: data.pack.description, description_en: data.pack.description_en, color: data.pack.color,
       cover_frame_id: (p.thumbs && p.thumbs[0]) || null, modes: p.modes || [],
+      modes_off: data.modes_off,
       questions: data.pack.questions || [], movies: data.movies || [],
     });
   }
   return json({
     format: "kadr-export-v1",
     built: meta.built, frames: meta.frames, posters: meta.posters, bytes: meta.bytes,
-    note: "Cloud holds at most 3 gameplay frames per film (hard/medium/easy). Scrape history, trailer URLs, picks and extra frames are not in the cloud copy.",
+    note: "Merged export: static assets + Content Durable Object overlay. Cloud holds at most 3 gameplay frames per film.",
+    overlay_stats: await contentOp(env, { op: "stats" }),
+    overlay,
     packs,
   });
 }
 
-// ------------------------------------------------------------------ gra
 async function gameApi(req, env, path, url) {
-  if (req.method === "GET" && path === "/api/packs") return asset(env, req, "/data/packs.json").then(r => new Response(r.body, { headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" } }));
+  if (req.method === "GET" && path === "/api/packs") {
+    const packsList = await (await asset(env, req, "/data/packs.json")).json();
+    // apply modes_off from overlay so lobby hides disabled modes
+    const out = [];
+    for (const p of packsList) {
+      const offCsv = (await contentOp(env, { op: "getModesOff", pack_id: p.id })).modes_off;
+      if (offCsv == null) { out.push(p); continue; }
+      const off = new Set(String(offCsv).split(",").filter(Boolean));
+      out.push({ ...p, modes: (p.modes || []).filter(k => !off.has(k)) });
+    }
+    return json(out);
+  }
   let m = path.match(/^\/api\/packs\/(\d+)\/titles$/);
   if (m) {
-    const r = await asset(env, req, `/data/titles-${m[1]}-${detectLang(req)}.json`);
-    if (!r.ok) throw new ApiError(404, "Nie ma takiego pakietu");
-    return new Response(r.body, { headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" } });
+    // titles with overlay pl_title
+    const data = await loadMergedPack(env, req, +m[1]);
+    const lang = detectLang(req);
+    const t = new Set(data.movies.map(x => x.title));
+    if (lang === "pl") for (const mv of data.movies) if (mv.pl_title) t.add(mv.pl_title);
+    return json([...t].sort((a, b) => a.localeCompare(b, lang)));
   }
   if (req.method === "POST" && path === "/api/rooms") {
     const d = await body(req);
@@ -164,14 +185,25 @@ export default {
     const lang = detectLang(req);
     try {
       if (req.method === "GET" && (path === "/" || /^\/r\/[A-Za-z0-9]{4}$/.test(path))) return page(env, req, "index.html");
-      if (req.method === "GET" && path === "/admin") return page(env, req, "cloud-admin.html");
-      if (path.startsWith("/data/") || path === "/static/index.html" || path === "/static/cloud-admin.html") throw new ApiError(404, "Nie ma takiej strony");
+      if (req.method === "GET" && path === "/admin")
+        return page(env, req, "admin.html", 'window.KADR_CLOUD=true;window.KADR_RT="ws";');
+      // overlay poster takes precedence
+      let pm = path.match(/^\/poster\/(\d+)\.jpg$/);
+      if (req.method === "GET" && pm) {
+        const stub = contentStub(env);
+        const r = await stub.fetch(new Request(`https://content/poster?id=${pm[1]}`));
+        if (r.ok) return r;
+        return env.ASSETS.fetch(req);
+      }
+      if (path.startsWith("/data/") || path === "/static/index.html" || path === "/static/admin.html" || path === "/static/cloud-admin.html")
+        throw new ApiError(404, "Nie ma takiej strony");
       if (path.startsWith("/api/admin")) return await adminApi(req, env, path);
       if (path.startsWith("/api/")) return await gameApi(req, env, path, url);
       return env.ASSETS.fetch(req);
     } catch (e) {
       const key = e.key || e.message || "Nie ma takiego adresu";
-      const code = e.code || (/Nie ma pokoju|Nie ma takiego pakietu/.test(key) ? 404 : /pełny|gotowych/.test(key) ? 400 : 500);
+      const code = e.code || (/Nie ma pokoju|Nie ma takiego pakietu|Nie ma filmu|Nie ma cytatu|Nie ma pytania/.test(key) ? 404
+        : /pełny|gotowych|Zły|Podaj|Za duże|Scraper|Pobieranie|W chmurze/.test(key) ? 400 : 500);
       if (code === 500) console.error(JSON.stringify({ msg: "worker error", error: String(e && e.stack || e) }));
       return json({ error: errText(key, lang), key }, code);
     }

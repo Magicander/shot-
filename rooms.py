@@ -138,9 +138,9 @@ def load_pack(con, pack_id):
     posters = {r[0] for r in con.execute(
         "SELECT p.movie_id FROM posters p JOIN movies m ON m.id=p.movie_id WHERE m.pack_id=?", (pack_id,))}
     quotes = {}
-    for q in con.execute("SELECT q.movie_id, q.text, q.lang FROM quotes q JOIN movies m ON m.id=q.movie_id "
+    for q in con.execute("SELECT q.id, q.movie_id, q.text, q.lang FROM quotes q JOIN movies m ON m.id=q.movie_id "
                          "WHERE m.pack_id=? ORDER BY q.id", (pack_id,)):
-        quotes.setdefault(q["movie_id"], []).append({"text": q["text"], "lang": q["lang"] or ""})
+        quotes.setdefault(q["movie_id"], []).append({"id": q["id"], "text": q["text"], "lang": q["lang"] or ""})
     for m in con.execute("SELECT * FROM movies WHERE pack_id=? ORDER BY id", (pack_id,)).fetchall():
         fr = db.game_frames(con, m["id"]) if m["status"] == "ok" else None
         try:

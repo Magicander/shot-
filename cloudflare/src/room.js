@@ -63,7 +63,24 @@ export class Room extends DurableObject {
     if (this.room) return { error: "exists" };
     const res = await this.env.ASSETS.fetch(`https://assets.local/data/pack-${packId}.json`);
     if (!res.ok) throw new GameError(404, "Nie ma takiego pakietu");
-    const data = await res.json();
+    let data = await res.json();
+    // nałóż edycje z Content DO (cytaty, pytania, tytuły PL, obsada, plakaty, modes_off)
+    try {
+      const stub = this.env.CONTENT.get(this.env.CONTENT.idFromName("content"));
+      const mr = await stub.fetch(new Request("https://content/op", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ op: "mergePack", data }),
+      }));
+      if (mr.ok) {
+        const merged = await mr.json();
+        data = { pack: merged.pack, movies: merged.movies, avail: merged.avail || data.avail };
+        if (merged.modes_off != null) {
+          const off = new Set(String(merged.modes_off).split(",").filter(Boolean));
+          // availability stays; host configure() still filters modes
+          data._modes_off = [...off];
+        }
+      }
+    } catch (e) { console.error("content merge failed", String(e)); }
     if (!Object.values(data.avail).some(v => v.ok)) throw new GameError(400, "Ten pakiet nie ma jeszcze gotowych filmów");
     this.movies = data.movies;
     this.room = newRoom(code, data, rounds);

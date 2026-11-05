@@ -1,9 +1,12 @@
 """deploy_cloudflare.py - wysyła lokalny quiz (quiz.db + kadry + plakaty) na Cloudflare.
 
-Synchronizacja jest jednokierunkowa: lokalne "studio" (app.py, scraper) -> chmura.
-Skrypt czyta quiz.db, buduje cloudflare/build/ (Workers Static Assets: kadry, plakaty,
-dane pakietów w JSON) i uruchamia `npx wrangler deploy`. Niczego nie zapisuje w quiz.db
-poza zwykłymi automatycznymi migracjami schematu.
+Synchronizacja dwukierunkowa treści edytowalnych:
+  1) przed pełnym deployem: pobiera nakładkę Content DO z chmury i scala ją do lokalnego quiz.db
+     (backup + reguła newest updated_at wins),
+  2) buduje Static Assets z (już scalonego) quiz.db i wdraża,
+  3) po udanym deployu czyści nakładkę w chmurze (edycje są już w bazie assetów).
+
+Scraper / kadry YouTube nadal tylko lokalnie. --code-only nie rusza assetów ani nakładki.
 
   python deploy_cloudflare.py              # zbuduj i wdroż
   python deploy_cloudflare.py --build-only # tylko zbuduj cloudflare/build/
@@ -51,9 +54,14 @@ def build(db_path: Path) -> dict:
     (BUILD / "frame").mkdir(parents=True)
     (BUILD / "poster").mkdir()
     (BUILD / "data").mkdir()
-    shutil.copytree(BASE / "static", BUILD / "static", ignore=shutil.ignore_patterns("admin.js", "admin.html", "admin.css"))
-    shutil.copy(CF / "public" / "cloud-admin.html", BUILD / "static" / "cloud-admin.html")
-    (BUILD / "static" / "rt.js").write_text('"use strict";\nwindow.KADR_RT = "ws";\n', encoding="utf-8")
+    # Pełny panel admina (ten sam UI co lokalnie); Worker wstrzykuje window.KADR_CLOUD=true
+    shutil.copytree(BASE / "static", BUILD / "static")
+    (BUILD / "static" / "rt.js").write_text(
+        '"use strict";\nwindow.KADR_RT = "ws";\n', encoding="utf-8")
+    # stary bookmark /static/cloud-admin.html -> redirect do /admin
+    (BUILD / "static" / "cloud-admin.html").write_text(
+        "<!doctype html><meta http-equiv=refresh content='0;url=/admin'><title>admin</title>",
+        encoding="utf-8")
 
     frame_ids, poster_ids, packs_out, meta_packs = set(), set(), [], []
     for p in con.execute("SELECT * FROM packs ORDER BY sort, id").fetchall():
@@ -335,8 +343,9 @@ def deploy_code_only():
         "bindings": [
             {"name": "ASSETS", "type": "assets"},
             {"name": "ROOMS", "type": "durable_object_namespace", "class_name": "Room"},
+            {"name": "CONTENT", "type": "durable_object_namespace", "class_name": "Content"},
         ],
-        "annotations": {"workers/message": "code-only keep_assets (export endpoint)"},
+        "annotations": {"workers/message": "code-only keep_assets + Content DO"},
     }
     boundary = "----kadrCodeOnly" + str(int(time.time()))
     parts = []
@@ -371,6 +380,93 @@ def deploy_code_only():
 
 
 
+def fetch_overlay(url: str, password: str | None = None) -> dict | None:
+    """Pobierz /api/admin/overlay (wymaga ADMIN_PASSWORD)."""
+    import http.cookiejar
+    url = url.rstrip("/")
+    jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+    pw = password or os.environ.get("ADMIN_PASSWORD") or os.environ.get("KADR_ADMIN_PASSWORD")
+    if not pw:
+        try:
+            import getpass
+            pw = getpass.getpass("Hasło /admin (pobranie nakładki): ")
+        except Exception:
+            pw = ""
+    if not pw:
+        print("Brak hasła - pomijam merge nakładki z chmury.")
+        return None
+    def req(method, path, body=None):
+        data = None if body is None else json.dumps(body).encode()
+        r = urllib.request.Request(
+            url + path, data=data, method=method,
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+        )
+        with opener.open(r, timeout=60) as res:
+            return json.loads(res.read().decode() or "null")
+    try:
+        req("POST", "/api/admin/login", {"password": pw})
+        return req("GET", "/api/admin/overlay")
+    except Exception as e:
+        print(f"Nie udało się pobrać nakładki: {e}")
+        return None
+
+
+def clear_overlay(url: str, password: str | None = None) -> bool:
+    import http.cookiejar
+    url = url.rstrip("/")
+    jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+    pw = password or os.environ.get("ADMIN_PASSWORD") or os.environ.get("KADR_ADMIN_PASSWORD")
+    if not pw:
+        return False
+    def req(method, path, body=None):
+        data = None if body is None else json.dumps(body).encode()
+        r = urllib.request.Request(
+            url + path, data=data, method=method,
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+        )
+        with opener.open(r, timeout=60) as res:
+            return json.loads(res.read().decode() or "null")
+    try:
+        req("POST", "/api/admin/login", {"password": pw})
+        req("DELETE", "/api/admin/overlay")
+        print("Nakładka Content DO wyczyszczona (edycje są już w Static Assets).")
+        return True
+    except Exception as e:
+        print(f"Nie udało się wyczyścić nakładki: {e}")
+        return False
+
+
+def merge_cloud_edits_into_local(db_path: Path, url: str | None, force: bool) -> None:
+    """Przed pełnym deployem: scal nakładkę z chmury do quiz.db (backup + summary)."""
+    if not url:
+        print("Brak --url: pomijam automatyczny merge nakładki. "
+              "Jeśli edytowałeś w /admin w chmurze, podaj --url albo zrób pull.")
+        return
+    ov = fetch_overlay(url)
+    if ov is None:
+        return
+    stats = {k: len(ov.get(k) or []) for k in ("movies", "quotes", "questions", "packs", "posters")}
+    if not any(stats.values()):
+        print("Nakładka w chmurze pusta - nic do scalenia.")
+        return
+    print(f"Nakładka z chmury: {stats}")
+    sys.path.insert(0, str(BASE))
+    import db
+    import cloud_sync
+    bak = cloud_sync.backup_db(db_path)
+    print(f"Backup quiz.db -> {bak.name}")
+    con = db.init_db(db_path, seed=False)
+    try:
+        summary = cloud_sync.merge_overlay(con, ov)
+        con.commit()
+        cloud_sync.print_summary(summary)
+    finally:
+        con.close()
+
+
+
 def main():
     ap = argparse.ArgumentParser(description="Wdrożenie kadr*/shot* na Cloudflare (Workers + Durable Objects + Static Assets)")
     ap.add_argument("--db", default=os.environ.get("QUIZ_DB") or str(BASE / "quiz.db"))
@@ -389,6 +485,10 @@ def main():
             sys.exit("Najpierw: cd cloudflare; npm install")
         sys.exit(deploy_code_only())
 
+    if not a.build_only and not a.dev:
+        # pełny deploy: najpierw ściągnij edycje z chmury do lokalnego quiz.db
+        merge_cloud_edits_into_local(db_path, a.url, a.force)
+
     meta = build(db_path)
     if a.build_only:
         return
@@ -402,6 +502,11 @@ def main():
     if code == 0:
         print("\nGotowe. Adres *.workers.dev jest wyżej w wyniku wrangler deploy.")
         print("Hasło do /admin (jednorazowo): cd cloudflare; npx wrangler secret put ADMIN_PASSWORD")
+        if a.url:
+            clear_overlay(a.url)
+        else:
+            print("Podaj --url przy następnym deployu, żeby automatycznie czyścić nakładkę po wdrożeniu.")
+            print("Albo: zaloguj się w /admin i DELETE /api/admin/overlay (albo poczekaj - nakładka jest idempotentna).")
     sys.exit(code)
 
 
