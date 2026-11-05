@@ -150,6 +150,44 @@ python3 test_game.py            # na kopii quiz.db: migracje, wklejanie PL, atra
 python3 test_editors.py         # na kopii quiz.db: scraper IMDb/Filmweb na atrapie (blokady, fallback), edytory, licytacja z pytaniem
 ```
 
+## Odzyskiwanie quiz.db z Cloudflare
+
+Dane w chmurze to Static Assets (JSON + kadry + plakaty), nie osobna baza D1. Worker blokuje publiczny dostęp do `/data/pack-*.json`. Cloudflare API też **nie pozwala pobrać** wdrożonych assetów (upload jest tylko do zapisu).
+
+**Pułapka (chicken-egg):** przycisk **Pobierz bazę** i `GET /api/admin/export` istnieją dopiero po wdrożeniu nowego kodu. Zwykłe `python deploy_cloudflare.py` buduje assety z lokalnej `quiz.db` i **nadpisze** nowsze dane na Cloudflare. Dlatego najpierw wgrywamy **tylko kod** (`--code-only`, `keep_assets=true`), potem ściągamy dane, dopiero potem pełny deploy.
+
+Aktualnie wdrożony Worker (ok. `951a404` / `287a12b`) **nie ma** eksportu — sam `pull_from_cloudflare.py` przeciwko niemu zakończy się komunikatem z instrukcją `--code-only`.
+
+### PowerShell (kolejność!)
+
+```powershell
+cd C:\sciezka\do\shot-
+git pull
+cd cloudflare
+npm install
+cd ..
+# 1) TYLKO kod Workera — assety (filmy/kadry) na live ZOSTAJĄ
+python deploy_cloudflare.py --code-only
+# 2) ściągnij dane z chmury do lokalnego quiz.db (stary plik -> quiz-backup-YYYYMMDD-HHMM.db)
+python pull_from_cloudflare.py --url https://shot-quiz.<twoje>.workers.dev
+# hasło admina = to samo co wrangler secret ADMIN_PASSWORD
+python test_game.py
+# 3) dopiero teraz pełny deploy (po lokalnych zmianach); --url porównuje liczby z live
+python deploy_cloudflare.py --url https://shot-quiz.<twoje>.workers.dev
+```
+
+Albo po `--code-only` wejdź na `/admin`, kliknij **pobierz bazę** / **download database**, potem:
+
+```powershell
+python pull_from_cloudflare.py --from-file kadr-export.json --url https://shot-quiz.<twoje>.workers.dev
+```
+
+(`--url` jest potrzebne do ściągnięcia `/frame` i `/poster`.)
+
+Przed pełnym deployem skrypt ostrzega, gdy lokalna baza ma mniej filmów/cytatów/pytań niż live (`--force` pomija pytanie).
+
+**Czego nie da się odzyskać z chmury:** tylko 3 kadry na film (hard/medium/easy); reszta kadrów ze scrapingu, historia yt/trailer (`yt_url`, `video_id`, `tried_ids`, query/status), ręczne `modes_off` admina.
+
 ## Wdrożenie na Cloudflare
 
 Wersja w chmurze służy do grania ze znajomymi przez internet. Scraping i edycja zostają w lokalnym studiu (`python app.py`), a do chmury wysyłasz gotowe dane jednym poleceniem. Synchronizacja działa w jedną stronę (lokalnie → Cloudflare). Każde wysłanie zastępuje dane w chmurze, a panel `/admin` w chmurze jest tylko do odczytu.

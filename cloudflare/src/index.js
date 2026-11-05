@@ -88,7 +88,36 @@ async function adminApi(req, env, path) {
   if (!await isAdmin(req, env)) throw new ApiError(403, "Zaloguj się");
   if (path === "/api/admin/me") return json({ ok: true, cloud: true });
   if (path === "/api/admin/overview") return asset(env, req, "/data/meta.json").then(r => new Response(r.body, { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } }));
+  if (path === "/api/admin/export" && req.method === "GET") return exportDb(env, req);
   throw new ApiError(405, "Panel w chmurze jest tylko do odczytu. Zmiany rób lokalnie i wyślij je skryptem deploy_cloudflare.py.");
+}
+
+
+// Pełny eksport do odbudowy quiz.db lokalnie. Kadry i plakaty są osobnymi URL-ami (/frame, /poster).
+async function exportDb(env, req) {
+  const packsRes = await asset(env, req, "/data/packs.json");
+  const metaRes = await asset(env, req, "/data/meta.json");
+  if (!packsRes.ok || !metaRes.ok) throw new ApiError(500, "Nie ma takiego adresu");
+  const packsList = await packsRes.json();
+  const meta = await metaRes.json();
+  const packs = [];
+  for (const p of packsList) {
+    const r = await asset(env, req, `/data/pack-${p.id}.json`);
+    if (!r.ok) throw new ApiError(500, "Nie ma takiego pakietu");
+    const data = await r.json();
+    packs.push({
+      id: data.pack.id, slug: data.pack.slug, name: data.pack.name, name_en: data.pack.name_en,
+      description: data.pack.description, description_en: data.pack.description_en, color: data.pack.color,
+      cover_frame_id: (p.thumbs && p.thumbs[0]) || null, modes: p.modes || [],
+      questions: data.pack.questions || [], movies: data.movies || [],
+    });
+  }
+  return json({
+    format: "kadr-export-v1",
+    built: meta.built, frames: meta.frames, posters: meta.posters, bytes: meta.bytes,
+    note: "Cloud holds at most 3 gameplay frames per film (hard/medium/easy). Scrape history, trailer URLs, picks and extra frames are not in the cloud copy.",
+    packs,
+  });
 }
 
 // ------------------------------------------------------------------ gra

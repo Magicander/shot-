@@ -37,7 +37,7 @@ table.ct th,table.ct td{padding:9px 10px;text-align:left;border-bottom:1px solid
 <div id="app" class="cwrap hidden">
   <div class="top">
     <div class="logo" style="font-size:40px">{{BRAND}}<span class="ast">*</span> <span class="muted" style="font-size:18px" data-k="cloud"></span></div>
-    <div><a href="#" class="sw pill">PL / EN</a> <a href="/" class="pill" data-k="play"></a> <button class="pill" id="out" data-k="logout"></button></div>
+    <div><a href="#" class="sw pill">PL / EN</a> <a href="/" class="pill" data-k="play"></a> <button class="pill orange" id="dl" data-k="download"></button> <button class="pill" id="out" data-k="logout"></button></div>
   </div>
   <div class="note" id="note"></div>
   <div class="stats" id="stats"></div>
@@ -48,14 +48,14 @@ table.ct th,table.ct td{padding:9px 10px;text-align:left;border-bottom:1px solid
 (function () {
   const L = (document.cookie.match(/(?:^|;\s*)kadr_lang=(pl|en)/) || [])[1] || document.documentElement.lang || "en";
   const D = {
-    pl: {intro: "Panel admina (chmura, tylko odczyt). Wpisz hasło.", enter: "wejdź", cloud: "chmura", play: "graj", logout: "wyloguj",
+    pl: {intro: "Panel admina (chmura, tylko odczyt). Wpisz hasło.", enter: "wejdź", cloud: "chmura", play: "graj", logout: "wyloguj", download: "pobierz bazę",
       ph: "hasło", bad: "Złe hasło",
-      note: "To jest wersja w chmurze, <b>tylko do odczytu</b>. Synchronizacja działa w jedną stronę: lokalne studio (scraping, edycja pakietów w <code>python app.py</code>) &rarr; Cloudflare. Zmiany wprowadzasz lokalnie, a potem wysyłasz je poleceniem <code>python deploy_cloudflare.py</code>. Każde wysłanie zastępuje dane w chmurze.",
+      note: "To jest wersja w chmurze, <b>tylko do odczytu</b>. Synchronizacja działa w jedną stronę: lokalne studio (scraping, edycja pakietów w <code>python app.py</code>) &rarr; Cloudflare. Zmiany wprowadzasz lokalnie, a potem wysyłasz je poleceniem <code>python deploy_cloudflare.py</code>. Każde wysłanie zastępuje dane w chmurze. Przycisk <b>pobierz bazę</b> ściąga JSON do odbudowy <code>quiz.db</code> skryptem <code>python pull_from_cloudflare.py --from-file</code> (w chmurze są tylko 3 kadry na film).",
       built: "ostatnia synchronizacja", frames: "kadry", posters: "plakaty", files: "pliki (limit 20 000)", mb: "MB obrazów",
       pack: "pakiet", movies: "filmy", framed: "z kadrami", cast: "z obsadą", quotes: "cytaty", questions: "pytania", modes: "tryby"},
-    en: {intro: "Admin panel (cloud, read-only). Enter the password.", enter: "enter", cloud: "cloud", play: "play", logout: "log out",
+    en: {intro: "Admin panel (cloud, read-only). Enter the password.", enter: "enter", cloud: "cloud", play: "play", logout: "log out", download: "download database",
       ph: "password", bad: "Wrong password",
-      note: "This is the cloud copy and it is <b>read-only</b>. Sync is one-way: the local studio (scraping and pack editing in <code>python app.py</code>) &rarr; Cloudflare. Make changes locally, then push them with <code>python deploy_cloudflare.py</code>. Every push replaces the cloud data.",
+      note: "This is the cloud copy and it is <b>read-only</b>. Sync is one-way: the local studio (scraping and pack editing in <code>python app.py</code>) &rarr; Cloudflare. Make changes locally, then push them with <code>python deploy_cloudflare.py</code>. Every push replaces the cloud data. <b>Download database</b> fetches JSON you can rebuild into <code>quiz.db</code> with <code>python pull_from_cloudflare.py --from-file</code> (the cloud keeps only 3 frames per film).",
       built: "last sync", frames: "frames", posters: "posters", files: "files (limit 20,000)", mb: "MB of images",
       pack: "pack", movies: "movies", framed: "with frames", cast: "with cast", quotes: "quotes", questions: "questions", modes: "modes"}
   }[L];
@@ -82,6 +82,20 @@ table.ct th,table.ct td{padding:9px 10px;text-align:left;border-bottom:1px solid
   $("#lf").onsubmit = async e => { e.preventDefault();
     const r = await fetch("/api/admin/login", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({password: $("#pw").value})});
     if (r.ok) show(); else $("#lerr").textContent = r.status === 403 ? D.bad : (await r.json()).error; };
+
+  $("#dl").onclick = async () => {
+    $("#dl").disabled = true;
+    try {
+      const r = await fetch("/api/admin/export");
+      if (!r.ok) { alert((await r.json()).error || r.status); return; }
+      const blob = await r.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "kadr-export.json";
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } finally { $("#dl").disabled = false; }
+  };
   $("#out").onclick = async () => { await fetch("/api/admin/logout", {method: "POST"}); location.reload(); };
   show();
 })();

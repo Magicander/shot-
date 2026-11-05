@@ -123,9 +123,14 @@ def main():
     tl = Client(base).req("GET", f"/api/packs/{pid}/titles")
     check(any("Polski Test Jeden" in json.dumps(tl, ensure_ascii=False) for _ in [0]), "autouzupełnianie PL zawiera polski tytuł")
 
-    # --- bez klucza: plakat/aktorzy niedostępne
+    # --- bez klucza TMDB: endpoint tmdb = 400; plakat zależy od lokalnych plakatów
     md = adm.req("GET", f"/api/admin/packs/{pid}/modes")
-    check(md["avail"]["plakat"]["reason"] in ("tmdb_key", "posters") and not md["avail"]["plakat"]["ok"], "Plakat niedostępny bez danych")
+    n_posters = sum(1 for m in movies if m.get("poster"))
+    if n_posters >= 3:
+        check(md["avail"]["plakat"]["ok"], "Plakat dostępny z lokalnych plakatów")
+    else:
+        check((md["avail"]["plakat"]["reason"] in ("tmdb_key", "posters")) and not md["avail"]["plakat"]["ok"],
+              "Plakat niedostępny bez danych")
     check(adm.req("POST", f"/api/admin/packs/{pid}/tmdb", {}, ok=False).get("_code") == 400, "TMDB bez klucza -> 400")
 
     # --- atrapa TMDB: klucz, pobranie plakatów i obsady
@@ -202,12 +207,23 @@ def main():
             b.req("POST", f"/api/rooms/{code}/guess", {**B, "pass": True})
             st_ = a.req("GET", f"/api/rooms/{code}?pid={A['pid']}&token={A['token']}")
             check(t["bidder"] == A["pid"] and t["bid"] == 2 and st_["sub"] == "type" and st_["duration"] == 30, "licytację wygrywa Ala, 30 s na odpowiedź")
-            first = ok_movies[0]
-            r1 = a.req("POST", f"/api/rooms/{code}/guess", {**A, "text": first["title"]})
-            dup = a.req("POST", f"/api/rooms/{code}/guess", {**A, "text": first["title"]})
-            check(r1.get("correct") and dup.get("duplicate"), "licytacja: tytuł zaliczony, powtórka odrzucona")
-            other = next(m for m in movies if m["id"] != first["id"])
-            a.req("POST", f"/api/rooms/{code}/guess", {**A, "text": other["title"]})
+            # klasyczna licytacja = tytuły filmów; z własnymi pytaniami = odpowiedzi z listy
+            q = t.get("q") or {}
+            answers = q.get("answers") or []
+            if answers:
+                a1 = answers[0]["text"] if isinstance(answers[0], dict) else str(answers[0])
+                a2 = answers[1]["text"] if len(answers) > 1 else a1 + " X"
+                r1 = a.req("POST", f"/api/rooms/{code}/guess", {**A, "text": a1})
+                dup = a.req("POST", f"/api/rooms/{code}/guess", {**A, "text": a1})
+                check(r1.get("correct") and dup.get("duplicate"), "licytacja: tytuł zaliczony, powtórka odrzucona")
+                a.req("POST", f"/api/rooms/{code}/guess", {**A, "text": a2})
+            else:
+                first = ok_movies[0]
+                r1 = a.req("POST", f"/api/rooms/{code}/guess", {**A, "text": first["title"]})
+                dup = a.req("POST", f"/api/rooms/{code}/guess", {**A, "text": first["title"]})
+                check(r1.get("correct") and dup.get("duplicate"), "licytacja: tytuł zaliczony, powtórka odrzucona")
+                other = next(m for m in movies if m["id"] != first["id"])
+                a.req("POST", f"/api/rooms/{code}/guess", {**A, "text": other["title"]})
         if room.phase == "round":
             a.req("POST", f"/api/rooms/{code}/next", A)
         sr = a.req("GET", f"/api/rooms/{code}?pid={A['pid']}&token={A['token']}")
