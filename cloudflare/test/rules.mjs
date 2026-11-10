@@ -1,7 +1,7 @@
 // Testy zasad portu (bez wranglera): node cloudflare/test/rules.mjs - te same scenariusze co test_rules.py
 import { readFileSync } from "node:fs";
-import { Game, newRoom, normSettings, JUDGE_GRACE, LIC_DONE_DELAY, topScore, topAssign, availability, mergePackData, MODES } from "../src/game.js";
-import { mostScore, pathMovies, pickPairFromGraph, localGraph } from "../src/most.js";
+import { Game, newRoom, normSettings, JUDGE_GRACE, LIC_DONE_DELAY, LIC_BID_CAP, licTotal, topScore, topAssign, availability, mergePackData, MODES } from "../src/game.js";
+import { mostScore, pathMovies, pickPairFromGraph, localGraph, pickFilmrunPair, poolPeople } from "../src/most.js";
 
 const FX = JSON.parse(readFileSync(new URL("./fixture.json", import.meta.url)));
 let T = 1000;
@@ -219,6 +219,24 @@ console.log("Filmrun: lobby bez czasu, Start/Stop");
   const js = readFileSync(new URL("../../static/game.js", import.meta.url), "utf8");
   check(js.includes("qmark") && js.includes("isCustom"), "karta Custom ma znak zapytania, nie kolaż kadrów");
   check(js.includes("titleHints") && js.includes("titleMatches"), "podpowiedzi tytułów jak we Framed");
+  check(js.includes("filmrun-home") && js.includes("filmrun-box"), "Filmrun ma osobny box na stronie głównej");
+  check(!js.includes("renderMostEntry(box)"), "Filmrun nie jest doklejany do siatki pakietów");
+  const css = readFileSync(new URL("../../static/style.css", import.meta.url), "utf8");
+  const cssn = css.replace(/\s+/g, "");
+  check(cssn.includes("grid-template-columns:autominmax(0,1fr)auto"), "wyniki: siatka zostawia miejsce na punkty");
+  check(css.includes("toplist li::before") && css.includes("content:none"), "Top: bez podwójnych numerów");
+  check(cssn.includes(".stage.textstage.lvl{position:static"), "nagłówek rundy w textstage nie nachodzi na pytanie");
+  check(cssn.includes(".stage:not(.textstage)img{"), "kadry: pełny kadr nie psuje zdjęć w Filmrun/textstage");
+  check(cssn.includes("flex-wrap:nowrap") && css.includes(".fr-pair{"), "Filmrun: para aktorów w jednym rzędzie na pulpicie");
+  const pool = poolPeople();
+  check(pool.length >= 100 && pool.length <= 160, `pula Filmrun ma 100–150 aktorów (jest ${pool.length})`);
+  const pair = await pickFilmrunPair([], null, "pl", () => 0.1);
+  check(pair.start.name && pair.start.name !== pair.goal.name, "pula CF: para to dwie różne osoby");
+  check(String(pair.start.imdb_id).startsWith("nm") && Number(pair.start.filmweb_id) > 0, "pula CF: prawdziwe ID");
+  check(pair.start.photo.includes("/static/filmrun/photos/") && !(pair.start.link.url.includes("search") || pair.start.link.url.includes("find/?")),
+    "pula CF: zdjęcie z assetów i profil, nie wyszukiwarka");
+  check(licTotal({ answers: [] }) === LIC_BID_CAP, "licytacja bez listy: pułap deklaracji");
+  check(licTotal({ answers: [{}, {}] }) === 2, "licytacja z listą: pułap to liczba odpowiedzi");
 }
 
 console.log(`\nOK: ${OK} sprawdzeń`);

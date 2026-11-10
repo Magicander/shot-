@@ -68,9 +68,9 @@ Nowe kolumny i tabele (polski tytuł, aliasy, obsada, plakaty ze źródłem, cyt
 
 Gospodarz wybiera pakiet (albo **Custom** — zawsze ostatni na liście, nie jest wierszem w tabeli pakietów; na karcie jest duży znak zapytania zamiast kolażu kadrów), a w poczekalni zaznacza tryby i liczbę rund. Przy Custom najpierw zaznacza, które istniejące pakiety złożyć w jedną pulę (np. Marvel + Akcja); filmy, pytania, obsada i kadry to suma wybranych pakietów, bez duplikatów tytułu i roku (zostaje bogatsza wersja). Filmy losowane są z tej puli, rundy przeplatają zaznaczone tryby, punkty sumują się w jednym rankingu.
 
-Pod listą pakietów, jako karta w tym samym stylu co kadr*/shot*, jest osobna gra **Filmrun** (podtytuł: „Wikipedia run, ale o filmach” / EN: „Wikipedia run, but for movies”). To nie jest zwykły pakiet. W lobby ustawiasz tylko liczbę rund i czytasz zasady — nie ma wyboru czasu ani sposobu odpowiedzi. W rundzie gracze dostają dwóch znanych aktorów ze zdjęciami. **Start** otwiera profil pierwszego (Filmweb po polsku, IMDb po angielsku). Bez limitu czasu szukacie drugiego aktora na tamtej zewnętrznej stronie, chodząc po filmach i obsadzie. Kto pierwszy wróci na kadr*/shot* i wciśnie **Stop**, wygrywa rundę (1000 pkt, razy mnożnik finału jeśli jest). Potem nowa para, aż do ustawionej liczby rund.
+Pod listą pakietów (jako osobny box, nie karta w siatce pakietów) jest specjalna gra **Filmrun** (podtytuł: „Wikipedia run, ale o filmach” / EN: „Wikipedia run, but for movies”). To nie jest zwykły pakiet. W lobby ustawiasz tylko liczbę rund i czytasz zasady — nie ma wyboru czasu ani sposobu odpowiedzi. W rundzie gracze dostają dwóch znanych aktorów ze zdjęciami. **Start** otwiera profil pierwszego (Filmweb po polsku, IMDb po angielsku). Bez limitu czasu szukacie drugiego aktora na tamtej zewnętrznej stronie, chodząc po filmach i obsadzie. Kto pierwszy wróci na kadr*/shot* i wciśnie **Stop**, wygrywa rundę (1000 pkt, razy mnożnik finału jeśli jest). Potem nowa para, aż do ustawionej liczby rund.
 
-Przeglądarka nie pozwala stronie śledzić kliknięć na imdb.com ani filmweb.pl (same-origin, bez iframe). Nie ma rozszerzenia i nie ma podglądu ścieżki z IMDb/Filmwebu — ruchy tam są poza naszą stroną, a wygrywa ten, kto pierwszy wróci i wciśnie Stop. Pary dobieramy spośród znanych aktorów z prawdziwym linkiem do profilu (nie wyszukiwarką, jeśli jest ID) i zapisanym zdjęciem. Przy kluczu TMDB (`config.local.json` albo, na Cloudflare, `npx wrangler secret put TMDB_API_KEY`) bierzemy popularnych ludzi z `imdb_id` i, po polsku, ID Filmwebu. Bez klucza nie losujemy par bez zdjęcia i bez działającego linku — start kończy się jasnym komunikatem, jeśli w lokalnej obsadzie nie ma dość takich osób.
+Przeglądarka nie pozwala stronie śledzić kliknięć na imdb.com ani filmweb.pl (same-origin, bez iframe). Nie ma rozszerzenia i nie ma podglądu ścieżki z IMDb/Filmwebu — ruchy tam są poza naszą stroną, a wygrywa ten, kto pierwszy wróci i wciśnie Stop. Pary biorą się z wbudowanej puli ok. 100–150 powszechnie rozpoznawalnych aktorów (A-lista i ikony kina, nie epizodyści z lokalnej obsady). Każdy ma prawdziwe ID IMDb i Filmweb oraz zdjęcie w `static/filmrun/photos/` (poza `quiz.db`). Gra startuje bez klucza TMDB. ID pochodzą z Wikidanych (właściwości P345 i P5033) i w razie potrzeby z API Filmwebu; zdjęcia z Wikimedia Commons albo z Filmwebu. Pary są losowane spośród tej puli, zawsze dwóch różnych ludzi z działającym linkiem profilu (Filmweb `/person/x-{id}` w PL, IMDb w EN).
 
 | Tryb | Zasady | Wymaga |
 |---|---|---|
@@ -116,7 +116,7 @@ Strona pakietu, "edytor trybów" (`/admin#/modes/ID`): karta każdego trybu z go
 - **Plakaty** (`#/posters/ID`): siatka plakatów. "pobierz dla pakietu" w tle z logiem na żywo (źródło: auto, IMDb, Filmweb, TMDB; opcjonalnie od nowa i z uzupełnieniem polskich tytułów). Na każdym plakacie: pobierz ponownie (z wybranego źródła), link do obrazka, plik z dysku (max 6 MB), usuń. Plakaty są zapisywane lokalnie w bazie, ze źródłem i datą.
 - **Obsada** (`#/cast/ID`): pobieranie top N aktorów (3 do 15, domyślnie 6) w kolejności z napisów, **razem ze zdjęciami**. W grze nazwiska i fotki pojawiają się od ostatniego na liście, gwiazda na końcu. Edytor: miniatury, zmiana kolejności, edycja nazwiska i postaci, wgranie zdjęcia, dodawanie, usuwanie, odwrócenie, przywrócenie kolejności z napisów, pobierz ponownie. Jeśli film ma już imiona bez fotek: przycisk **dociągnij zdjęcia** (albo **dociągnij brakujące zdjęcia (imiona zostają)** dla całego pakietu) uzupełnia tylko fotki, bez kasowania ręcznie wpisanych imion.
 - **Cytaty** (`#/quotes/ID`): Cytat nie jest już trybem gry (zastąpiła go gra Top). Dane cytatów zostają w bazie; edytor jest przygaszony, ale nadal działa. Cytaty przy każdym filmie (dodaj, edytuj, usuń, język PL/EN/oba). Wklejanie listy: `Tytuł (rok) = cytat`, tytuł oryginalny albo polski, rok opcjonalny, język tagiem `[pl]` albo `[en]` na początku cytatu. Podgląd pokazuje dopasowane, brak w pakiecie, niejednoznaczne, powtórki i zły format. Polska wersja gry woli cytaty `[pl]`, angielska `[en]`.
-- **Pytania do licytacji** (`#/questions/ID`): pytanie PL i EN, odpowiedzi jedna w linii, aliasy po średniku ("The Thing; Coś"). "wstaw filmy z pakietu" wypełnia odpowiedzi tytułami, polskimi tytułami i aliasami. Wklejanie wielu pytań: bloki oddzielone pustą linią, pierwsza linia `pytanie PL | pytanie EN`.
+- **Pytania do licytacji** (`#/questions/ID`): tylko treść pytania po polsku i po angielsku, bez pól na odpowiedzi. Zaliczenie i tak oceniają gracze po timerze. Istniejące odpowiedzi w bazie zostają (edycja pytania ich nie kasuje), ale nie są wymagane ani pokazywane w formularzu. Wklejanie wielu pytań: bloki oddzielone pustą linią, jedna linia `pytanie PL | pytanie EN`.
 
 ## Źródła plakatów i obsady
 
@@ -133,7 +133,7 @@ Blokady (403, 429, WAF) są zgłaszane w logu jako "blocked" z powodem. Scraper 
 
 1. Załóż darmowe konto na themoviedb.org i wygeneruj klucz API (v3) albo token (v4).
 2. Panel admina, Ustawienia: wklej klucz. Jest sprawdzany i zapisywany w `config.local.json` (poza gitem i poza eksportem .sql). Można też użyć zmiennej `TMDB_API_KEY`.
-3. TMDB staje się trzecim źródłem w trybie auto i można je wybrać wprost w edytorach. Ten sam klucz pomaga dobrać znane pary w Filmrun (popularność + imdb_id, a po polsku profil Filmwebu). Na Cloudflare ustawiasz go osobno: `npx wrangler secret put TMDB_API_KEY` (nie trafia do gita ani do eksportu).
+3. TMDB staje się trzecim źródłem w trybie auto i można je wybrać wprost w edytorach. Na Cloudflare ustawiasz go osobno: `npx wrangler secret put TMDB_API_KEY` (nie trafia do gita ani do eksportu). Filmrun nie wymaga tego klucza — pary biorą się z wbudowanej puli.
 
 Ta aplikacja korzysta z API TMDB, ale nie jest przez TMDB wspierana ani certyfikowana.
 
@@ -144,6 +144,8 @@ Ta aplikacja korzysta z API TMDB, ale nie jest przez TMDB wspierana ani certyfik
 - Obok tabela do edycji polskiego tytułu i aliasów w miejscu (zapis po wyjściu z pola, aliasy po średniku).
 - Edycja filmu: polski tytuł i aliasy. Cytaty są w edytorze trybów.
 - W wersji PL gra przyjmuje oryginał, aliasy, polski tytuł oraz jego główny człon ("Obcy" dla "Obcy - 8. pasażer Nostromo"). Wyniki i podpowiedzi pokazują polski tytuł, oryginał mniejszą czcionką.
+
+Pula Filmrun jest w `static/filmrun/` (JSON + zdjęcia) i w `cloudflare/src/filmrun_people.js`. Odświeżenie: `python3 tools/build_filmrun_pool.py` (nie zapisuje nic w `quiz.db`).
 
 ## Testy
 
@@ -203,7 +205,7 @@ Po zalogowaniu hasłem `ADMIN_PASSWORD` (sekret wranglera):
 
 - cytaty (CRUD + wklejanie listy z podglądem; to nie jest już tryb gry)
 - kadr do Zoomu (wskazanie albo wgranie, niezależny od Kadry)
-- pytania licytacji (CRUD + hurtem + auto-uzupełnianie odpowiedzi z filmów pakietu)
+- pytania licytacji (CRUD + hurtem; same treści PL/EN, bez wymaganej listy odpowiedzi)
 - polskie tytuły i aliasy (inline + wklejanie listy)
 - włączanie/wyłączanie trybów w pakiecie
 - plakat: podmiana URL albo upload do 1,5 MB

@@ -867,40 +867,36 @@ async function quotesPage(id, keepText) {
   });
 }
 
-/* pytania do licytacji */
-const ansText = q => q.answers.map(a => [a.text, ...(a.aliases || [])].join("; ")).join("\n");
+/* pytania do licytacji — tylko treść PL/EN; zaliczenie oceniają gracze po timerze */
 function questionModal(id, q) {
   modal(`<h2>${q ? T("edytuj pytanie") : T("nowe pytanie")}</h2>
     <div class="form-grid">
       <label class="field full">${T("Pytanie po polsku")}<input class="input sm" name="prompt_pl" value="${esc(q?.prompt_pl || "")}" placeholder="${T("np. Wymień filmy Johna Carpentera")}"></label>
-      <label class="field full">${T("Pytanie po angielsku (opcjonalnie)")}<input class="input sm" name="prompt_en" value="${esc(q?.prompt_en || "")}" placeholder="Name John Carpenter films"></label>
-      <label class="field full">${T("Akceptowane odpowiedzi: jedna w linii, aliasy po średniku")}<textarea class="input sm" name="answers_text" id="qans" rows="9" placeholder="The Thing; Coś\nHalloween\nThe Fog; Mgła">${esc(q ? ansText(q) : "")}</textarea></label>
-      <div class="full row"><button type="button" class="pill small light" id="qauto">${T("wstaw filmy z pakietu")}</button><span class="muted" style="font-size:13px" id="qcount"></span></div>
+      <label class="field full">${T("Pytanie po angielsku")}<input class="input sm" name="prompt_en" value="${esc(q?.prompt_en || "")}" placeholder="Name John Carpenter films"></label>
     </div>
+    <p class="muted" style="margin:8px 0 0;font-size:14px">${T("Bez listy odpowiedzi. Po licytacji i timerze pozostali gracze decydują, czy zadanie zostało zaliczone.")}</p>
     <div class="actions"><button type="button" class="pill ghost" data-close>${T("anuluj")}</button><button class="pill orange">${T("zapisz")}</button></div>`,
-    async fd => { const body = Object.fromEntries(fd);
+    async fd => {
+      const body = {prompt_pl: fd.get("prompt_pl") || "", prompt_en: fd.get("prompt_en") || ""};
       if (q) await api(`/api/admin/questions/${q.id}`, "PUT", body); else await api(`/api/admin/packs/${id}/questions`, "POST", body);
       toast(T("Zapisano")); questionsPage(id); });
-  const cnt = () => { $("#qcount").textContent = T("odpowiedzi: {n}", {n: $("#qans").value.split("\n").filter(x => x.trim()).length}); };
-  $("#qans").oninput = cnt; cnt();
-  $("#qauto").onclick = async () => { const r = await api(`/api/admin/packs/${id}/answers_auto`); const cur = $("#qans").value.trim(); $("#qans").value = (cur ? cur + "\n" : "") + r.text; cnt(); };
 }
 async function questionsPage(id) {
   const p = packs.find(x => x.id === id); if (!p) return (location.hash = "#/");
   const qs = await api(`/api/admin/packs/${id}/questions`);
   $("#main").innerHTML = edHead(p, T("licytacja: pytania"), `<button class="pill orange" id="qnew">${T("nowe pytanie")}</button>`) + `
-    <p class="muted" style="margin:-6px 0 16px;font-size:15px">${T("Gracze licytują, ile poprawnych odpowiedzi podadzą. Najwyższa oferta wpisuje odpowiedzi na czas. Odpowiedzi sprawdzam po znormalizowanym tekście, z aliasami i literówkami.")}</p>
+    <p class="muted" style="margin:-6px 0 16px;font-size:15px">${T("Wpisz pytanie po polsku i po angielsku. Gracze licytują, ile odpowiedzi wymienią, a po timerze pozostali oceniają, czy zadanie zostało zaliczone. Listy odpowiedzi nie trzeba podawać.")}</p>
     <div class="ed-grid">
       <div class="panel"><h2>${T("pytania")} <span class="muted">(${qs.length})</span></h2>
         ${qs.length ? `<div class="qlist">${qs.map(q => `<div class="qq" data-id="${q.id}"><div class="row" style="justify-content:space-between;flex-wrap:nowrap;align-items:flex-start">
             <div><div class="t">${esc(q.prompt_pl || q.prompt_en)}</div>${q.prompt_pl && q.prompt_en ? `<div class="sub">EN: ${esc(q.prompt_en)}</div>` : !q.prompt_pl ? `<div class="sub">${T("tylko EN")}</div>` : ""}</div>
             <div class="row" style="gap:6px;flex-wrap:nowrap"><button class="ibtn" data-a="edit" title="${T("edytuj")}">${ICON.edit || T("edytuj")}</button><button class="ibtn" data-a="del" title="${T("usuń")}">${ICON.del || "&times;"}</button></div></div>
-            <div class="sub"><b>${T("odpowiedzi: {n}", {n: q.answers.length})}</b> · ${q.answers.slice(0, 8).map(a => esc(a.text)).join(", ")}${q.answers.length > 8 ? ", ..." : ""}</div></div>`).join("")}</div>`
+            </div>`).join("")}</div>`
         : `<p class="empty">${T("Brak pytań. Bez nich licytacja zadaje jedno proste pytanie: ile filmów z pakietu wymienisz.")}</p>`}
       </div>
       <div class="panel"><h2>${T("wklej wiele pytań")}</h2>
-        <p class="muted" style="font-size:14px;margin:0 0 10px">${T("Pytania oddziel pustą linią. Pierwsza linia: <b>pytanie PL | pytanie EN</b> (EN opcjonalnie), dalej odpowiedzi, jedna w linii, aliasy po średniku.")}</p>
-        <textarea class="input" id="bqtext" rows="10" placeholder="Wymień filmy Carpentera | Name Carpenter films\nThe Thing; Coś\nHalloween\nThe Fog; Mgła\n\nWymień potwory z filmów | Name movie monsters\nXenomorph; Obcy\nPennywise"></textarea>
+        <p class="muted" style="font-size:14px;margin:0 0 10px">${T("Pytania oddziel pustą linią. Jedna linia na pytanie: <b>pytanie PL | pytanie EN</b> (EN opcjonalnie).")}</p>
+        <textarea class="input" id="bqtext" rows="10" placeholder="Wymień filmy Carpentera | Name Carpenter films\n\nWymień potwory z filmów | Name movie monsters"></textarea>
         <div class="row" style="margin-top:10px"><button class="pill light" id="bqprev">${T("podgląd")}</button><button class="pill orange" id="bqsave" disabled>${T("zapisz poprawne")}</button></div>
         <div id="bqres"></div>
       </div></div>`;
@@ -915,8 +911,8 @@ async function questionsPage(id) {
     const text = $("#bqtext").value; if (!text.trim()) return toast(T("Wklej listę"));
     const r = await api(`/api/admin/packs/${id}/questions`, "POST", {bulk: text, apply}); last = text;
     $("#bqres").innerHTML = `<p class="plsum"><b>${T("poprawne: {n}", {n: r.ok})}</b> · ${T("błędne: {n}", {n: r.rows.length - r.ok})}</p>
-      ${r.rows.map(x => `<div class="qq ${x.status}"><div class="t">${esc(x.prompt_pl || x.prompt_en || "?")}${x.status !== "ok" ? ` <span class="badge error">${T("potrzeba pytania i 2 odpowiedzi")}</span>` : ""}</div>
-        ${x.prompt_pl && x.prompt_en ? `<div class="sub">EN: ${esc(x.prompt_en)}</div>` : ""}<div class="sub">${T("odpowiedzi: {n}", {n: x.answers.length})} · ${x.answers.map(a => esc(a.text) + (a.aliases.length ? ` <span class="muted">(${a.aliases.map(esc).join(", ")})</span>` : "")).join(", ")}</div></div>`).join("")}`;
+      ${r.rows.map(x => `<div class="qq ${x.status}"><div class="t">${esc(x.prompt_pl || x.prompt_en || "?")}${x.status !== "ok" ? ` <span class="badge error">${T("potrzeba pytania PL albo EN")}</span>` : ""}</div>
+        ${x.prompt_pl && x.prompt_en ? `<div class="sub">EN: ${esc(x.prompt_en)}</div>` : ""}</div>`).join("")}`;
     $("#bqsave").disabled = apply || !r.ok;
     if (apply) { toast(T("Zapisano {n} pytań", {n: r.saved})); setTimeout(() => questionsPage(id), 900); }
   };

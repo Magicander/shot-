@@ -33,8 +33,17 @@ def check(cond, msg):
     OK += 1
     print("  ok ", msg)
 
-JPG = b"\xff\xd8\xff\xe0" + b"0" * 2000
-PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 500
+def _img(fmt="JPEG"):
+    from PIL import Image
+    import io
+    im = Image.new("RGB", (220, 280))
+    im.putdata([((i * 13) % 256, (i * 29) % 256, (i * 47) % 256) for i in range(220 * 280)])
+    buf = io.BytesIO()
+    kw = {"quality": 90} if fmt == "JPEG" else {}
+    im.save(buf, fmt, **kw)
+    return buf.getvalue()
+JPG = _img("JPEG")
+PNG = _img("PNG")
 
 # ---------- atrapa sieci dla webscrape.http
 MODE = {"imdb_page": "blocked", "filmweb": "ok"}
@@ -119,8 +128,8 @@ def parse_tests(con, pid):
     check([x["text"] for x in a] == ["Alien", "The Thing"] and a[0]["aliases"] == ["Obcy", "ósmy pasażer Nostromo"],
           "odpowiedzi: aliasy po średniku, puste i powtórki pominięte")
     qs = app.parse_questions("Filmy Carpentera | Carpenter films\nThe Thing; Coś\nHalloween\n\nTylko jedna\nX\n\n| EN only\nA\nB")
-    check([q["status"] for q in qs] == ["ok", "bad_format", "ok"] and qs[0]["prompt_en"] == "Carpenter films"
-          and qs[2]["prompt_pl"] == "", "pytania hurtem: bloki, PL | EN, min. 2 odpowiedzi")
+    check([q["status"] for q in qs] == ["ok", "ok", "ok"] and qs[0]["prompt_en"] == "Carpenter films"
+          and qs[2]["prompt_pl"] == "" and qs[1]["status"] == "ok", "pytania hurtem: bloki, PL | EN, odpowiedzi opcjonalne")
     m = con.execute("SELECT title, year, pl_title FROM movies WHERE pack_id=? AND year IS NOT NULL ORDER BY id LIMIT 1", (pid,)).fetchone()
     text = (f"{m['title']} ({m['year']}) = [pl] Testowy cytat\n{m['title'].upper()} = \"Test quote\"\n"
             f"{m['title']} = [pl] testowy CYTAT\nNie Ma Takiego Filmu = x\nbez znaku\n{m['title']} ({m['year'] + 5}) = zły rok")
@@ -250,9 +259,14 @@ def main():
     # --- pytania
     auto = adm.req("GET", f"/api/admin/packs/{pid}/answers_auto")["text"]
     check(len(auto.splitlines()) == len(movies), "auto-uzupełnianie: jedna linia na film")
-    check(adm.req("POST", f"/api/admin/packs/{pid}/questions", {"prompt_pl": "X", "answers_text": "jedna"}, ok=False)["_code"] == 400,
-          "pytanie z 1 odpowiedzią odrzucone")
-    bulk = "Hurt 1 | Bulk 1\nA1\nA2\n\nzłe\n\nHurt 2\nB1\nB2\nB3"
+    check(adm.req("POST", f"/api/admin/packs/{pid}/questions", {"prompt_pl": "", "prompt_en": ""}, ok=False)["_code"] == 400,
+          "pytanie bez treści odrzucone")
+    qempty = adm.req("POST", f"/api/admin/packs/{pid}/questions", {"prompt_pl": "Tylko treść, bez odpowiedzi"})
+    check(qempty.get("id"), "pytanie bez listy odpowiedzi jest przyjmowane")
+    only = [q for q in adm.req("GET", f"/api/admin/packs/{pid}/questions") if q["id"] == qempty["id"]][0]
+    check(only["prompt_pl"].startswith("Tylko treść") and only["answers"] == [], "nowe pytanie nie wymaga odpowiedzi")
+    adm.req("DELETE", f"/api/admin/questions/{qempty['id']}")
+    bulk = "Hurt 1 | Bulk 1\nA1\nA2\n\n|\n\nHurt 2"
     r = adm.req("POST", f"/api/admin/packs/{pid}/questions", {"bulk": bulk, "apply": True})
     check(r["saved"] == 2 and r["ok"] == 2, "pytania hurtem: 2 zapisane, złe pominięte")
     for q in adm.req("GET", f"/api/admin/packs/{pid}/questions"):
@@ -266,6 +280,10 @@ def main():
                                                                {"text": "Blob"}, {"text": "Gremlin"}]})
     qs = adm.req("GET", f"/api/admin/packs/{pid}/questions")
     check(len(qs) == 1 and len(qs[0]["answers"]) == 5, "pytanie zapisane i edytowane (5 odpowiedzi)")
+    adm.req("PUT", f"/api/admin/questions/{qid}", {"prompt_pl": "Wymień potwory z kosmosu (PL)", "prompt_en": "Name space monsters"})
+    qs = adm.req("GET", f"/api/admin/packs/{pid}/questions")
+    check(qs[0]["prompt_pl"].endswith("(PL)") and len(qs[0]["answers"]) == 5,
+          "edycja samego pytania nie kasuje istniejących odpowiedzi")
     md = adm.req("GET", f"/api/admin/packs/{pid}/modes")
     check(md["questions"] == 1 and md["avail"]["licytacja"]["ok"], "hub: licytacja gotowa, liczba pytań")
 
@@ -278,29 +296,27 @@ def main():
     room = app.rooms[code]
     st = lambda c, P: c.req("GET", f"/api/rooms/{code}?pid={P['pid']}&token={P['token']}")
     sa, sb = st(a, A), st(b, B)
-    check(sa["prompt"] == "Wymień potwory z kosmosu" and sb["prompt"] == "Name space monsters",
+    check(sa["prompt"] == "Wymień potwory z kosmosu (PL)" and sb["prompt"] == "Name space monsters",
           "pytanie w języku gracza")
     check("Predator" not in json.dumps(sa), "stan nie zdradza odpowiedzi")
+    t = room.task
+    t["order"] = [A["pid"], B["pid"]]; t["turn"] = 0  # zaczyna Ala
     a.req("POST", f"/api/rooms/{code}/guess", {**A, "bid": 3})
     b.req("POST", f"/api/rooms/{code}/guess", {**B, "bid": 99})
-    t = room.task
     check(t["bidder"] == B["pid"] and t["bid"] == 5, "najwyższa oferta wygrywa, oferta przycięta do liczby odpowiedzi")
-    check(a.req("POST", f"/api/rooms/{code}/guess", {**A, "text": "Predator"}).get("ok") is False, "tylko licytujący wpisuje")
-    g = lambda x: b.req("POST", f"/api/rooms/{code}/guess", {**B, "text": x})
-    check(g("xenomorph").get("correct"), "alias zaliczony")
-    d = g("Obcy")
-    check(d.get("correct") is False and d.get("duplicate"), "powtórka (inny alias) odrzucona jako duplikat")
-    check(g("predatr").get("correct"), "drobna literówka zaliczona")
-    n = g("Godzilla")
-    check(n.get("correct") is False and not n.get("duplicate"), "odpowiedź spoza listy odrzucona")
-    sa = st(a, A)
-    check(sa["total"] == 5 and len(sa["found"]) == 2 and sa["misses"] == 2, "postęp na żywo u wszystkich")
-    a.req("POST", f"/api/rooms/{code}/next", A)
+    check(not b.req("POST", f"/api/rooms/{code}/guess", {**B, "start_timer": True}).get("ok"), "licytujący nie puszcza timera")
+    a.req("POST", f"/api/rooms/{code}/guess", {**A, "start_timer": True})
+    sa2 = st(a, A)
+    check(sa2.get("sub") == "timed" and sa2.get("duration") == 30, "przeciwnik puszcza timer (30 s)")
+    t["type_end"] = __import__("time").time() - 0.1
+    room.tick()
+    check(t.get("sub") == "verdict", "po czasie jest werdykt graczy")
+    check(not b.req("POST", f"/api/rooms/{code}/guess", {**B, "verdict": False}).get("ok"), "licytujący nie ocenia siebie")
+    a.req("POST", f"/api/rooms/{code}/guess", {**A, "verdict": False})
     sr = st(a, A)
     pts = {p["name"]: p["score"] for p in sr["players"]}
-    check(sr["phase"] == "reveal" and pts == {"Ala": 500, "Bob": 0}, f"nie udało się: pozostali po 100 x oferta ({pts})")
-    missed = [m["title"] for m in sr["answer"]["missed"]]
-    check(missed == ["The Thing", "Blob", "Gremlin"] and sr["answer"]["prompt"] == "Wymień potwory z kosmosu", "odsłona: pominięte odpowiedzi")
+    check(sr["phase"] == "reveal" and pts == {"Ala": 500, "Bob": 0}, f"werdykt nie: pozostali po 100 x oferta ({pts})")
+    check((sr.get("answer") or {}).get("prompt") == "Wymień potwory z kosmosu (PL)", "odsłona pokazuje pytanie")
 
     # --- kadr Zoom niezależny od Kadry
     mid = m0["id"]

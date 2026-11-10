@@ -1,6 +1,8 @@
 // most.js - gra Most/Bridge: przejście po filmografii, punktacja i dobór pary.
 // Ruchy dzieją się w naszym UI. Linki IMDb/Filmweb są tylko pomocnicze (bez śledzenia).
 
+import { FILMRUN_PEOPLE } from "./filmrun_people.js";
+
 export const TMDB_API = "https://api.themoviedb.org/3";
 export const IMG = "https://image.tmdb.org/t/p/w185";
 export const BFS_MOVIES = 8;
@@ -417,30 +419,36 @@ async function filmwebPerson(name) {
   return null;
 }
 
+const FILMRUN_PHOTO = "/static/filmrun/photos/";
+
+export function poolPeople() {
+  return (FILMRUN_PEOPLE || []).filter(p =>
+    p && String(p.imdb_id || "").startsWith("nm") && Number(p.filmweb_id) > 0 && p.photo);
+}
+
+export function personFromPool(p, lang = "pl") {
+  const out = {
+    kind: "person", id: p.imdb_id, name: p.name || "",
+    photo: FILMRUN_PHOTO + p.photo,
+    imdb_id: p.imdb_id, filmweb_id: Number(p.filmweb_id),
+    source: "filmrun-pool",
+  };
+  out.link = extLinks(out, lang);
+  return out;
+}
+
 export async function pickFilmrunPair(movies, key, lang = "pl", rng = Math.random) {
-  let cands = [];
-  if (key) {
-    try { cands = await tmdbPopularPeople(key, lang, rng); }
-    catch (e) { console.log("Filmrun TMDB pick failed:", String(e)); }
-  }
+  const cands = poolPeople();
   if (cands.length < 2) {
-    const have = new Set(cands.map(p => (p.name || "").toLowerCase()));
-    for (const p of famousFromLocal(movies, lang)) {
-      if (!have.has((p.name || "").toLowerCase())) cands.push(p);
-    }
-  }
-  cands = cands.filter(p => p.photo && p.link && !linkIsSearch(p));
-  if (cands.length < 2) {
-    const err = new Error(key ? "most_no_pair" : "most_no_tmdb");
+    const err = new Error("most_no_pair");
     err.code = "LookupError";
-    err.key = err.message;
+    err.key = "most_no_pair";
     throw err;
   }
-  cands.sort(() => rng() - 0.5);
-  const start = cands[0], goal = cands[1];
-  start.link = extLinks(start, lang);
-  goal.link = extLinks(goal, lang);
-  return { start, goal };
+  const draw = () => Math.floor(rng() * cands.length);
+  let i = draw(), j = draw();
+  if (j === i) j = (j + 1) % cands.length;
+  return { start: personFromPool(cands[i], lang), goal: personFromPool(cands[j], lang) };
 }
 
 export async function pickPair(movies, key, lang = "pl", rng = Math.random) {

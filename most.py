@@ -455,32 +455,10 @@ def famous_from_local(con, movies, lang="pl"):
 
 
 def pick_filmrun_pair(con, movies, lang="pl", rng=None):
-    """Dobiera dwóch znanych aktorów ze zdjęciem i prawdziwym linkiem do profilu (nie wyszukiwarką)."""
+    """Dobiera dwóch znanych aktorów z wbudowanej puli (działa bez TMDB i bez obsady z quiz.db)."""
+    import filmrun_pool
     rng = rng or random
-    ensure_cache_table(con)
-    key = db.tmdb_key()
-    cands = []
-    if key:
-        try:
-            cands = famous_from_tmdb(con, key, lang, rng)
-        except Exception as e:
-            print("Filmrun TMDB pick failed:", e)
-    if len(cands) < 2:
-        local = famous_from_local(con, movies, lang)
-        have = {db.norm_title(p["name"]) for p in cands}
-        for p in local:
-            if db.norm_title(p["name"]) not in have:
-                cands.append(p)
-    cands = [p for p in cands if p.get("photo") and p.get("link") and "search" not in p["link"]["url"]]
-    if len(cands) < 2:
-        if not key:
-            raise LookupError("most_no_tmdb")
-        raise LookupError("most_no_pair")
-    rng.shuffle(cands)
-    start, goal = cands[0], cands[1]
-    start["link"] = ext_links(start, lang)
-    goal["link"] = ext_links(goal, lang)
-    return {"start": start, "goal": goal}
+    return filmrun_pool.pick_pair(lang=lang, rng=rng)
 
 
 def pick_pair(con, movies, lang="pl", rng=None):

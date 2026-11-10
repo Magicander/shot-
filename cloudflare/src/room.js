@@ -216,7 +216,7 @@ export class Room extends DurableObject {
               g.start({ pairs, pair: pairs[0] });
             } catch (e) {
               const msg = (e.key === "most_no_tmdb" || e.message === "most_no_tmdb")
-                ? "Filmrun wymaga klucza TMDB albo aktorów ze zdjęciem i profilem Filmweb/IMDb"
+                ? "Nie udało się dobrać pary aktorów w Filmrun"
                 : "Nie udało się dobrać pary aktorów";
               throw new GameError(400, msg);
             }

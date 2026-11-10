@@ -82,7 +82,7 @@ async function loadPacks() {
     };
     box.append(w);
   });
-  renderMostEntry(box);
+  renderMostEntry();
 }
 
 function openCustom(packs, nrounds) {
@@ -108,40 +108,26 @@ function openCustom(packs, nrounds) {
   };
 }
 
-function renderMostEntry(box) {
-  const w = document.createElement("div");
-  w.className = "packet-wrap filmrun-pack";
+function renderMostEntry() {
+  const host = document.querySelector("#filmrun-home");
+  if (!host) return;
   const rounds = {n: 3};
-  w.innerHTML = `
-    <div class="packet filmrun-card" style="--c:#F26B1D;--tilt:-1deg" id="most">
-      <div class="kit"><span>${T("quiz<br>filmowy")}</span><b>${BRAND}*</b></div>
-      <h3>Filmrun</h3>
-      <p class="filmrun-sub">${T("Wikipedia run, ale o filmach")}</p>
-      <div class="collage fr-art" aria-hidden="true">
+  host.innerHTML = `
+    <div class="filmrun-box" id="most">
+      <div class="filmrun-copy">
+        <p class="filmrun-kicker">${T("gra osobna")}</p>
+        <h2>Filmrun</h2>
+        <p class="filmrun-sub">${T("Wikipedia run, ale o filmach")}</p>
+        <p class="filmrun-desc">${T("Dostajecie dwóch znanych aktorów. Start otwiera profil pierwszego. Na Filmwebie albo IMDb szukacie drugiego. Kto pierwszy wróci i wciśnie Stop, wygrywa rundę.")}</p>
+        <button type="button" class="pill orange big" id="mostgo">${T("graj")}</button>
+      </div>
+      <div class="filmrun-art" aria-hidden="true">
         <div class="fr-bust"><span>?</span></div>
         <span class="fr-to">→</span>
         <div class="fr-bust goal"><span>?</span></div>
       </div>
-      <div class="stamp">${T("gra")}<small>${T("osobno")}</small></div>
-      <div class="foot"><span>${T("Dwóch aktorów, Start, potem Filmweb albo IMDb, Stop wygrywa rundę.")}</span></div>
-    </div>
-    <p class="pack-modes">${T("Specjalna gra poza pakietami")}</p>
-    <div class="pack-pills">
-      <span class="chip-pill">${T("bez limitu czasu")}</span>
-      <div class="stepper" role="group" aria-label="${T("Liczba rund")}">
-        <button type="button" class="minus" aria-label="${T("mniej rund")}">-</button>
-        <span class="n">${plRounds(rounds.n)}</span>
-        <button type="button" class="plus" aria-label="${T("więcej rund")}">+</button>
-        <button type="button" class="go" id="mostgo">${T("graj")}</button>
-      </div>
     </div>`;
-  (box && box.id === "packs" ? box : document.querySelector("#packs") || box).append(w);
-  const nEl = w.querySelector(".n");
-  const upd = d => { rounds.n = Math.max(1, Math.min(30, rounds.n + d)); nEl.textContent = plRounds(rounds.n); };
-  upd(0);
-  w.querySelector(".minus").onclick = () => upd(-1);
-  w.querySelector(".plus").onclick = () => upd(1);
-  w.querySelector("#mostgo").onclick = () => askName(T("Filmrun"), T("{rounds}. Jak cię nazywać?", {rounds: plRounds(rounds.n)}), async name => {
+  host.querySelector("#mostgo").onclick = () => askName(T("Filmrun"), T("{rounds}. Jak cię nazywać?", {rounds: plRounds(rounds.n)}), async name => {
     const d = await api("/api/rooms", {kind:"filmrun", pack_id:"most", rounds:rounds.n, name});
     setCreds(d.code, d); location.href = "/r/" + d.code;
   });
@@ -245,8 +231,7 @@ const plural = (n, a, b, c) => n === 1 ? a : (n % 10 >= 2 && n % 10 <= 4 && (n %
 function playerList(players, opts = {}) {
   return `<ul class="plist">${players.map(p => `<li class="${p.online ? "" : "off"}">
     <span class="avatar" style="background:${avColor(p.name)}">${esc([...p.name][0].toUpperCase())}</span>
-    <span>${esc(p.name)}</span>${p.id === S.me ? `<span class="you">${T("ty")}</span>` : ""}${p.id === S.host ? `<span class="host">${T("gospodarz")}</span>` : ""}
-    ${opts.status && (p.got || p.done) ? `<span class="mark ok" title="${T("zgadł")}"></span>` : ""}
+    <span class="who"><span class="nm">${esc(p.name)}</span>${p.id === S.me ? `<span class="you">${T("ty")}</span>` : ""}${p.id === S.host ? `<span class="host">${T("gospodarz")}</span>` : ""}${opts.status && (p.got || p.done) ? `<span class="mark ok" title="${T("zgadł")}"></span>` : ""}</span>
     ${opts.score ? `<span class="sc">${p.score}</span>` : ""}</li>`).join("")}</ul>`;
 }
 
@@ -615,8 +600,8 @@ function renderAuction(m) {
   const rules = `<details class="rules" ${S.sub === "bid" ? "open" : ""}><summary>${T("zasady licytacji")}</summary>${notice}<ol>
     <li>${T("Gra losuje, kto zaczyna. Potem gracze po kolei: podbijasz ofertę albo pasujesz. Na ruch masz {n} s, potem automatyczny pas.", {n: S.bid_seconds})}</li>
     <li>${T("Licytacja kończy się, gdy zostanie jedna osoba. Wygrywa najwyższa oferta.")}</li>
-    <li>${T("Zwycięzca ma tylko {n} s, żeby podać tyle odpowiedzi z listy (jest ich {t}), ile zadeklarował.", {n: secs, t: S.total})}</li>
-    <li>${T("Uda się: licytujący dostaje 200 pkt za każdą zadeklarowaną odpowiedź. Nie uda się: każdy z pozostałych dostaje po 100 pkt za każdą.")}</li></ol></details>`;
+    <li>${T("Zwycięzca wymienia odpowiedzi na głos. Timer puszcza przeciwnik (nie startuje sam). Na wypowiedź jest {n} s.", {n: secs})}</li>
+    <li>${T("Po czasie pozostali decydują (tak/nie), czy zaliczył zadanie. Sukces: licytujący dostaje 200 pkt za każdą zadeklarowaną. Porażka: każdy z pozostałych dostaje po 100 pkt za każdą.")}</li></ol></details>`;
   const hist = (S.history || []).length ? `<p class="muted small-note">${S.history.map(h => h.bid ? T("{name}: {n}", {name: esc(h.name), n: h.bid}) : T("{name}: pas", {name: esc(h.name)})).join(" · ")}</p>` : "";
   if (S.sub === "bid") {
     const myTurn = S.turn === S.me;

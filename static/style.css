@@ -140,16 +140,19 @@ footer{padding:30px 0 50px;text-align:center;color:var(--muted);font-size:14px}
 .share{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
 .share .input{flex:1;min-width:200px;font-size:15px;min-height:48px}
 .plist{list-style:none;padding:0;margin:12px 0 0;display:flex;flex-direction:column;gap:8px}
-.plist li{display:flex;align-items:center;gap:12px;background:var(--card);border-radius:16px;padding:10px 14px;font-weight:700;font-size:18px}
+.plist li{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px 10px;background:var(--card);border-radius:16px;padding:10px 14px;font-weight:700;font-size:18px;min-width:0;overflow:hidden}
+.plist .who{display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0}
+.plist .nm{min-width:0;overflow-wrap:anywhere;line-height:1.2}
 .avatar{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;color:#fff;font-family:var(--display);font-weight:700;flex:none;font-size:18px}
-.plist .you{font-size:12px;font-weight:700;background:var(--orange-l);padding:2px 8px;border-radius:999px}
-.plist .host{font-size:12px;font-weight:700;background:var(--ink);color:var(--paper);padding:2px 8px;border-radius:999px}
+.plist .you,.plist .host{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;flex:none;line-height:1.2}
+.plist .you{background:var(--orange-l)}
+.plist .host{background:var(--ink);color:var(--paper)}
 .plist .off{opacity:.45}
-.plist .sc{margin-left:auto;font-family:var(--display);font-size:20px}
+.plist .sc{margin-left:0;font-family:var(--display);font-size:20px;font-variant-numeric:tabular-nums;justify-self:end;flex:none;white-space:nowrap}
 
 .game{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:22px;margin:4px 0 40px;align-items:start}
 .stage{position:relative;border-radius:28px;overflow:hidden;background:#000;aspect-ratio:16/9;box-shadow:var(--shadow)}
-.stage img{width:100%;height:100%;object-fit:cover;animation:fadein .5s}
+.stage:not(.textstage) img{width:100%;height:100%;object-fit:cover;animation:fadein .5s}
 @keyframes fadein{from{opacity:0;transform:scale(1.02)}to{opacity:1}}
 .stage .lvl{position:absolute;left:14px;top:14px;background:var(--bone);color:var(--ink);border-radius:999px;padding:6px 14px;font-family:var(--display);font-weight:700;font-size:16px}
 .stage .clock{position:absolute;right:14px;top:14px;background:var(--ink);color:var(--paper);border-radius:999px;padding:6px 14px;font-family:var(--display);font-weight:700;font-size:20px;min-width:64px;text-align:center}
@@ -253,8 +256,10 @@ footer{padding:30px 0 50px;text-align:center;color:var(--muted);font-size:14px}
 .stage.zoom img{transition:none;will-change:transform}
 .stage.posterstage{aspect-ratio:auto;display:flex;justify-content:center;background:var(--ink);padding:56px 0 18px}
 .stage.posterstage canvas{width:min(100%,340px);height:auto;aspect-ratio:2/3;border-radius:12px;display:block}
-.stage.textstage{aspect-ratio:auto;min-height:300px;background:var(--card);color:var(--ink);padding:64px 26px 26px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;border:2px solid var(--line)}
-.stage.textstage .lvl{background:var(--orange);color:#fff}
+.stage.textstage{aspect-ratio:auto;min-height:300px;background:var(--card);color:var(--ink);padding:18px 22px 26px;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;justify-items:center;text-align:center;border:2px solid var(--line);gap:8px 12px}
+.stage.textstage .lvl{position:static;background:var(--orange);color:#fff;max-width:100%;white-space:normal;line-height:1.2;text-align:left;justify-self:start;border-radius:16px;hyphens:auto}
+.stage.textstage .clock{position:static;justify-self:end}
+.stage.textstage > *:not(.lvl):not(.clock){grid-column:1 / -1}
 .castlist{list-style:none;counter-reset:c;margin:0;padding:0;display:grid;gap:8px;width:100%;max-width:460px}
 .castlist li{counter-increment:c;border-radius:16px;padding:8px 14px;font-family:var(--display);font-weight:700;font-size:22px;text-align:left;display:flex;gap:12px;align-items:center}
 .castlist li::before{content:counter(c);display:inline-grid;place-items:center;width:30px;height:30px;border-radius:50%;background:var(--ink);color:var(--paper);font-size:15px;flex:none}
@@ -299,7 +304,6 @@ footer{padding:30px 0 50px;text-align:center;color:var(--muted);font-size:14px}
 .guesses .d{color:var(--muted);font-size:14px}.guesses .sc{font-family:var(--display);font-weight:700}
 .wait-box{background:var(--card);color:var(--ink);border:2px solid var(--line)}
 @media (max-width:560px){
-  .stage.textstage{padding:58px 14px 18px;min-height:240px}
   .castlist li{font-size:18px;padding:6px 10px}
   .castlist .ahot,.castlist .anoimg{width:44px;height:54px;border-radius:8px}
   .orderlist img,.orderlist .noimg{width:58px}
@@ -310,7 +314,7 @@ footer{padding:30px 0 50px;text-align:center;color:var(--muted);font-size:14px}
 }
 
 /* faza 4: licytacja */
-.qprompt{font-size:clamp(24px,4vw,34px);line-height:1.15;margin:8px 0 6px}
+.qprompt{font-size:clamp(24px,4vw,34px);line-height:1.15;margin:8px 0 6px;overflow-wrap:anywhere;max-width:100%}
 .qprompt-r{font-weight:700;margin:0 0 6px}
 .aprog{max-width:420px;margin:8px auto 0}
 .aprog .prog{height:14px;border-radius:999px;background:var(--line);overflow:hidden}
@@ -444,8 +448,8 @@ footer{padding:30px 0 50px;text-align:center;color:var(--muted);font-size:14px}
   .hud > *{padding:5px 10px}
   .stage .clock{display:none}
   .stage{border-radius:18px}
-  .stage img{animation:none}
-  .stage.textstage{padding:48px 12px 14px;min-height:0}
+  .stage:not(.textstage) img{animation:none}
+  .stage.textstage{padding:14px 12px 14px;min-height:0}
   .stage .lvl{font-size:14px;left:10px;top:10px;padding:5px 12px}
   .timeline{margin:8px 0}
   .guess{flex-direction:row}
@@ -479,18 +483,39 @@ footer{padding:30px 0 50px;text-align:center;color:var(--muted);font-size:14px}
 }
 
 
-/* Custom + Most na stronie głównej */
+/* Custom na stronie głównej */
 .packpicks{display:flex;flex-direction:column;gap:8px;max-height:40vh;overflow:auto}
 .packpicks .check{display:flex;align-items:center;gap:10px;font-weight:700}
 .packpicks .dot{width:12px;height:12px;border-radius:50%;flex:none}
-.most-entry{margin:48px 0 20px}
-.mostcard{background:var(--paper);border-radius:24px;padding:22px 24px;box-shadow:var(--shadow);display:flex;gap:18px;align-items:center;justify-content:space-between;flex-wrap:wrap;border:2px solid var(--line)}
-.mostcard h3{font-size:32px;margin:0 0 6px}
-.mostcard p{margin:0;max-width:520px;color:var(--muted);font-weight:600}
+
+/* Filmrun: osobna gra pod siatką pakietów, nie karta w siatce */
+.filmrun-home{margin:48px 0 8px}
+.filmrun-box{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(220px,.9fr);gap:28px;align-items:center;
+  background:var(--paper);border:2px solid var(--line);border-radius:32px;padding:32px 36px;box-shadow:var(--shadow);
+  position:relative;overflow:hidden}
+.filmrun-box::before{content:"";position:absolute;right:-40px;top:-50px;width:220px;height:220px;border-radius:50%;
+  background:var(--orange);opacity:.12;pointer-events:none}
+.filmrun-kicker{margin:0 0 8px;font-weight:700;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--orange)}
+.filmrun-copy h2{font-size:clamp(52px,7vw,84px);letter-spacing:-.04em;line-height:.85;margin:0 0 8px}
+.filmrun-sub{margin:0 0 12px;font-family:var(--display);font-weight:700;font-size:clamp(18px,2.2vw,24px);color:var(--orange);line-height:1.2}
+.filmrun-desc{margin:0 0 22px;max-width:38em;color:var(--muted);font-weight:600;line-height:1.45}
+.filmrun-art{display:flex;align-items:center;justify-content:center;gap:14px;position:relative;z-index:1}
+.fr-bust{width:120px;height:150px;border-radius:22px;background:var(--ink);color:var(--orange);display:grid;place-items:center;
+  box-shadow:var(--shadow);transform:rotate(-4deg)}
+.fr-bust.goal{background:var(--orange);color:var(--bone);transform:rotate(5deg)}
+.fr-bust span{font-family:var(--display);font-size:84px;line-height:1;font-weight:700}
+.fr-to{font-family:var(--display);font-size:36px;font-weight:700;color:var(--orange)}
+@media (max-width:800px){
+  .filmrun-box{grid-template-columns:1fr;padding:24px 20px;gap:20px;border-radius:28px}
+  .filmrun-art{order:-1}
+  .fr-bust{width:88px;height:110px;border-radius:18px}
+  .fr-bust span{font-size:64px}
+}
 
 /* Top */
 .toplist li, .orderlist li{touch-action:none}
-.toplist .tpos, .orderlist .tpos{font-family:var(--display);font-size:22px;width:28px;flex:none;text-align:center}
+.toplist .tpos, .orderlist .tpos{font-family:var(--display);font-size:22px;width:28px;flex:none;text-align:center;color:var(--orange)}
+.toplist li::before, .orderlist.bigtop li::before{content:none;counter-increment:none}
 .toplist li.dragging{opacity:.6}
 .topcmp{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 .toprev, .toprev-me{margin:14px 0}
@@ -529,30 +554,21 @@ footer{padding:30px 0 50px;text-align:center;color:var(--muted);font-size:14px}
   user-select:none;
 }
 
-/* Filmrun na stronie głównej — karta jak pakiet */
-.filmrun-pack .filmrun-card{background:var(--card)}
-.filmrun-sub{margin:0 0 8px;font-weight:700;color:var(--muted);letter-spacing:-.02em}
-.filmrun-card .filmrun-sub{font-size:14px;max-width:90%}
-.fr-art{display:flex;align-items:center;justify-content:center;gap:10px;min-height:140px}
-.fr-bust{
-  width:42%;aspect-ratio:3/4;border-radius:18px;background:linear-gradient(180deg,#2a241c,#1B1712);
-  border:4px solid var(--card);box-shadow:var(--shadow);display:flex;align-items:center;justify-content:center;
-  transform:rotate(-4deg);
-}
-.fr-bust.goal{transform:rotate(5deg)}
-.fr-bust span{font-family:var(--display);font-size:64px;color:var(--orange);line-height:1}
-.fr-to{font-size:28px;font-weight:700;color:var(--orange)}
 .fr-rules{margin:0 0 18px;padding-left:1.2em;font-weight:600;line-height:1.45;max-width:40em}
 .fr-rules li{margin:0 0 8px}
 .filmrun-setup .filmrun-sub{font-size:18px;color:var(--orange);font-family:var(--display)}
 .filmrun-stage{padding:18px 18px 8px}
-.fr-pair{display:flex;align-items:stretch;justify-content:center;gap:16px;flex-wrap:wrap;margin:12px 0 18px}
+.fr-pair{display:flex;align-items:stretch;justify-content:center;gap:18px 22px;flex-wrap:nowrap;margin:12px 0 18px}
 .fr-card{
-  flex:1 1 200px;max-width:280px;background:var(--paper);border-radius:22px;padding:16px 16px 18px;
+  flex:0 1 240px;width:100%;max-width:280px;min-width:0;background:var(--paper);border-radius:22px;padding:16px 16px 18px;
   box-shadow:var(--shadow);display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center;
 }
+.fr-pair .mostarrow{flex:none;align-self:center}
 .fr-card img, .fr-card .noimg{
   width:160px;height:200px;object-fit:cover;border-radius:16px;background:linear-gradient(180deg,#2a241c,#1B1712);
+  display:block;flex:none;animation:none;
+}
+.fr-card .noimg{
   display:flex;align-items:center;justify-content:center;font-family:var(--display);font-size:72px;color:var(--orange);
 }
 .fr-card b{font-size:22px;line-height:1.15;letter-spacing:-.03em}
@@ -574,13 +590,17 @@ footer{padding:30px 0 50px;text-align:center;color:var(--muted);font-size:14px}
 }
 
 /* Licytacja: luźniejszy układ */
-.auction.loose{padding:22px 20px 16px}
+.auction.loose{padding:16px 20px 16px}
 .auction.loose .qprompt{margin:10px 0 18px;font-size:clamp(26px,4vw,40px);line-height:1.15}
 .loose-bid{margin:8px 0 22px;display:flex;flex-direction:column;align-items:flex-start;gap:4px}
 .loose-bid .bigbid{font-size:64px;line-height:1}
 .verdict-row{display:flex;gap:12px;flex-wrap:wrap}
 .verdict-row .pill{flex:1;min-height:56px}
 .auction.loose .notice30.big{margin:8px 0 18px;font-size:18px;line-height:1.35}
+@media (max-width:700px){
+  .fr-pair{flex-direction:column;align-items:center}
+  .fr-pair .mostarrow{transform:rotate(90deg)}
+}
 @media (max-width:560px){
   .fr-card img, .fr-card .noimg{width:120px;height:150px}
   .fr-card b{font-size:18px}

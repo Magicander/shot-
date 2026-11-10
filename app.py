@@ -80,7 +80,7 @@ EN_ERRORS = {
     "To nie jest obraz (JPEG, PNG albo WebP)": "This is not an image (JPEG, PNG or WebP)",
     "Podaj treść cytatu": "Enter the quote text",
     "Podaj pytanie (PL albo EN)": "Enter the question (PL or EN)",
-    "Pytanie potrzebuje co najmniej 2 odpowiedzi": "A question needs at least 2 answers",
+    "potrzeba pytania PL albo EN": "a PL or EN question is required",
     "Nie ma cytatu": "Quote not found",
     "Nie ma pytania": "Question not found",
     "Nieznane źródło": "Unknown source",
@@ -109,7 +109,7 @@ EN_ERRORS = {
     "Klucz TMDB nie działa": "This TMDB key does not work",
     "Wybierz przynajmniej jeden pakiet": "Pick at least one pack",
     "Nie udało się dobrać pary aktorów": "Could not pick an actor pair",
-    "Filmrun wymaga klucza TMDB albo aktorów ze zdjęciem i profilem Filmweb/IMDb": "Filmrun needs a TMDB key, or local actors who already have a photo and a Filmweb/IMDb profile",
+    "Nie udało się dobrać pary aktorów w Filmrun": "Could not pick a Filmrun actor pair",
     "Za mało filmów w wybranych pakietach": "Not enough movies in the selected packs",
 }
 
@@ -395,8 +395,7 @@ class Handler(BaseHTTPRequestHandler):
                     try:
                         r.start()
                     except LookupError as e:
-                        msg = "Filmrun wymaga klucza TMDB albo aktorów ze zdjęciem i profilem Filmweb/IMDb" if str(e) == "most_no_tmdb" \
-                            else "Nie udało się dobrać pary aktorów"
+                        msg = "Nie udało się dobrać pary aktorów w Filmrun"
                         raise ApiError(400, msg)
                 elif action == "next" and r.phase in ("round", "reveal"):
                     r.next()
@@ -822,14 +821,17 @@ class Handler(BaseHTTPRequestHandler):
         return None
 
     @staticmethod
-    def question_from(d):
+    def question_from(d, existing=None):
         pl, en = str(d.get("prompt_pl") or "").strip()[:200], str(d.get("prompt_en") or "").strip()[:200]
         if not pl and not en:
             raise ApiError(400, "Podaj pytanie (PL albo EN)")
-        ans = db.parse_answers(d["answers_text"]) if "answers_text" in d else \
-            db.parse_answers("\n".join("; ".join([a["text"]] + list(a.get("aliases") or [])) for a in d.get("answers") or []))
-        if len(ans) < 2:
-            raise ApiError(400, "Pytanie potrzebuje co najmniej 2 odpowiedzi")
+        if "answers_text" in d or "answers" in d:
+            ans = db.parse_answers(d["answers_text"]) if "answers_text" in d else \
+                db.parse_answers("\n".join("; ".join([a["text"]] + list(a.get("aliases") or [])) for a in d.get("answers") or []))
+        elif existing is not None:
+            ans = existing
+        else:
+            ans = []
         return {"prompt_pl": pl, "prompt_en": en, "answers": ans}
 
     @staticmethod
@@ -1068,7 +1070,9 @@ class Handler(BaseHTTPRequestHandler):
                     con.execute("UPDATE quotes SET text=?, lang=? WHERE id=?",
                                 (text, d.get("lang") if d.get("lang") in ("pl", "en") else "", iid))
                 else:
-                    q = self.question_from(d)
+                    row = con.execute("SELECT answers FROM questions WHERE id=?", (iid,)).fetchone()
+                    existing = json.loads((row["answers"] if row else None) or "[]")
+                    q = self.question_from(d, existing=existing)
                     con.execute("UPDATE questions SET prompt_pl=?, prompt_en=?, answers=? WHERE id=?",
                                 (q["prompt_pl"], q["prompt_en"], json.dumps(q["answers"], ensure_ascii=False), iid))
             return self.json({"ok": True})
@@ -1143,8 +1147,8 @@ def parse_quotes(con, pack_id, text):
 
 
 def parse_questions(text):
-    """Bloki oddzielone pustą linią. Pierwsza linia: "Pytanie PL | Question EN", dalej odpowiedzi
-    (jedna w linii, aliasy po średniku)."""
+    """Bloki oddzielone pustą linią. Pierwsza linia: "Pytanie PL | Question EN".
+    Kolejne linie (stare odpowiedzi) są zachowywane, ale nie są wymagane."""
     out = []
     for block in re.split(r"\n\s*\n", str(text or "").replace("\r", "").strip()):
         lines = [x.strip() for x in block.split("\n") if x.strip()]
@@ -1154,7 +1158,7 @@ def parse_questions(text):
         pl, _, en = head.partition("|")
         ans = db.parse_answers("\n".join(lines[1:]))
         row = {"prompt_pl": pl.strip()[:200], "prompt_en": en.strip()[:200], "answers": ans,
-               "status": "ok" if len(ans) >= 2 and (pl.strip() or en.strip()) else "bad_format"}
+               "status": "ok" if (pl.strip() or en.strip()) else "bad_format"}
         out.append(row)
     return out
 

@@ -15,7 +15,7 @@ const EN = {
   "Zły format danych": "Bad data format",
   "Wybierz przynajmniej jeden pakiet": "Pick at least one pack",
   "Nie udało się dobrać pary aktorów": "Could not pick an actor pair",
-  "Filmrun wymaga klucza TMDB albo aktorów ze zdjęciem i profilem Filmweb/IMDb": "Filmrun needs a TMDB key, or local actors who already have a photo and a Filmweb/IMDb profile",
+  "Nie udało się dobrać pary aktorów w Filmrun": "Filmrun needs a TMDB key, or local actors who already have a photo and a Filmweb/IMDb profile",
   "Za mało filmów w wybranych pakietach": "Not enough movies in the selected packs",
 };
 export const errText = (key, lang) => (lang === "en" ? EN[key] || key : key);

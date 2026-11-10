@@ -237,6 +237,32 @@ print("Custom i zdjęcia: placeholder nie jest fotką")
 js = open("static/game.js", encoding="utf-8").read()
 check("qmark" in js and "isCustom" in js, "karta Custom ma znak zapytania, nie kolaż kadrów")
 check("titleHints" in js and "titleMatches" in js, "podpowiedzi tytułów jak we Framed")
+check("filmrun-home" in js and "filmrun-box" in js, "Filmrun ma osobny box na stronie głównej")
+check("renderMostEntry(box)" not in js, "Filmrun nie jest doklejany do siatki pakietów")
+css = open("static/style.css", encoding="utf-8").read()
+cssn = css.replace(" ", "").replace("\n", "")
+check("grid-template-columns:autominmax(0,1fr)auto" in cssn, "wyniki: siatka zostawia miejsce na punkty")
+check("toplist li::before" in css and "content:none" in css, "Top: bez podwójnych numerów")
+check(".stage.textstage.lvl{position:static" in cssn, "nagłówek rundy w textstage nie nachodzi na pytanie")
+check(".stage:not(.textstage)img{" in cssn, "kadry: pełny kadr nie psuje zdjęć w Filmrun/textstage")
+check("flex-wrap:nowrap" in cssn and ".fr-pair{" in css, "Filmrun: para aktorów w jednym rzędzie na pulpicie")
+html = open("static/index.html", encoding="utf-8").read()
+check('id="filmrun-home"' in html and html.find('id="packs"') < html.find('id="filmrun-home"'),
+      "Filmrun jest pod listą pakietów w HTML")
+import rooms as roomsmod
+check(roomsmod.lic_total({"answers": []}) == roomsmod.LIC_BID_CAP, "licytacja bez listy: pułap deklaracji")
+check(roomsmod.lic_total({"answers": [{"text": "A"}, {"text": "B"}, {"text": "C"}]}) == 3,
+      "licytacja z listą: pułap to liczba odpowiedzi")
+import filmrun_pool
+pool = filmrun_pool.load_people()
+check(100 <= len(pool) <= 160, f"pula Filmrun ma 100–150 aktorów (jest {len(pool)})")
+pair = filmrun_pool.pick_pair(lang="pl", rng=__import__("random").Random(1))
+check(pair["start"]["name"] != pair["goal"]["name"], "pula: para to dwie różne osoby")
+check(pair["start"]["imdb_id"].startswith("nm") and int(pair["start"]["filmweb_id"]) > 0, "pula: prawdziwe ID IMDb i Filmweb")
+check("/static/filmrun/photos/" in pair["start"]["photo"] and "search" not in pair["start"]["link"]["url"],
+      "pula: zdjęcie z assetów i profil, nie wyszukiwarka")
+check(most.pick_filmrun_pair(None, [], lang="pl", rng=__import__("random").Random(2))["start"]["name"],
+      "Filmrun dobiera parę bez TMDB i bez obsady z bazy")
 import webscrape
 check(webscrape.is_placeholder_url("https://fwcdn.pl/front/assets/images/t.gif"), "Filmweb t.gif to placeholder")
 check(not webscrape.is_real_headshot(b"GIF89a" + b"x" * 2000), "GIF (t.gif) nie jest prawdziwym zdjęciem")

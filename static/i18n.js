@@ -479,4 +479,14 @@ Object.assign(EN, {
   "zdjęcie nie zapisane": "photo not saved",
   "placeholder Filmweb": "Filmweb placeholder",
   "wszystkie zdjęcia zapisane": "all photos saved",
+
+  "gra osobna": "a game of its own",
+  "Dostajecie dwóch znanych aktorów. Start otwiera profil pierwszego. Na Filmwebie albo IMDb szukacie drugiego. Kto pierwszy wróci i wciśnie Stop, wygrywa rundę.": "You get two well-known actors. Start opens the first actor's profile. On Filmweb or IMDb you look for the second. The first to come back and press Stop wins the round.",
+  "Zwycięzca wymienia odpowiedzi na głos. Timer puszcza przeciwnik (nie startuje sam). Na wypowiedź jest {n} s.": "The winner lists answers out loud. The opponent starts the timer (it does not start by itself). They have {n} s to speak.",
+  "Po czasie pozostali decydują (tak/nie), czy zaliczył zadanie. Sukces: licytujący dostaje 200 pkt za każdą zadeklarowaną. Porażka: każdy z pozostałych dostaje po 100 pkt za każdą.": "When time is up, the others vote yes/no on whether the task was completed. Success: the bidder gets 200 pts per declared answer. Failure: everyone else gets 100 pts per declared answer.",
+  "Bez listy odpowiedzi. Po licytacji i timerze pozostali gracze decydują, czy zadanie zostało zaliczone.": "No answer list. After bidding and the timer, the other players decide whether the task was completed.",
+  "Wpisz pytanie po polsku i po angielsku. Gracze licytują, ile odpowiedzi wymienią, a po timerze pozostali oceniają, czy zadanie zostało zaliczone. Listy odpowiedzi nie trzeba podawać.": "Enter the question in Polish and English. Players bid on how many answers they can list, and after the timer the others judge whether the task was completed. You do not need an answer list.",
+  "Pytania oddziel pustą linią. Jedna linia na pytanie: <b>pytanie PL | pytanie EN</b> (EN opcjonalnie).": "Separate questions with a blank line. One line per question: <b>question PL | question EN</b> (EN optional).",
+  "potrzeba pytania PL albo EN": "a PL or EN question is required",
+  "Nie udało się dobrać pary aktorów w Filmrun": "Could not pick a Filmrun actor pair",
 });

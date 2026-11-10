@@ -10,12 +10,18 @@ export const MAX_ROUNDS = 30;
 export const TOP_N = 5;
 export const TOP_N_MIN = 3, TOP_N_MAX = 8;
 export const TOP_OWN = 45, TOP_GUESS = 45, MOST_TIME = 90;
+export const LIC_BID_CAP = 30;
 export const MODES = ["kadry", "zoom", "licytacja", "rok", "kolejnosc", "plakat", "aktorzy", "top"];
 export const DURATION = { kadry: 3 * STAGE_SECONDS, zoom: 30, plakat: 30, top: TOP_OWN, rok: 25, kolejnosc: 40 };
 export const ACTOR_SECONDS = 6;
 export const MAX_ACTORS = 8;
 export const BID_SECONDS = 15;
 export const ORDER_N = 4;
+export function licTotal(q) {
+  const n = ((q && q.answers) || []).length;
+  return n >= 2 ? n : LIC_BID_CAP;
+}
+
 function castView(members) {
   return (members || []).map(c => {
     if (typeof c === "string") return { name: c, photo: null };
@@ -356,7 +362,7 @@ export class Game {
       if (opts.pair) r.mostPair = opts.pair;
       if (opts.pair && !(r.mostPairs && r.mostPairs.length)) r.mostPairs = [opts.pair];
       if (!(r.mostPairs && r.mostPairs.length) && !r.mostPair)
-        throw new GameError(400, "Filmrun wymaga klucza TMDB albo aktorów ze zdjęciem i profilem Filmweb/IMDb");
+        throw new GameError(400, "Nie udało się dobrać pary aktorów w Filmrun");
     }
     const used = new Set(); r.plan = [];
     const modes = r.kind === "most" ? Array.from({ length: r.rounds }, () => "most") : this.planModes();
@@ -594,7 +600,7 @@ export class Game {
     t.bids.push([pid, bid || 0]);
     this.event(bid === null ? "pass" : "bid", this.pname(pid) || "?", bid);
     const alive = t.order.filter(x => !t.passed.includes(x) && r.players[x]);
-    if (!alive.length || (alive.length === 1 && alive[0] === t.leader) || (t.leader && t.bid >= t.q.answers.length)) return this.licClose();
+    if (!alive.length || (alive.length === 1 && alive[0] === t.leader) || (t.leader && t.bid >= licTotal(t.q))) return this.licClose();
     const n = t.order.length;
     for (let k = 1; k <= n; k++) { const j = (t.turn + k) % n; if (alive.includes(t.order[j])) { t.turn = j; break; } }
     t.turn_end = now() + t.step;
@@ -852,7 +858,7 @@ export class Game {
         if (t.bidder !== null || r.phase !== "round") return { ok: false };
         if (t.order[t.turn] !== p.id) return { ok: false, turn: false };
         if (d.pass) { this.licAct(p.id, null); return { ok: true }; }
-        const raw = toInt(d.bid, 1, ans.length, null);
+        const raw = toInt(d.bid, 1, licTotal(t.q), null);
         if (raw === null) throw new GameError(400, "bid");
         if (raw <= t.bid) return { ok: false, low: true };
         this.licAct(p.id, raw);
@@ -1001,7 +1007,7 @@ export class Game {
       } else if (mode === "licytacja") {
         const ans = t.q.answers;
         Object.assign(out, {
-          total: ans.length, prompt: Game.prompt(t.q, lang), bid_seconds: this.cfg.lic_bid, answer_seconds: t.dur, bid: t.bid,
+          total: licTotal(t.q), prompt: Game.prompt(t.q, lang), bid_seconds: this.cfg.lic_bid, answer_seconds: t.dur, bid: t.bid,
           history: t.bids.map(([pid, b]) => ({ name: this.pname(pid) || "?", bid: b })).slice(-10),
         });
         if (t.bidder === null) {
@@ -1076,7 +1082,7 @@ export class Game {
       const got = new Set(t.found.map(f => f.i));
       Object.assign(ans, {
         bidder_name: this.pname(t.bidder || ""), bid: t.bid, success: t.success || false,
-        total: t.q.answers.length, prompt: Game.prompt(t.q, lang),
+        total: licTotal(t.q), prompt: Game.prompt(t.q, lang),
         answers: t.q.answers.map(a => Game.fview({ text: a.text, pl: a.pl || "" }, lang)),
         missed: t.q.answers.map((a, k) => [a, k]).filter(([, k]) => !got.has(k)).map(([a]) => Game.fview({ text: a.text, pl: a.pl || "" }, lang)).slice(0, 40),
         bids: t.bids.filter(([, b]) => b).map(([pid, b]) => ({ name: this.pname(pid) || "?", bid: b })),

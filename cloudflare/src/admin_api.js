@@ -142,13 +142,19 @@ function b64FromBytes(bytes) {
   return btoa(s);
 }
 
-function questionFrom(d) {
+function questionFrom(d, existing) {
   const pl = String(d.prompt_pl || "").trim().slice(0, 200);
   const en = String(d.prompt_en || "").trim().slice(0, 200);
   if (!pl && !en) throw new ApiError(400, "Podaj pytanie (PL albo EN)");
-  const ans = "answers_text" in d ? parseAnswers(d.answers_text)
-    : parseAnswers((d.answers || []).map(a => [a.text, ...(a.aliases || [])].join("; ")).join("\n"));
-  if (ans.length < 2) throw new ApiError(400, "Pytanie potrzebuje co najmniej 2 odpowiedzi");
+  let ans;
+  if ("answers_text" in d || "answers" in d) {
+    ans = "answers_text" in d ? parseAnswers(d.answers_text)
+      : parseAnswers((d.answers || []).map(a => [a.text, ...(a.aliases || [])].join("; ")).join("\n"));
+  } else if (existing) {
+    ans = existing;
+  } else {
+    ans = [];
+  }
   return { prompt_pl: pl, prompt_en: en, answers: ans };
 }
 
@@ -193,7 +199,7 @@ function parseQuestionsText(text) {
     const ans = parseAnswers(lines.slice(1).join("\n"));
     out.push({
       prompt_pl: pl.trim().slice(0, 200), prompt_en: en.trim().slice(0, 200), answers: ans,
-      status: ans.length >= 2 && (pl.trim() || en.trim()) ? "ok" : "bad_format",
+      status: (pl.trim() || en.trim()) ? "ok" : "bad_format",
     });
   }
   return out;
@@ -639,15 +645,16 @@ export async function handleAdmin(req, env, path, { isAdmin, body, detectLang })
       }
       if (req.method === "PUT") {
         const d = await body(req);
-        const q = questionFrom(d);
-        let packId = d.pack_id || 0;
-        if (!packId) {
+        let packId = d.pack_id || 0, existing = null;
+        if (!packId || !("answers_text" in d || "answers" in d)) {
           const packsList = await assetJson(env, req, "/data/packs.json");
           for (const p of packsList) {
             const data = await loadMergedPack(env, req, p.id);
-            if ((data.pack.questions || []).some(x => x.id === iid)) { packId = p.id; break; }
+            const hit = (data.pack.questions || []).find(x => x.id === iid);
+            if (hit) { packId = packId || p.id; existing = hit.answers || []; break; }
           }
         }
+        const q = questionFrom(d, existing);
         await contentOp(env, { op: "editQuestion", id: iid, pack_id: packId, question: q });
         return json({ ok: true });
       }

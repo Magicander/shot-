@@ -19,6 +19,7 @@ TOP_N_MIN, TOP_N_MAX = 3, 8
 TOP_OWN = 45                # sekundy na własną topkę
 TOP_GUESS = 45              # sekundy na odgadywanie cudzej
 MOST_TIME = 90              # dawny limit rundy Mostu (Filmrun nie używa zegara)
+LIC_BID_CAP = 30            # max deklaracja, gdy pytanie nie ma listy odpowiedzi
 
 MODES = ["kadry", "zoom", "licytacja", "rok", "kolejnosc", "plakat", "aktorzy", "top"]
 DURATION = {"kadry": 3 * STAGE_SECONDS, "zoom": 30, "plakat": 30, "top": TOP_OWN, "rok": 25, "kolejnosc": 40}
@@ -28,6 +29,12 @@ BID_SECONDS = 15
 ORDER_N = 4
 TITLE_MODES = {"kadry", "zoom", "plakat", "aktorzy"}
 
+
+
+def lic_total(q):
+    """Górny pułap oferty: długość listy odpowiedzi, albo LIC_BID_CAP gdy listy nie ma."""
+    n = len((q or {}).get("answers") or [])
+    return n if n >= 2 else LIC_BID_CAP
 
 def cast_view(members):
     """Lista {name, photo} do gry. photo to /actor/{id}.jpg albo None."""
@@ -698,7 +705,7 @@ class Room:
         name = self.players[pid]["name"] if pid in self.players else "?"
         self.event("pass" if bid is None else "bid", name, bid)
         alive = [x for x in t["order"] if x not in t["passed"] and x in self.players]
-        if not alive or alive == [t["leader"]] or (t["leader"] and t["bid"] >= len(t["q"]["answers"])):
+        if not alive or alive == [t["leader"]] or (t["leader"] and t["bid"] >= lic_total(t["q"])):
             return self.lic_close()
         n = len(t["order"])
         for k in range(1, n + 1):
@@ -957,7 +964,7 @@ class Room:
                 if d.get("pass"):
                     self.lic_act(p["id"], None)
                     return {"ok": True}
-                raw = _int(d.get("bid"), 1, len(ans), None)
+                raw = _int(d.get("bid"), 1, lic_total(t["q"]), None)
                 if raw is None:
                     raise ValueError("bid")
                 if raw <= t["bid"]:
@@ -1131,7 +1138,7 @@ class Room:
                                      "year": t["movie"]["year"]} if self.sees_solution(me) else None)
             elif mode == "licytacja":
                 ans = t["q"]["answers"]
-                out.update(total=len(ans), prompt=self.prompt(t["q"], lang), bid_seconds=self.cfg["lic_bid"],
+                out.update(total=lic_total(t["q"]), prompt=self.prompt(t["q"], lang), bid_seconds=self.cfg["lic_bid"],
                            answer_seconds=t["dur"], bid=t["bid"],
                            history=[{"name": self.pname(pid) or "?", "bid": b} for pid, b in t["bids"]][-10:])
                 if t["bidder"] is None:
@@ -1222,7 +1229,7 @@ class Room:
             got = {f["i"] for f in t["found"]}
             answers = [self.fview({"text": a["text"], "pl": a.get("pl") or ""}, lang) for a in t["q"]["answers"]]
             ans.update(bidder_name=self.pname(t["bidder"] or ""), bid=t["bid"],
-                       success=t.get("success", False), total=len(t["q"]["answers"]), prompt=self.prompt(t["q"], lang),
+                       success=t.get("success", False), total=lic_total(t["q"]), prompt=self.prompt(t["q"], lang),
                        answers=answers,
                        missed=[x for k, x in enumerate(answers) if k not in got][:40],
                        bids=[{"name": self.pname(pid) or "?", "bid": b} for pid, b in t["bids"] if b],
