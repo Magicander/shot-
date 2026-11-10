@@ -167,14 +167,10 @@ function langSwitch() {
     `<button type="button" class="${l === window.LANG ? "on" : ""}" onclick="setLang('${l}')" aria-pressed="${l === window.LANG}">${l.toUpperCase()}</button>`).join("")}</span>`;
 }
 function applyI18n(root = document) {
-  root.querySelectorAll("[data-t]").forEach(el => { const k = el.innerHTML.trim(); el.innerHTML = T(k);   "wszystkie zdjęcia zapisane": "all photos saved",
-});
-  root.querySelectorAll("[data-tp]").forEach(el => { el.placeholder = T(el.placeholder);   "wszystkie zdjęcia zapisane": "all photos saved",
-});
-  root.querySelectorAll("[data-ta]").forEach(el => { el.setAttribute("aria-label", T(el.getAttribute("aria-label")));   "wszystkie zdjęcia zapisane": "all photos saved",
-});
-  root.querySelectorAll("[data-langsw]").forEach(el => { el.innerHTML = langSwitch();   "wszystkie zdjęcia zapisane": "all photos saved",
-});
+  root.querySelectorAll("[data-t]").forEach(el => { const k = el.innerHTML.trim(); el.innerHTML = T(k); });
+  root.querySelectorAll("[data-tp]").forEach(el => { el.placeholder = T(el.placeholder); });
+  root.querySelectorAll("[data-ta]").forEach(el => { el.setAttribute("aria-label", T(el.getAttribute("aria-label"))); });
+  root.querySelectorAll("[data-langsw]").forEach(el => { el.innerHTML = langSwitch(); });
 }
 document.addEventListener("DOMContentLoaded", () => applyI18n());
 

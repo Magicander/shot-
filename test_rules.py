@@ -254,4 +254,10 @@ except Exception:
     check(False, "is_real_headshot nie powinien rzucać")
 check(not webscrape.is_real_headshot(b"not-an-image"), "nie-obrazek odrzucony")
 
+# składnia frontendu — zepsuty i18n.js wyłącza całą stronę
+import subprocess, pathlib
+for name in ("static/i18n.js", "static/game.js", "static/admin.js", "static/rt.js"):
+    r = subprocess.run(["node", "--check", str(pathlib.Path(__file__).parent / name)], capture_output=True, text=True)
+    check(r.returncode == 0, f"składnia {name}" + (f": {r.stderr.strip()}" if r.returncode else ""))
+
 print(f"\nOK: {OK} sprawdzeń")
