@@ -3,6 +3,7 @@
 import { errText } from "./i18n.js";
 import { handleAdmin, ApiError as AdminApiError, loadMergedPack, contentOp } from "./admin_api.js";
 import { contentStub } from "./content.js";
+import { tmdbPersonMovies, tmdbMovieCast, tmdbPersonDetail, localGraph, extLinks } from "./most.js";
 export { Room } from "./room.js";
 export { Content } from "./content.js";
 
@@ -128,6 +129,32 @@ async function exportDb(env, req) {
   });
 }
 
+
+async function localMostLookup(env, req, kind, nid, lang, noTmdb) {
+  const packsList = await (await asset(env, req, "/data/packs.json")).json();
+  const movies = [];
+  for (const p of packsList) {
+    if (p.custom || p.id === "custom") continue;
+    try {
+      const data = await loadMergedPack(env, req, p.id);
+      movies.push(...(data.movies || []));
+    } catch {}
+  }
+  const g = localGraph(movies);
+  const meta = (node) => {
+    const m = (g._meta && (g._meta[`${node[0]}:${node[1]}`] || g._meta[node])) || {};
+    if (node[0] === "person") {
+      const v = { kind: "person", id: node[1], name: m.name || "", photo: m.photo || null, imdb_id: m.imdb_id || "", filmweb_id: m.filmweb_id || null };
+      v.link = extLinks(v, lang);
+      return v;
+    }
+    return { kind: "movie", id: node[1], title: m.title || "", year: m.year, poster: m.poster || null };
+  };
+  const list = (g[`${kind}:${Number(nid)}`] || []).map(meta);
+  if (kind === "person") return { person: meta(["person", Number(nid)]), movies: list, local: true, no_tmdb: !!noTmdb };
+  return { movie: meta(["movie", Number(nid)]), cast: list, local: true, no_tmdb: !!noTmdb };
+}
+
 async function gameApi(req, env, path, url) {
   if (req.method === "GET" && path === "/api/packs") {
     const packsList = await (await asset(env, req, "/data/packs.json")).json();
@@ -139,24 +166,83 @@ async function gameApi(req, env, path, url) {
       const off = new Set(String(offCsv).split(",").filter(Boolean));
       out.push({ ...p, modes: (p.modes || []).filter(k => !off.has(k)) });
     }
+    if (!out.some(p => p.id === "custom" || p.custom)) {
+      const thumbs = [];
+      for (const p of out) for (const th of (p.thumbs || [])) if (thumbs.length < 3) thumbs.push(th);
+      const total = out.reduce((s, p) => s + (p.total || p.playable || 0), 0);
+      out.push({
+        id: "custom", slug: "custom", name: "Custom", name_en: "Custom",
+        description: "Złóż własne multi-pakiet z kilku istniejących.",
+        description_en: "Build a multi-pack from the packs you already have.",
+        color: "#1B1712", playable: total, total, thumbs, modes: [], custom: true,
+      });
+    } else {
+      const i = out.findIndex(p => p.id === "custom" || p.custom);
+      if (i >= 0 && i !== out.length - 1) out.push(...out.splice(i, 1));
+    }
     return json(out);
   }
-  let m = path.match(/^\/api\/packs\/(\d+)\/titles$/);
-  if (m) {
-    // titles with overlay pl_title
-    const data = await loadMergedPack(env, req, +m[1]);
+  if (req.method === "GET" && path === "/api/most/status")
+    return json({ tmdb: !!env.TMDB_API_KEY, ok: true });
+  let mm = path.match(/^\/api\/most\/(person|movie)\/(\d+)(?:\/(movies|cast))?$/);
+  if (mm && req.method === "GET") {
+    const kind = mm[1], nid = +mm[2], sub = mm[3];
     const lang = detectLang(req);
-    const t = new Set(data.movies.map(x => x.title));
-    if (lang === "pl") for (const mv of data.movies) if (mv.pl_title) t.add(mv.pl_title);
-    return json([...t].sort((a, b) => a.localeCompare(b, lang)));
+    const key = env.TMDB_API_KEY;
+    if (key) {
+      try {
+        if (kind === "person" && (sub == null || sub === "movies")) {
+          const person = await tmdbPersonDetail(key, nid, lang);
+          return json({ person, movies: await tmdbPersonMovies(key, nid) });
+        }
+        if (kind === "movie" && (sub == null || sub === "cast")) {
+          return json({ movie: { kind: "movie", id: nid }, cast: await tmdbMovieCast(key, nid, lang) });
+        }
+      } catch (e) { console.log("most lookup tmdb", String(e)); }
+    }
+    return json(await localMostLookup(env, req, kind, nid, lang, !key));
+  }
+  let m = path.match(/^\/api\/packs\/(custom|\d+)\/titles$/);
+  if (m) {
+    const lang = detectLang(req);
+    if (m[1] === "custom") {
+      const packsList = await (await asset(env, req, "/data/packs.json")).json();
+      const tset = new Set();
+      for (const p of packsList) {
+        if (p.custom || p.id === "custom") continue;
+        try {
+          const data = await loadMergedPack(env, req, p.id);
+          for (const x of data.movies) {
+            tset.add(x.title);
+            if (lang === "pl" && x.pl_title) tset.add(x.pl_title);
+          }
+        } catch {}
+      }
+      return json([...tset].sort((a, b) => a.localeCompare(b, lang)));
+    }
+    const data = await loadMergedPack(env, req, +m[1]);
+    const tset = new Set(data.movies.map(x => x.title));
+    if (lang === "pl") for (const mv of data.movies) if (mv.pl_title) tset.add(mv.pl_title);
+    return json([...tset].sort((a, b) => a.localeCompare(b, lang)));
   }
   if (req.method === "POST" && path === "/api/rooms") {
     const d = await body(req);
-    const packId = parseInt(d.pack_id, 10);
-    if (!(packId > 0)) throw new ApiError(400, "Zły format danych");
+    const kind = d.kind || (d.pack_id === "most" ? "most" : d.pack_id === "custom" ? "custom" : "pack");
+    if (kind === "pack") {
+      const packId = parseInt(d.pack_id, 10);
+      if (!(packId > 0)) throw new ApiError(400, "Zły format danych");
+    } else if (kind === "custom") {
+      const ids = (d.pack_ids || d.packs || []).map(Number).filter(n => n > 0);
+      if (!ids.length) throw new ApiError(400, "Wybierz przynajmniej jeden pakiet");
+    }
     for (let i = 0; i < 8; i++) {
       const code = newCode();
-      const out = await roomStub(env, code).create(code, packId, parseInt(d.rounds, 10) || 10, d.modes || null, d.name, d.settings || null);
+      const out = await roomStub(env, code).create(
+        code, kind === "pack" ? parseInt(d.pack_id, 10) : kind,
+        parseInt(d.rounds, 10) || (kind === "most" ? 3 : 10),
+        d.modes || null, d.name, d.settings || null,
+        { kind, pack_ids: d.pack_ids || d.packs || [] },
+      );
       if (!out.error) return json(out);
     }
     throw new ApiError(503, "Nie ma takiego adresu");
@@ -218,6 +304,13 @@ export default {
       if (req.method === "GET" && pm) {
         const stub = contentStub(env);
         const r = await stub.fetch(new Request(`https://content/poster?id=${pm[1]}`));
+        if (r.ok) return r;
+        return env.ASSETS.fetch(req);
+      }
+      let fm = path.match(/^\/frame\/(\d+)\.jpg$/);
+      if (req.method === "GET" && fm) {
+        const stub = contentStub(env);
+        const r = await stub.fetch(new Request(`https://content/frame?id=${fm[1]}`));
         if (r.ok) return r;
         return env.ASSETS.fetch(req);
       }

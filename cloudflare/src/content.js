@@ -56,10 +56,25 @@ export class Content extends DurableObject {
         deleted INTEGER NOT NULL DEFAULT 0,
         updated_at REAL NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS frames (
+        id INTEGER PRIMARY KEY,
+        movie_id INTEGER NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'zoom',
+        image BLOB,
+        deleted INTEGER NOT NULL DEFAULT 0,
+        updated_at REAL NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS movie_zoom (
+        movie_id INTEGER PRIMARY KEY,
+        frame_id INTEGER,
+        deleted INTEGER NOT NULL DEFAULT 0,
+        updated_at REAL NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS seq (name TEXT PRIMARY KEY, n INTEGER NOT NULL);
       INSERT OR IGNORE INTO seq(name, n) VALUES ('quotes', ${NEW_ID_BASE});
       INSERT OR IGNORE INTO seq(name, n) VALUES ('questions', ${NEW_ID_BASE});
       INSERT OR IGNORE INTO seq(name, n) VALUES ('actors', ${NEW_ID_BASE});
+      INSERT OR IGNORE INTO seq(name, n) VALUES ('frames', ${NEW_ID_BASE});
     `);
   }
 
@@ -95,6 +110,8 @@ export class Content extends DurableObject {
         return { ...rest, has_image: !!(bytes), bytes: bytes || 0, image_b64 };
       }),
       seq: Object.fromEntries(rows("SELECT name, n FROM seq").map(r => [r.name, r.n])),
+      zoom: rows("SELECT movie_id, frame_id, deleted, updated_at FROM movie_zoom"),
+      frames: rows("SELECT id, movie_id, kind, deleted, updated_at, length(image) AS bytes FROM frames").map(f => ({ ...f, has_image: (f.bytes || 0) > 0 })),
     };
   }
 
@@ -105,6 +122,8 @@ export class Content extends DurableObject {
     this.ctx.storage.sql.exec("DELETE FROM packs");
     this.ctx.storage.sql.exec("DELETE FROM posters");
     this.ctx.storage.sql.exec("DELETE FROM actor_photos");
+    this.ctx.storage.sql.exec("DELETE FROM frames");
+    this.ctx.storage.sql.exec("DELETE FROM movie_zoom");
     this.ctx.storage.sql.exec(`UPDATE seq SET n = ${NEW_ID_BASE}`);
     return { ok: true };
   }
@@ -120,6 +139,8 @@ export class Content extends DurableObject {
       packs: one("SELECT COUNT(*) AS n FROM packs"),
       posters: one("SELECT COUNT(*) AS n FROM posters WHERE deleted=0"),
       actors: one("SELECT COUNT(*) AS n FROM actor_photos WHERE deleted=0"),
+      frames: one("SELECT COUNT(*) AS n FROM frames WHERE deleted=0"),
+      zoom: one("SELECT COUNT(*) AS n FROM movie_zoom WHERE deleted=0 AND frame_id IS NOT NULL"),
     };
   }
 
@@ -337,6 +358,9 @@ export class Content extends DurableObject {
           try { out.cast = JSON.parse(o.cast_json || "[]"); } catch { out.cast = []; }
         }
       }
+    const zoomOv = Object.fromEntries(
+      [...this.ctx.storage.sql.exec("SELECT movie_id, frame_id, deleted, updated_at FROM movie_zoom")].map(r => [r.movie_id, r])
+    );
       // quotes: base + overlay (by id, or by movie_id for new cloud quotes)
       const baseQs = (m.quotes || []).map(q => ({
         text: typeof q === "string" ? q : q.text,
@@ -365,6 +389,11 @@ export class Content extends DurableObject {
       if (po) {
         if (po.deleted) out.poster = false;
         else if (po.bytes > 0) out.poster = true;
+      }
+      const zo = zoomOv[m.id];
+      if (zo) {
+        if (zo.deleted) out.zoom_frame = null;
+        else if (zo.frame_id) out.zoom_frame = zo.frame_id;
       }
       return out;
     });
@@ -401,22 +430,22 @@ export class Content extends DurableObject {
     const pack = { ...data.pack, questions, modes_off: modesOff };
     const off = new Set(String(modesOff || "").split(",").filter(Boolean));
     const framed = movies.filter(m => (m.frames || []).length).length;
+    const zoomed = movies.filter(m => m.zoom_frame || (m.frames || []).length).length;
     const years = new Set(movies.map(m => m.year).filter(Boolean));
-    const nQuotes = movies.reduce((n, m) => n + (m.quotes || []).length, 0);
     const nPosters = movies.filter(m => m.poster).length;
     const nCast = movies.filter(m => (m.cast || []).length >= 3).length;
     const nQ = questions.length || (movies.length >= 5 ? 1 : 0);
     const need = {
       kadry: [framed, 1, "frames"],
-      zoom: [framed, 1, "frames"],
+      zoom: [zoomed, 1, "frames"],
       licytacja: [nQ, 1, "questions"],
       rok: [movies.filter(m => m.year).length, 3, "years"],
       kolejnosc: [years.size, 4, "years"],
       plakat: [nPosters, 3, "posters"],
       aktorzy: [nCast, 3, "cast"],
-      cytat: [nQuotes, 5, "quotes"],
+      top: [movies.length, 5, "movies"],
     };
-    const MODES = ["kadry", "zoom", "licytacja", "rok", "kolejnosc", "plakat", "aktorzy", "cytat"];
+    const MODES = ["kadry", "zoom", "licytacja", "rok", "kolejnosc", "plakat", "aktorzy", "top"];
     const avail = {};
     for (const k of MODES) {
       const [have, needN, what] = need[k];
@@ -455,6 +484,54 @@ export class Content extends DurableObject {
     return row || null;
   }
 
+
+  setZoomFrame(movieId, frameId, imageBytes = null) {
+    const ts = this.now();
+    let fid = frameId ? +frameId : 0;
+    if (imageBytes) {
+      if (imageBytes.byteLength > MAX_POSTER)
+        throw Object.assign(new Error("Kadr jest za duży (max 1,5 MB)"), { code: 413, key: "Kadr jest za duży (max 1,5 MB)" });
+      if (!fid) fid = this.nextId("frames");
+      this.ctx.storage.sql.exec(
+        `INSERT INTO frames(id, movie_id, kind, image, deleted, updated_at) VALUES (?,?,?,?,0,?)
+         ON CONFLICT(id) DO UPDATE SET image=excluded.image, kind='zoom', deleted=0, updated_at=excluded.updated_at`,
+        fid, +movieId, "zoom", imageBytes, ts,
+      );
+    }
+    if (!fid) throw Object.assign(new Error("Brak kadru"), { code: 400, key: "Brak kadru" });
+    this.ctx.storage.sql.exec(
+      `INSERT INTO movie_zoom(movie_id, frame_id, deleted, updated_at) VALUES (?,?,0,?)
+       ON CONFLICT(movie_id) DO UPDATE SET frame_id=excluded.frame_id, deleted=0, updated_at=excluded.updated_at`,
+      +movieId, fid, ts,
+    );
+    return { ok: true, zoom: fid, updated_at: ts };
+  }
+
+  clearZoomFrame(movieId) {
+    const ts = this.now();
+    const row = [...this.ctx.storage.sql.exec("SELECT frame_id FROM movie_zoom WHERE movie_id=?", +movieId)][0];
+    this.ctx.storage.sql.exec(
+      `INSERT INTO movie_zoom(movie_id, frame_id, deleted, updated_at) VALUES (?,NULL,1,?)
+       ON CONFLICT(movie_id) DO UPDATE SET deleted=1, frame_id=NULL, updated_at=excluded.updated_at`,
+      +movieId, ts,
+    );
+    if (row && row.frame_id && row.frame_id >= NEW_ID_BASE)
+      this.ctx.storage.sql.exec("UPDATE frames SET deleted=1, updated_at=? WHERE id=? AND movie_id=?", ts, row.frame_id, +movieId);
+    return { ok: true };
+  }
+
+  getFrame(id) {
+    const row = [...this.ctx.storage.sql.exec(
+      "SELECT image, kind, deleted, movie_id FROM frames WHERE id=?", +id)][0];
+    return row || null;
+  }
+
+  getZoomMeta(movieId) {
+    const row = [...this.ctx.storage.sql.exec(
+      "SELECT frame_id, deleted, updated_at FROM movie_zoom WHERE movie_id=?", +movieId)][0];
+    return row || null;
+  }
+
   getModesOff(packId) {
     const row = [...this.ctx.storage.sql.exec("SELECT modes_off FROM packs WHERE pack_id=?", +packId)][0];
     return row ? (row.modes_off || "") : null;
@@ -471,6 +548,14 @@ export class Content extends DurableObject {
         const bytes = row.image;
         const ct = bytes[0] === 0x89 ? "image/png" : bytes[8] === 0x57 ? "image/webp" : "image/jpeg";
         return new Response(bytes, { headers: { "Content-Type": ct, "Cache-Control": "no-store" } });
+      }
+      if (request.method === "GET" && url.pathname === "/frame") {
+        const id = +url.searchParams.get("id");
+        const row = this.getFrame(id);
+        if (!row || row.deleted || !row.image) return new Response("gone", { status: 404 });
+        const bytes = row.image;
+        const ct = bytes[0] === 0x89 ? "image/png" : bytes[8] === 0x57 ? "image/webp" : "image/jpeg";
+        return new Response(bytes, { headers: { "Content-Type": ct, "Cache-Control": "public, max-age=3600" } });
       }
       if (request.method === "GET" && url.pathname === "/actor") {
         const id = +url.searchParams.get("id");
@@ -522,6 +607,17 @@ export class Content extends DurableObject {
           updated_at: row.updated_at, has_image: !!(row.image && row.image.byteLength),
         });
       }
+      if (op === "setZoomFrame") {
+        let bytes = null;
+        if (d.image_b64) {
+          const bin = atob(d.image_b64);
+          bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        }
+        return Response.json(this.setZoomFrame(d.movie_id, d.frame_id, bytes));
+      }
+      if (op === "clearZoomFrame") return Response.json(this.clearZoomFrame(d.movie_id));
+      if (op === "getZoomMeta") return Response.json(this.getZoomMeta(d.movie_id));
       if (op === "getPosterMeta") {
         const row = this.getPoster(d.movie_id);
         if (!row) return Response.json(null);

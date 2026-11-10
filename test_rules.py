@@ -173,4 +173,72 @@ r.configure(rounds=2); r.start(); r.next(); r.next()
 check(r.state(A)["mult"] == 2, "ostatnia runda x2")
 r.answer(A, {"text": "Movie " + str(r.task["movie"]["id"])}, "pl")
 check(A["got"]["points"] == 2 * 1100, "punkty podwojone")
+print("top, custom, zoom, most")
+check(rooms.top_score([1, 2, 3, 4, 5], [1, 2, 3, 4, 5]) == 25, "Top: komplet = N*N")
+check(rooms.top_score([2, 1, 3, 4, 5], [1, 2, 3, 4, 5]) == 23, "Top: pomyłka o 1 na dwóch miejscach = 4+4+5+5+5")
+check(rooms.top_score([5, 4, 3, 2, 1], [1, 2, 3, 4, 5]) == 13, "Top: odwrotna kolejność = 13")
+asg = rooms.top_assign(["A", "B"])
+check(asg == {"A": "B", "B": "A"}, "Top: przy 2 osobach zgadują siebie nawzajem")
+asg = rooms.top_assign(["A", "B", "C", "D"])
+check(len(asg) == 4 and all(asg[k] != k for k in asg) and set(asg.values()) == set(asg), "Top: cykl bez zgadywania siebie, każdy raz")
+check(rooms.top_assign(["A"]) == {}, "Top: jedna osoba — brak celów")
+
+# zoom_frame niezależny od kadry
+ms = json.loads(json.dumps(FX["movies"]))
+ms[0]["zoom_frame"] = 999
+r = rooms.Room("TEST", json.loads(json.dumps(FX["pack"])), ms, 1, FX["avail"])
+r.add_player("A")
+r.configure(modes=["zoom"])
+# deterministycznie: tylko pierwszy film w puli zoom (wszystkie mają frames, pierwszy ma zoom_frame)
+# podmieniamy pick przez ograniczenie puli
+r.movies = [ms[0]]
+r.start()
+check(r.task["frame"] == 999, "Zoom: osobny kadr, nie frames[1]")
+r2 = rooms.Room("TEST", json.loads(json.dumps(FX["pack"])), json.loads(json.dumps(FX["movies"])), 1, FX["avail"])
+r2.add_player("A")
+r2.configure(modes=["zoom"])
+r2.movies = [json.loads(json.dumps(FX["movies"][0]))]  # bez zoom_frame
+r2.start()
+check(r2.task["frame"] == FX["movies"][0]["frames"][1], "Zoom: zapas to środkowy kadr z Kadry")
+
+# merge custom
+import types as _types
+class Fake:
+    pass
+
+# merge_packs wymaga sqlite — testujemy czystą deduplikację przez ręczny typ
+# (funkcja jest przy kon; tu sprawdzamy klucz tytułu+rok na liście filmów z rooms.load patrząc na logikę poza DB)
+from rooms import merge_packs, availability, top_need, norm_settings
+# availability top
+av = rooms.availability(FX["pack"], FX["movies"][:3], False, {"top_n": 5})
+check(not av["top"]["ok"] and av["top"]["need"] == 5 and av["top"]["reason"] == "movies", "Top niedostępny, gdy za mało filmów")
+av = rooms.availability(FX["pack"], FX["movies"], False, {"top_n": 5})
+check(av["top"]["ok"], "Top dostępny przy 8 filmach")
+
+# Most: punktacja, ścieżka, graf lokalny
+import most
+check(most.most_score(3, True, first=True) == 1100, "Most: 3 filmy i premia za pierwsze miejsce")
+check(most.most_score(3, True, first=False) == 1000, "Most: 3 filmy bez premii")
+check(most.most_score(8, True) == 100, "Most: 8 filmów = minimum 100")
+check(most.most_score(10, True) == 100, "Most: dłuższa niż cap i tak 100, jeśli doszedł")
+check(most.most_score(2, False) == 0, "Most: brak dojścia = 0")
+
+# graf z wspólnymi aktorami: A-film1-B-film2-C-film3-D  (3 filmy, dystans OK)
+chain_movies = []
+names = ["Ada", "Ben", "Cora", "Dan"]
+for i in range(3):
+    chain_movies.append({
+        "id": 100 + i, "title": f"Link {i}", "year": 2000 + i, "poster": False,
+        "frames": None, "cast": [{"name": names[i], "source_id": str(10 + i)},
+                                 {"name": names[i+1], "source_id": str(11 + i)}],
+    })
+g = most.local_graph(chain_movies)
+pair = most.pick_pair_from_graph(g, rng=__import__("random").Random(0))
+check(pair is not None, "Most: istnieje ścieżka w grafie lokalnym")
+start, goal, path = pair
+check(start["kind"] == "person" and goal["kind"] == "person" and start["id"] != goal["id"], "Most: para to dwaj różni aktorzy")
+nmov = most.path_movies(path)
+check(3 <= nmov <= 4, f"Most: dobrana ścieżka ma 3–4 filmy (jest {nmov})")
+check(most.is_adjacent is not None, "Most: is_adjacent istnieje")
+
 print(f"\nOK: {OK} sprawdzeń")

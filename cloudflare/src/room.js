@@ -1,8 +1,9 @@
 // room.js - jeden Durable Object na pokój. WebSockety z hibernacją (bez pollingu),
 // stan w SQLite obiektu (ctx.storage), zegar rundy przez alarmy.
 import { DurableObject } from "cloudflare:workers";
-import { Game, GameError, newRoom, MAX_PLAYERS } from "./game.js";
+import { Game, GameError, newRoom, MAX_PLAYERS, mergePackData, availability, normTitle } from "./game.js";
 import { errText } from "./i18n.js";
+import { pickPair, localGraph, tmdbIsAdjacent, tmdbAdjacent, isAdjacentLocal, enrichLocal } from "./most.js";
 
 const IDLE_TTL = 6 * 3600;          // pusty pokój znika po 6 h
 const ACTIONS_HOST = new Set(["start", "next", "again", "kick", "setup"]);
@@ -27,7 +28,11 @@ export class Room extends DurableObject {
       const a = ws.deserializeAttachment(); if (a && a.pid) s.add(a.pid); }
     return s;
   }
-  game(exclude = null) { return new Game(this.room, this.movies, this.online(exclude)); }
+  game(exclude = null) {
+    const g = new Game(this.room, this.movies, this.online(exclude));
+    g._localGraph = this.localGraph || (this.movies ? localGraph(this.movies) : null);
+    return g;
+  }
 
   async save() {
     await this.ctx.storage.put("room", this.room);
@@ -59,12 +64,10 @@ export class Room extends DurableObject {
   }
 
   // ---------------------------------------------------------------- RPC z Workera
-  async create(code, packId, rounds, modes, name, settings = null) {
-    if (this.room) return { error: "exists" };
+  async loadPackData(packId) {
     const res = await this.env.ASSETS.fetch(`https://assets.local/data/pack-${packId}.json`);
-    if (!res.ok) throw new GameError(404, "Nie ma takiego pakietu");
+    if (!res.ok) return null;
     let data = await res.json();
-    // nałóż edycje z Content DO (cytaty, pytania, tytuły PL, obsada, plakaty, modes_off)
     try {
       const stub = this.env.CONTENT.get(this.env.CONTENT.idFromName("content"));
       const mr = await stub.fetch(new Request("https://content/op", {
@@ -74,18 +77,63 @@ export class Room extends DurableObject {
       if (mr.ok) {
         const merged = await mr.json();
         data = { pack: merged.pack, movies: merged.movies, avail: merged.avail || data.avail };
-        if (merged.modes_off != null) {
-          const off = new Set(String(merged.modes_off).split(",").filter(Boolean));
-          // availability stays; host configure() still filters modes
-          data._modes_off = [...off];
-        }
       }
     } catch (e) { console.error("content merge failed", String(e)); }
-    if (!Object.values(data.avail).some(v => v.ok)) throw new GameError(400, "Ten pakiet nie ma jeszcze gotowych filmów");
+    return data;
+  }
+
+  async loadAllMovies() {
+    const res = await this.env.ASSETS.fetch("https://assets.local/data/packs.json");
+    if (!res.ok) return [];
+    const packsList = await res.json();
+    const movies = [], seen = new Set();
+    for (const p of packsList) {
+      if (p.custom || p.id === "custom") continue;
+      const data = await this.loadPackData(p.id);
+      if (!data) continue;
+      for (const m of data.movies || []) {
+        const key = `${normTitle(m.title)}|${m.year || -1}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        movies.push(m);
+      }
+    }
+    return movies;
+  }
+
+  async create(code, packId, rounds, modes, name, settings = null, opts = {}) {
+    if (this.room) return { error: "exists" };
+    const kind = (opts && opts.kind) || (packId === "most" ? "most" : packId === "custom" ? "custom" : "pack");
+    let data;
+    if (kind === "most") {
+      const movies = await this.loadAllMovies();
+      data = {
+        pack: { id: "most", slug: "most", name: "Most", name_en: "Bridge", color: "#F26B1D", questions: [], modes_off: "" },
+        movies,
+        avail: { most: { ok: true, have: 1, need: 1, reason: null } },
+      };
+    } else if (kind === "custom") {
+      const ids = [...new Set((opts.pack_ids || []).map(Number).filter(n => n > 0))];
+      const datas = [];
+      for (const id of ids) {
+        const one = await this.loadPackData(id);
+        if (one) datas.push(one);
+      }
+      if (!datas.length) throw new GameError(400, "Wybierz przynajmniej jeden pakiet");
+      const merged = mergePackData(datas);
+      merged.avail = availability(merged.pack, merged.movies, settings);
+      if (!Object.values(merged.avail).some(v => v.ok)) throw new GameError(400, "Za mało filmów w wybranych pakietach");
+      data = merged;
+    } else {
+      data = await this.loadPackData(packId);
+      if (!data) throw new GameError(404, "Nie ma takiego pakietu");
+      if (!Object.values(data.avail || {}).some(v => v.ok)) throw new GameError(400, "Ten pakiet nie ma jeszcze gotowych filmów");
+    }
     this.movies = data.movies;
-    this.room = newRoom(code, data, rounds);
+    this.localGraph = localGraph(this.movies);
+    this.room = newRoom(code, data, rounds, kind);
     const g = this.game();
-    if ((modes && modes.length) || settings) g.configure(modes && modes.length ? modes : null, null, settings);
+    if ((modes && modes.length && kind !== "most") || settings) g.configure(modes && modes.length && kind !== "most" ? modes : null, null, settings);
     const p = g.addPlayer(name);
     await this.ctx.storage.put("movies", this.movies);
     await this.save();
@@ -146,11 +194,28 @@ export class Room extends DurableObject {
     try {
       let out;
       if (m.a === "state") out = null;
-      else if (m.a === "guess") out = g.answer(p, b, a.lang);
+      else if (m.a === "guess") {
+        if (r.task && r.task.mode === "most") out = await this.mostGuess(g, p, b, a.lang);
+        else out = g.answer(p, b, a.lang);
+      }
       else if (ACTIONS_HOST.has(m.a)) {
         if (p.id !== r.host) throw new GameError(403, "Tylko gospodarz może to zrobić");
         if (m.a === "setup") g.configure(b.modes, b.rounds, b.settings);
-        else if (m.a === "start" && ["lobby", "final"].includes(r.phase)) g.start();
+        else if (m.a === "start" && ["lobby", "final"].includes(r.phase)) {
+          if (r.kind === "most") {
+            try {
+              const pair = await pickPair(this.movies, this.env.TMDB_API_KEY, a.lang);
+              this.localGraph = localGraph(this.movies);
+              g._localGraph = this.localGraph;
+              g.start({ pair });
+            } catch (e) {
+              const msg = (e.key === "most_no_tmdb" || e.message === "most_no_tmdb")
+                ? "Most wymaga klucza TMDB albo bogatszej obsady w pakietach"
+                : "Nie udało się dobrać pary aktorów";
+              throw new GameError(400, msg);
+            }
+          } else g.start();
+        }
         else if (m.a === "next" && ["round", "reveal"].includes(r.phase)) g.next();
         else if (m.a === "again") g.again();
         else if (m.a === "kick" && b.victim in r.players && b.victim !== r.host) g.removePlayer(b.victim);
@@ -193,6 +258,29 @@ export class Room extends DurableObject {
     // granica etapu (nowy kadr, kolejny aktor, podpowiedź) też wymaga wysłania stanu
     this.broadcast(g);
     void before;
+  }
+
+  async mostGuess(g, p, b, lang) {
+    const prep = g.mostStepLocal(p, b);
+    if (prep.ok !== "check") return prep;
+    g._localGraph = g._localGraph || localGraph(this.movies);
+    let ok = false, nxt = prep.nxt;
+    const key = this.env.TMDB_API_KEY;
+    if (key) {
+      ok = await tmdbIsAdjacent(key, prep.path[prep.path.length - 1], nxt, lang);
+      if (ok && !nxt.name && !nxt.title) {
+        try {
+          const neigh = await tmdbAdjacent(key, prep.path[prep.path.length - 1], lang);
+          const hit = neigh.find(n => n.kind === nxt.kind && Number(n.id) === Number(nxt.id));
+          if (hit) nxt = hit;
+        } catch {}
+      }
+    }
+    if (!ok) {
+      ok = isAdjacentLocal(g._localGraph, prep.path[prep.path.length - 1], nxt);
+      if (ok) nxt = enrichLocal(g._localGraph, nxt);
+    }
+    return g.applyMostStep(p, prep.path, nxt, ok);
   }
 }
 

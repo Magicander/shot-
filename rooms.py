@@ -13,16 +13,20 @@ REVEAL_SECONDS = 9
 STAGE_POINTS = [1000, 600, 300]
 FIRST_BONUS = 100
 MAX_PLAYERS = 16
-MIN_QUOTES = 5              # Cytat wymaga co najmniej tylu cytatów w pakiecie
 MAX_ROUNDS = 30
+TOP_N = 5                   # domyślna długość topki
+TOP_N_MIN, TOP_N_MAX = 3, 8
+TOP_OWN = 45                # sekundy na własną topkę
+TOP_GUESS = 45              # sekundy na odgadywanie cudzej
+MOST_TIME = 90              # sekundy na rundę Mostu
 
-MODES = ["kadry", "zoom", "licytacja", "rok", "kolejnosc", "plakat", "aktorzy", "cytat"]
-DURATION = {"kadry": 3 * STAGE_SECONDS, "zoom": 30, "plakat": 30, "cytat": 30, "rok": 25, "kolejnosc": 40}
+MODES = ["kadry", "zoom", "licytacja", "rok", "kolejnosc", "plakat", "aktorzy", "top"]
+DURATION = {"kadry": 3 * STAGE_SECONDS, "zoom": 30, "plakat": 30, "top": TOP_OWN, "rok": 25, "kolejnosc": 40}
 ACTOR_SECONDS = 6
 MAX_ACTORS = 8
 BID_SECONDS = 15
 ORDER_N = 4
-TITLE_MODES = {"kadry", "zoom", "plakat", "aktorzy", "cytat"}
+TITLE_MODES = {"kadry", "zoom", "plakat", "aktorzy"}
 
 
 def cast_view(members):
@@ -42,7 +46,8 @@ JUDGE_GRACE = 15            # po końcu czasu sędzia ma jeszcze tyle sekund na 
 LIC_DONE_DELAY = 3          # licytacja na głos: chwila na cofnięcie ostatniego "+1" po osiągnięciu deklaracji
 DEFAULTS = {"time": 0, "mode_time": {}, "order": "mix", "per_mode": False, "mode_rounds": {},
             "answer": "type", "mode_answer": {}, "judge": "rotate", "lic_answer": 30, "lic_bid": 10,
-            "hints": True, "final_x": 1}
+            "hints": True, "final_x": 1, "top_n": TOP_N, "top_own": TOP_OWN, "top_guess": TOP_GUESS,
+            "most_time": MOST_TIME}
 
 
 def _int(v, lo, hi, dflt):
@@ -76,6 +81,10 @@ def norm_settings(d):
         "lic_bid": _int(d.get("lic_bid"), 5, 60, 10),
         "hints": d.get("hints") is not False,
         "final_x": _int(d.get("final_x"), 1, 3, 1),
+        "top_n": _int(d.get("top_n"), TOP_N_MIN, TOP_N_MAX, TOP_N),
+        "top_own": _int(d.get("top_own"), 15, 180, TOP_OWN),
+        "top_guess": _int(d.get("top_guess"), 15, 180, TOP_GUESS),
+        "most_time": _int(d.get("most_time"), 30, 180, MOST_TIME),
     }
 
 
@@ -161,9 +170,10 @@ def load_pack(con, pack_id):
             cast = json.loads(m["cast_json"] or "[]")
         except ValueError:
             cast = []
+        zf = db.game_zoom_frame(con, m["id"]) if m["status"] == "ok" else None
         movies.append({"id": m["id"], "title": m["title"], "year": m["year"], "pl_title": m["pl_title"] or "",
                        "aliases": db.split_aliases(m["aliases"]), "quotes": quotes.get(m["id"], []),
-                       "frames": fr, "poster": m["id"] in posters, "cast": cast})
+                       "frames": fr, "zoom_frame": zf, "poster": m["id"] in posters, "cast": cast})
     return movies
 
 
@@ -207,19 +217,105 @@ def best_answer(guess, answers, idxs):
     return scored[0][1]
 
 
-def availability(pack, movies, has_key):
+def top_need(cfg=None):
+    if not cfg:
+        return TOP_N
+    return _int(cfg.get("top_n"), TOP_N_MIN, TOP_N_MAX, TOP_N)
+
+
+def top_score(guess, truth):
+    """Za każdy film: N pkt za dokładne miejsce, -1 za każde miejsce odchyłki (min. 0). Maks. N*N."""
+    n = len(truth)
+    pos = {mid: i for i, mid in enumerate(truth)}
+    return sum(max(0, n - abs(i - pos[mid])) for i, mid in enumerate(guess) if mid in pos)
+
+
+def top_assign(pids, rng=None):
+    """Cykl: każdy zgaduje dokładnie jednego innego. Przy 2 osobach — siebie nawzajem. Przy 1 — pusty."""
+    ids = list(pids)
+    if len(ids) < 2:
+        return {}
+    (rng or random).shuffle(ids)
+    return {ids[i]: ids[(i + 1) % len(ids)] for i in range(len(ids))}
+
+
+def merge_packs(con, pack_ids):
+    """Składa multi-pakiet Custom z wybranych pakietów. Duplikaty tytułów (norm+rok) odpadają (zostaje pierwszy, z bogatszymi danymi jeśli się da)."""
+    ids, seen_id = [], set()
+    for x in pack_ids or []:
+        try:
+            i = int(x)
+        except (TypeError, ValueError):
+            continue
+        if i > 0 and i not in seen_id:
+            seen_id.add(i)
+            ids.append(i)
+    packs = []
+    for i in ids:
+        row = con.execute("SELECT * FROM packs WHERE id=?", (i,)).fetchone()
+        if row:
+            packs.append(dict(row))
+    if not packs:
+        raise ValueError("no packs")
+    movies, questions, seen, qseen = [], [], {}, set()
+    for p in packs:
+        for m in load_pack(con, p["id"]):
+            key = (db.norm_title(m["title"]), m.get("year") or -1)
+            old = seen.get(key)
+            if old is None:
+                seen[key] = m
+                movies.append(m)
+            else:
+                # zachowaj wersję z większą liczbą danych (kadry/obsada/plakat)
+                score = lambda x: (1 if x.get("frames") else 0) + (1 if x.get("poster") else 0) + (1 if len(x.get("cast") or []) >= 3 else 0) + (1 if x.get("zoom_frame") else 0)
+                if score(m) > score(old):
+                    movies[movies.index(old)] = m
+                    seen[key] = m
+        for q in load_questions(con, p["id"]):
+            if q["id"] not in qseen:
+                qseen.add(q["id"])
+                questions.append(q)
+    names = [p["name"] for p in packs]
+    pack = {
+        "id": "custom", "slug": "custom", "name": "Custom", "name_en": "Custom",
+        "description": " + ".join(names),
+        "description_en": " + ".join(p.get("name_en") or p["name"] for p in packs),
+        "color": packs[0]["color"] if packs else "#1B1712",
+        "modes_off": "", "questions": questions, "source_ids": [p["id"] for p in packs],
+    }
+    return pack, movies
+
+
+def custom_list_entry(con):
+    """Wirtualny pakiet na końcu listy (nie jest wierszem w packs)."""
+    n = con.execute("SELECT COUNT(*) FROM movies").fetchone()[0]
+    thumbs = [r[0] for r in con.execute(
+        "SELECT f.id FROM frames f JOIN movies m ON m.id=f.movie_id "
+        "WHERE IFNULL(f.kind,'kadry')!='zoom' ORDER BY m.pack_id, f.id LIMIT 6")]
+    return {
+        "id": "custom", "slug": "custom", "name": "Custom", "name_en": "Custom",
+        "description": "Złóż własne multi-pakiet z kilku istniejących.",
+        "description_en": "Build a multi-pack from the packs you already have.",
+        "color": "#1B1712", "playable": n, "total": n, "thumbs": thumbs[:3],
+        "modes": [k for k in MODES], "custom": True,
+    }
+
+
+def availability(pack, movies, has_key, cfg=None):
     off = set(filter(None, (pack.get("modes_off") or "").split(",")))
     framed = sum(1 for m in movies if m["frames"])
+    zoomed = sum(1 for m in movies if m.get("zoom_frame") or m["frames"])
     years = {m["year"] for m in movies if m["year"]}
+    tn = top_need(cfg)
     info = {
         "kadry": (framed, 1, "frames"),
-        "zoom": (framed, 1, "frames"),
+        "zoom": (zoomed, 1, "frames"),
         "licytacja": (len(pack.get("questions") or []) or (1 if len(movies) >= 5 else 0), 1, "questions"),
         "rok": (sum(1 for m in movies if m["year"]), 3, "years"),
         "kolejnosc": (len(years), ORDER_N, "years"),
         "plakat": (sum(1 for m in movies if m["poster"]), 3, "posters"),
         "aktorzy": (sum(1 for m in movies if len(m["cast"]) >= 3), 3, "cast"),
-        "cytat": (sum(len(m["quotes"]) for m in movies), MIN_QUOTES, "quotes"),
+        "top": (len(movies), tn, "movies"),
     }
     out = {}
     for k in MODES:
@@ -232,9 +328,10 @@ def availability(pack, movies, has_key):
 
 # --------------------------------------------------------------------- pokój
 class Room:
-    def __init__(self, code, pack, movies, rounds, avail):
+    def __init__(self, code, pack, movies, rounds, avail, kind="pack"):
         self.code, self.pack, self.movies, self.avail = code, pack, movies, avail
-        self.modes = [k for k in MODES if avail[k]["ok"]]
+        self.kind = kind
+        self.modes = ["most"] if kind == "most" else [k for k in MODES if avail.get(k, {}).get("ok")]
         self.rounds = max(1, min(int(rounds or 10), MAX_ROUNDS))
         self.cfg = norm_settings({})
         self.players = {}
@@ -287,6 +384,10 @@ class Room:
             self.rounds = _int(rounds, 1, MAX_ROUNDS, self.rounds)
         if settings is not None:
             self.cfg = norm_settings(settings)
+            if self.kind != "most":
+                self.avail = availability(self.pack, self.movies, False, self.cfg)
+                if self.modes:
+                    self.modes = [k for k in self.modes if self.avail.get(k, {}).get("ok")] or                                  [k for k in MODES if self.avail.get(k, {}).get("ok")]
         self.version += 1
 
     def total_rounds(self):
@@ -312,6 +413,10 @@ class Room:
         if mode == "aktorzy":
             dur = s or ACTOR_SECONDS * len(t["cast"])
             return dur, round(dur / len(t["cast"]), 2)
+        if mode == "top":
+            return c["top_own"], c["top_guess"]
+        if mode == "most":
+            return s or c["most_time"], None
         dur = s or DURATION.get(mode, 30)
         return dur, (round(dur / 3, 2) if mode == "kadry" else None)
 
@@ -321,13 +426,17 @@ class Room:
 
     # --- przebieg
     def start(self):
-        if not self.modes:
+        if self.kind != "most" and not self.modes:
             raise ValueError("no modes")
         used, self.plan = set(), []
-        for mode in self.plan_modes():
+        modes = self.plan_modes() if self.kind != "most" else ["most"] * self.rounds
+        for mode in modes:
             t = self.make_task(mode, used)
             if t:
                 t["dur"], t["step"] = self.timing(t)
+                if mode == "top":
+                    t["own_dur"], t["guess_dur"] = t["dur"], t["step"]
+                    t["dur"] = t["own_dur"]
                 self.plan.append(t)
         for p in self.players.values():
             p.update(score=0, history=[])
@@ -343,12 +452,14 @@ class Room:
 
     def make_task(self, mode, used):
         ms = self.movies
-        if mode in ("kadry", "zoom"):
+        if mode == "kadry":
             m = self.pick([x for x in ms if x["frames"]], used)
-            t = {"mode": mode, "movie": m}
-            if mode == "zoom":
-                t.update(frame=m["frames"][1], ox=round(random.uniform(.3, .7), 3), oy=round(random.uniform(.3, .7), 3))
-            return t
+            return {"mode": mode, "movie": m}
+        if mode == "zoom":
+            m = self.pick([x for x in ms if x.get("zoom_frame") or x["frames"]], used)
+            frame = m.get("zoom_frame") or (m["frames"][1] if m.get("frames") else None)
+            return {"mode": mode, "movie": m, "frame": frame,
+                    "ox": round(random.uniform(.3, .7), 3), "oy": round(random.uniform(.3, .7), 3)}
         if mode == "plakat":
             m = self.pick([x for x in ms if x["poster"]], used)
             return {"mode": mode, "movie": m, "style": random.choice(["pix", "tiles"]), "seed": random.randint(1, 10**6)}
@@ -356,13 +467,17 @@ class Room:
             m = self.pick([x for x in ms if len(x["cast"]) >= 3], used)
             raw = m["cast"][-MAX_ACTORS:]      # w bazie już w kolejności odsłaniania (gwiazda na końcu)
             return {"mode": mode, "movie": m, "cast": cast_view(raw)}
-        if mode == "cytat":
-            m = self.pick([x for x in ms if x["quotes"]], used)
-            qs = m["quotes"]
-            base = random.choice([q for q in qs if not q["lang"]] or qs)
-            pick = {lg: (base if base["lang"] in ("", lg) and not [q for q in qs if q["lang"] == lg] else
-                         random.choice([q for q in qs if q["lang"] == lg] or [base])) for lg in ("pl", "en")}
-            return {"mode": mode, "movie": m, "quote": {lg: q["text"] for lg, q in pick.items()}}
+        if mode == "top":
+            n = top_need(self.cfg)
+            if len(ms) < n:
+                return None
+            items = random.sample(ms, n)
+            return {"mode": mode, "items": items, "sub": "own", "own": {}, "guess": {}, "targets": {}}
+        if mode == "most":
+            import most
+            pair = most.pick_pair(db.connect(), ms, lang="pl")
+            return {"mode": mode, "start": pair["start"], "goal": pair["goal"],
+                    "witness": pair.get("witness"), "paths": {}, "done_at": {}}
         if mode == "rok":
             m = self.pick([x for x in ms if x["year"]], used)
             return {"mode": mode, "movie": m}
@@ -403,6 +518,15 @@ class Room:
             s = random.randrange(len(pl)) if pl else 0
             t.update(order=pl[s:] + pl[:s], turn=0, passed=[], leader=None, bids=[], bid=0, bidder=None,
                      found=[], type_end=None, done_at=None, turn_end=self.t0 + t["step"])
+        elif t["mode"] == "top":
+            t.update(sub="own", own={}, guess={}, targets={})
+            t["dur"] = t.get("own_dur") or self.cfg["top_own"]
+        elif t["mode"] == "most":
+            t.setdefault("paths", {})
+            t.setdefault("done_at", {})
+            for pid in pl:
+                if pid not in t["paths"]:
+                    t["paths"][pid] = [dict(t["start"])]
         elif t["voice"]:
             t.update(claims=[], peek=[])
         self.version += 1
@@ -534,9 +658,18 @@ class Room:
                     self.end_round()
                 elif not pend and (el >= self.duration() or (players and all(p["got"] for p in players))):
                     self.end_round()
+            elif t["mode"] == "top":
+                if t.get("sub") == "own":
+                    if el >= self.duration() or (act and all(p["id"] in t["own"] for p in act)):
+                        self.top_to_guess()
+                elif el >= self.duration() or (act and all(p["id"] in t["guess"] for p in act)):
+                    self.end_round()
+            elif t["mode"] == "most":
+                if el >= self.duration() or (act and act and all(p["id"] in t.get("done_at", {}) for p in act)):
+                    self.end_round()
             elif el >= self.duration() or (act and all(p["ans"] is not None or p["got"] for p in act)):
                 self.end_round()
-        elif self.phase == "reveal" and now - self.t0 >= REVEAL_SECONDS + (3 if self.mode in ("kolejnosc", "licytacja") else 0):
+        elif self.phase == "reveal" and now - self.t0 >= REVEAL_SECONDS + (6 if self.mode in ("kolejnosc", "licytacja", "top", "most") else 0):
             self.next()
 
     # --- licytacja po kolei
@@ -604,6 +737,25 @@ class Room:
                     pts[pid] = 200 * t["bid"] * x if pid == t["bidder"] else 0
                 else:
                     pts[pid] = 0 if pid == t["bidder"] else 100 * t["bid"] * x
+        elif t["mode"] == "top":
+            self.top_lock_remaining()
+            for pid, p in self.players.items():
+                target = t["targets"].get(pid)
+                guess, truth = t["guess"].get(pid), t["own"].get(target)
+                pts[pid] = (top_score(guess, truth) * x) if guess and truth else 0
+        elif t["mode"] == "most":
+            import most
+            finished = []
+            for pid, at in (t.get("done_at") or {}).items():
+                path = t.get("paths", {}).get(pid) or []
+                if path and path[-1].get("kind") == "person" and int(path[-1]["id"]) == int(t["goal"]["id"]):
+                    finished.append((at, pid, most.path_movies(path)))
+            finished.sort()
+            first_pid = finished[0][1] if finished else None
+            for pid in self.players:
+                path = t.get("paths", {}).get(pid) or []
+                reached = bool(path and path[-1].get("kind") == "person" and int(path[-1]["id"]) == int(t["goal"]["id"]))
+                pts[pid] = most.most_score(most.path_movies(path), reached, first=(pid == first_pid)) * x
         for pid, p in self.players.items():
             if t["mode"] not in TITLE_MODES:
                 p["score"] += pts[pid]
@@ -621,6 +773,92 @@ class Room:
         else:
             self.round += 1
             self.begin_round()
+
+    def top_lock_remaining(self):
+        t = self.task
+        default = [m["id"] for m in t["items"]]
+        if t.get("sub") == "own" or not t.get("own"):
+            for pid in self.players:
+                t["own"].setdefault(pid, list(p["ans"] if (p := self.players.get(pid)) and p.get("ans") else default))
+        if t.get("sub") == "guess":
+            for pid, target in t.get("targets", {}).items():
+                if pid not in t["guess"]:
+                    t["guess"][pid] = list(t["own"].get(pid) or default)
+
+    def top_to_guess(self):
+        t = self.task
+        default = [m["id"] for m in t["items"]]
+        for pid in list(self.players):
+            t["own"].setdefault(pid, list(self.players[pid]["ans"] or default))
+            self.players[pid]["ans"] = None
+        t["targets"] = top_assign(list(self.players))
+        t["sub"] = "guess"
+        t["dur"] = t.get("guess_dur") or self.cfg["top_guess"]
+        self.t0 = time.time()
+        self.version += 1
+        if not t["targets"]:
+            self.end_round()
+
+    def most_answer(self, p, d):
+        import most
+        t = self.task
+        if p["id"] in t.get("done_at", {}):
+            return {"ok": False}
+        path = t.setdefault("paths", {}).setdefault(p["id"], [dict(t["start"])])
+        if d.get("undo"):
+            if len(path) > 1:
+                path.pop()
+                self.version += 1
+            return {"ok": True, "path": path}
+        step = d.get("person") or d.get("movie") or d.get("step")
+        if not step:
+            return {"ok": False}
+        kind = "person" if (d.get("person") or (isinstance(step, dict) and step.get("kind") == "person")) else "movie"
+        if isinstance(step, dict):
+            nxt = dict(step)
+            nxt["kind"] = nxt.get("kind") or kind
+        else:
+            nxt = {"kind": kind, "id": int(step)}
+        cur = path[-1]
+        # lokalny fallback: sprawdź graf obsady, gdy brak TMDB
+        key = db.tmdb_key()
+        ok = False
+        if key:
+            try:
+                con = db.connect()
+                most.ensure_cache_table(con)
+                ok = most.is_adjacent(con, key, cur, nxt)
+                if ok and ("name" not in nxt and "title" not in nxt):
+                    if nxt["kind"] == "person":
+                        nxt = most.person_detail(con, key, nxt["id"])
+                    else:
+                        # dociągnij krótki widok z listy sąsiadów
+                        for m in most.adjacent(con, key, cur):
+                            if m["kind"] == nxt["kind"] and int(m["id"]) == int(nxt["id"]):
+                                nxt = m
+                                break
+            except Exception as e:
+                print("most step tmdb:", e)
+                ok = False
+        if not ok:
+            # lokalny graf
+            g = most.local_graph(self.movies)
+            a = (cur["kind"], int(cur["id"]))
+            b = (nxt["kind"], int(nxt["id"]))
+            ok = b in (g.get(a) or [])
+            if ok:
+                meta = (g.get("_meta") or {}).get(b) or {}
+                nxt = {**{"kind": b[0], "id": b[1]}, **meta}
+        if not ok:
+            return {"ok": False, "illegal": True}
+        path.append(nxt)
+        reached = nxt["kind"] == "person" and int(nxt["id"]) == int(t["goal"]["id"])
+        if reached:
+            t.setdefault("done_at", {})[p["id"]] = time.time()
+            self.event("guess", p["name"])
+        self.version += 1
+        self.tick()
+        return {"ok": True, "reached": reached, "path": path}
 
     # --- odpowiedzi
     def answer(self, p, d, lang):
@@ -740,6 +978,21 @@ class Room:
             self.version += 1
             self.tick()
             return {"ok": True, "correct": True, "title": ans[i]["text"]}
+        if mode == "top":
+            ids = [int(x) for x in d.get("order") or []]
+            expect = sorted(m["id"] for m in t["items"])
+            if sorted(ids) != expect:
+                raise ValueError("order")
+            bucket = "own" if t.get("sub") == "own" else "guess"
+            if p["id"] in t[bucket]:
+                return {"ok": False}
+            t[bucket][p["id"]] = ids
+            p["ans"] = ids
+            self.event("answered", p["name"])
+            self.tick()
+            return {"ok": True}
+        if mode == "most":
+            return self.most_answer(p, d)
         return {"ok": False}
 
     # --- stan dla klienta
@@ -777,10 +1030,12 @@ class Room:
         out = {
             "code": self.code, "phase": self.phase, "round": self.round + 1,
             "rounds": len(self.plan) if self.phase != "lobby" and self.plan else self.total_rounds(),
-            "pack": {k: self.pack.get(k) for k in ("id", "name", "name_en", "slug", "color")},
-            "host": self.host, "me": me["id"] if me else None, "feed": self.feed[-6:],
+            "pack": {k: self.pack.get(k) for k in ("id", "name", "name_en", "slug", "color", "source_ids")
+                     if k in self.pack or k in ("id", "name", "name_en", "slug", "color")},
+            "kind": self.kind, "host": self.host, "me": me["id"] if me else None, "feed": self.feed[-6:],
             "stage_seconds": STAGE_SECONDS, "reveal_seconds": REVEAL_SECONDS,
-            "modes": self.modes, "avail": self.avail, "all_modes": MODES, "min_quotes": MIN_QUOTES,
+            "modes": self.modes, "avail": self.avail, "all_modes": MODES if self.kind != "most" else ["most"],
+            "min_top": top_need(self.cfg),
             "settings": self.cfg, "max_rounds": MAX_ROUNDS,
             "players": [{"id": p["id"], "name": p["name"], "score": p["score"],
                          "online": now - p["seen"] < 20,
@@ -807,8 +1062,19 @@ class Room:
             elif mode == "aktorzy":
                 k = min(len(t["cast"]), int(el // t["step"]) + 1)
                 out.update(cast=t["cast"][:k], cast_total=len(t["cast"]), actor_seconds=t["step"])
-            elif mode == "cytat":
-                out.update(quote=t["quote"][lang if lang in ("pl", "en") else "pl"], hint_year=t["movie"]["year"] if el >= self.duration() / 2 else None)
+            elif mode == "top":
+                items = [dict(self.mview(m, lang), img=self.thumb(m)) for m in t["items"]]
+                mine = (me and t.get("own" if t.get("sub") == "own" else "guess", {}).get(me["id"]))
+                target = (me and t.get("targets", {}).get(me["id"]))
+                out.update(sub=t.get("sub") or "own", items=items, mine=mine,
+                           target={"id": target, "name": self.pname(target)} if target else None,
+                           top_n=len(t["items"]),
+                           score_hint="n-d")
+            elif mode == "most":
+                path = (me and t.get("paths", {}).get(me["id"])) or [t["start"]]
+                cur = path[-1]
+                out.update(start=t["start"], goal=t["goal"], path=path, current=cur,
+                           finished=bool(me and me["id"] in t.get("done_at", {})))
             elif mode == "rok":
                 out.update(movie=self.mview(t["movie"], lang, year=False), img=self.thumb(t["movie"]),
                            mine=me and me["ans"])
@@ -867,8 +1133,6 @@ class Room:
                        img=self.thumb(m))
             if mode == "aktorzy":
                 ans["cast"] = t["cast"]
-            if mode == "cytat":
-                ans["quote"] = t["quote"][lang if lang in ("pl", "en") else "pl"]
             if mode == "zoom":
                 ans["img"] = f"/frame/{t['frame']}.jpg"
             if mode == "plakat":
@@ -879,6 +1143,47 @@ class Room:
         if mode == "kolejnosc":
             right = sorted(t["items"], key=lambda m: m["year"])
             ans["items"] = [dict(self.mview(m, lang), img=self.thumb(m)) for m in right]
+        if mode == "top":
+            by_id = {m["id"]: dict(self.mview(m, lang), img=self.thumb(m)) for m in t["items"]}
+            def row(ids):
+                return [by_id[i] for i in ids if i in by_id]
+            ans["items"] = [by_id[m["id"]] for m in t["items"]]
+            ans["tops"] = []
+            for p in players:
+                own = t["own"].get(p["id"])
+                # kto zgadywał tę osobę
+                guesser = next((g for g, tgt in t.get("targets", {}).items() if tgt == p["id"]), None)
+                guessed = t["guess"].get(guesser) if guesser else None
+                gname = self.pname(guesser) if guesser else None
+                gpts = 0
+                if guesser and guesser in self.players:
+                    hist = self.players[guesser]["history"]
+                    gpts = hist[-1] if hist else 0
+                ans["tops"].append({
+                    "id": p["id"], "name": p["name"], "own": row(own or []),
+                    "guessed_by": gname, "guess": row(guessed or []),
+                    "points": gpts,
+                })
+            if me:
+                tgt = t.get("targets", {}).get(me["id"])
+                ans["mine"] = {
+                    "own": row(t["own"].get(me["id"]) or []),
+                    "target": self.pname(tgt),
+                    "guess": row(t["guess"].get(me["id"]) or []),
+                    "truth": row(t["own"].get(tgt) or []),
+                    "points": (me["history"][-1] if me["history"] else 0),
+                }
+        if mode == "most":
+            import most
+            ans.update(start=t["start"], goal=t["goal"])
+            rows = []
+            for p in players:
+                path = t.get("paths", {}).get(p["id"]) or []
+                reached = bool(path and path[-1].get("kind") == "person" and int(path[-1]["id"]) == int(t["goal"]["id"]))
+                rows.append({"id": p["id"], "name": p["name"], "path": path,
+                             "movies": most.path_movies(path), "reached": reached,
+                             "points": p["history"][-1] if p["history"] else 0})
+            ans["paths"] = rows
         if mode == "licytacja":
             got = {f["i"] for f in t["found"]}
             ans.update(bidder_name=self.pname(t["bidder"] or ""), bid=t["bid"],

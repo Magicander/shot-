@@ -1,6 +1,6 @@
 # kadr* - quiz filmowy dla znajomych
 
-Zgadujcie filmy z wybranego pakietu w kilku trybach: po kadrze, zbliżeniu, plakacie, obsadzie, cytacie, roku premiery, kolejności i w licytacji. Im szybciej, tym więcej punktów.
+Zgadujcie filmy z wybranego pakietu w kilku trybach: po kadrze, zbliżeniu, plakacie, obsadzie, roku premiery, kolejności, w licytacji i w Topce. Osobno, pod listą pakietów, jest specjalna gra Most: przejście po filmografii od jednego aktora do drugiego. Im szybciej albo bliżej, tym więcej punktów.
 
 ## Start
 
@@ -23,7 +23,7 @@ W panelu możesz:
 - tworzyć pakiety i edytować listy filmów (także wklejać wiele naraz w formacie `Tytuł (rok)`),
 - uruchamiać i zatrzymywać scraper i oglądać jego log na żywo,
 - wybierać kadry trudny, średni i łatwy. Skróty: strzałki, N, oraz 1/2/3 po najechaniu na kadr.
-- w edytorze trybów pobierać plakaty i obsadę z IMDb lub Filmwebu, wpisywać cytaty i pytania do licytacji (opis niżej).
+- w edytorze trybów pobierać plakaty i obsadę z IMDb lub Filmwebu, wybierać osobny kadr do Zoomu i wpisywać pytania do licytacji (opis niżej). Edytor cytatów zostaje (dane w bazie), ale Cytat nie jest już trybem gry.
 
 ## Scraper z konsoli
 
@@ -66,18 +66,20 @@ Nowe kolumny i tabele (polski tytuł, aliasy, obsada, plakaty ze źródłem, cyt
 
 ## Tryby gry
 
-Gospodarz wybiera pakiet, a w poczekalni zaznacza tryby i liczbę rund. Filmy losowane są tylko z tego pakietu, rundy przeplatają zaznaczone tryby, punkty sumują się w jednym rankingu.
+Gospodarz wybiera pakiet (albo **Custom** — zawsze ostatni na liście, nie jest wierszem w tabeli pakietów), a w poczekalni zaznacza tryby i liczbę rund. Przy Custom najpierw zaznacza, które istniejące pakiety złożyć w jedną pulę (np. Marvel + Akcja); filmy, pytania, obsada i kadry to suma wybranych pakietów, bez duplikatów tytułu i roku (zostaje bogatsza wersja). Filmy losowane są z tej puli, rundy przeplatają zaznaczone tryby, punkty sumują się w jednym rankingu.
+
+Pod listą pakietów jest osobna gra **Most** (w angielskim: **Bridge**). To nie jest tryb wewnątrz pakietu. Wszyscy w pokoju dostają tę samą parę aktorów i w naszym interfejsie chodzą: profil aktora (filmografia) → film (obsada) → kolejny aktor, aż ktoś dojdzie do celu. Ścieżka jest zawsze widoczna. Po rundzie wszyscy widzą, kto którą drogą szedł. Punktacja: im krótsza ścieżka, tym więcej punktów — 200 pkt za każde ogniwo poniżej 8 filmów (minimum 100, jeśli dojdziesz); kto dojdzie pierwszy, +100. Para jest dobierana tak, żeby istniała ścieżka (zwykle 3–4 filmy, nie ten sam film). Filmografię bierzemy z TMDB (klucz opcjonalnie w `config.local.json` albo, na Cloudflare, `npx wrangler secret put TMDB_API_KEY`). Bez klucza gra używa lokalnego grafu z już pobranej obsady pakietów i nie udaje pełnej bazy; gdy i tego nie starczy, start kończy się jasnym komunikatem. Link „otwórz profil na Filmweb” (PL) albo IMDb (EN) jest tylko pomocą — strona nie śledzi kliknięć na tych serwisach i nie otwiera ich w ramce.
 
 | Tryb | Zasady | Wymaga |
 |---|---|---|
 | Kadry | trzy kadry od trudnego do łatwego, wcześniej = więcej punktów | 1 film z kadrami |
-| Zoom | mocne zbliżenie kadru, które się oddala (30 s) | 1 film z kadrami |
+| Zoom | mocne zbliżenie kadru, które się oddala (30 s). Admin może wskazać albo wgrać osobny kadr, niezależny od trójki z Kadry. Jeśli nic nie ustawi, gra bierze środkowy kadr z Kadry | 1 film z kadrem Zoom albo z kadrami Kadry |
 | Licytacja | pytanie admina z listą odpowiedzi (np. "Wymień filmy Carpentera"). Każdy po cichu deklaruje, ile poprawnych odpowiedzi poda (15 s). Najwyższa oferta (remis: kto pierwszy) wpisuje je na czas: 15 s + 5 s za odpowiedź, max 90 s. Dopasowanie po znormalizowanym tekście z aliasami i drobnymi literówkami, powtórki odrzucane, postęp widzą wszyscy. Uda się: 200 pkt x deklaracja. Nie uda się: pozostali po 100 pkt x deklaracja. Odsłona pokazuje pominięte odpowiedzi | 1 pytanie (bez pytań: zapasowe "wymień filmy z pakietu", gdy pakiet ma 5 filmów) |
 | Który rok | podaj rok premiery: dokładnie 1000 pkt, każdy rok różnicy około -30 procent, ponad 8 lat 0 | 3 filmy z rokiem |
 | Ułóż po kolei | 4 filmy od najstarszego do najnowszego, 250 pkt za każde dobre miejsce | 4 różne lata |
 | Plakat | plakat się wyostrza (pikseloza) albo odsłania kafelkami | 3 plakaty (IMDb, Filmweb, TMDB albo ręcznie) |
 | Aktorzy | obsada pojawia się co 6 s, od najmniej znanych nazwisk (ze zdjęciem, jeśli jest); mniej nazwisk = więcej punktów | 3 filmy z obsadą (Filmweb, IMDb, TMDB albo ręcznie) |
-| Cytat | cytat wpisany przez admina, w połowie czasu podpowiedź z rokiem | 5 cytatów w pakiecie |
+| Top | Wszyscy dostają te same filmy (domyślnie 5, w lobby 3–8). Najpierw każdy układa własną topkę od najlepszego do najgorszego (przeciąganie albo strzałki). Potem każdy zgaduje topkę dokładnie jednego innego gracza (przy 2 osobach — siebie nawzajem; nikt nie zgaduje siebie). Za każdy film: N pkt za dokładne miejsce, o 1 mniej za każde miejsce pomyłki (minimum 0). Przy 5 filmach maksimum to 25. Remis jest dozwolony | tyle filmów w puli, ile wynosi długość topki |
 
 W trybach z tytułem pierwsza poprawna odpowiedź dostaje +100 pkt. Tryb bez wystarczających danych jest wyszarzony z podpowiedzią, czego brakuje.
 Admin może wyłączyć dowolny tryb dla pakietu (edytor trybów albo panel "tryby gry" na stronie pakietu).
@@ -91,7 +93,9 @@ Podstawowe:
 - **czas na rundę** – `domyślny` (każdy tryb swój, np. Kadry 3 x 15 s, Zoom 30 s) albo stały 10–120 s,
 - **odpowiedzi** – `Wpisywanie` (gra sprawdza sama) albo `Na głos` (gracz klika *Mam!*, mówi tytuł, ktoś ocenia),
 - **kto ocenia** (przy odpowiedziach na głos) – `kolejny gracz` (sędzia rotuje co rundę), `gospodarz` albo `głosowanie` (decyduje większość pozostałych),
-- **licytacja** – czas na odpowiedź zwycięzcy (domyślnie 30 s) i czas na jedną turę licytacji (domyślnie 10 s).
+- **licytacja** – czas na odpowiedź zwycięzcy (domyślnie 30 s) i czas na jedną turę licytacji (domyślnie 10 s),
+- **Top** – liczba filmów (domyślnie 5, od 3 do 8), czas na własną topkę i czas na zgadywanie (domyślnie po 45 s),
+- **Most** – czas na rundę (domyślnie 90 s).
 
 Zaawansowane: czas osobno dla trybu, odpowiedzi osobno dla trybu (np. Kadry na głos, reszta wpisywana), liczba rund każdego trybu, kolejność trybów (losowa albo Twoja), podpowiedzi tytułów (wł./wył.), mnożnik punktów w finale (x1/x2/x3).
 
@@ -110,9 +114,10 @@ Aktualizacja wersji na Cloudflare: zobacz sekcję **Aktualizacja do wersji z edy
 
 Strona pakietu, "edytor trybów" (`/admin#/modes/ID`): karta każdego trybu z gotowością (ile danych jest, ile trzeba), przełącznikiem włącz/wyłącz w tym pakiecie i linkiem do edytora.
 
+- **Kadr do Zoomu** (`#/zoom/ID` albo przy kadrach filmu): wybór albo wgranie kadru dedykowanego do Zoomu, niezależnego od trójki trudny/średni/łatwy. Jasno widać, który kadr jest do Zoomu; jeśli nic nie ustawisz, gra użyje środkowego kadru z Kadry. Kadr wchodzi w deploy, eksport, pull i nakładkę Content na Cloudflare i jest serwowany jak inne kadry.
 - **Plakaty** (`#/posters/ID`): siatka plakatów. "pobierz dla pakietu" w tle z logiem na żywo (źródło: auto, IMDb, Filmweb, TMDB; opcjonalnie od nowa i z uzupełnieniem polskich tytułów). Na każdym plakacie: pobierz ponownie (z wybranego źródła), link do obrazka, plik z dysku (max 6 MB), usuń. Plakaty są zapisywane lokalnie w bazie, ze źródłem i datą.
 - **Obsada** (`#/cast/ID`): pobieranie top N aktorów (3 do 15, domyślnie 6) w kolejności z napisów, **razem ze zdjęciami**. W grze nazwiska i fotki pojawiają się od ostatniego na liście, gwiazda na końcu. Edytor: miniatury, zmiana kolejności, edycja nazwiska i postaci, wgranie zdjęcia, dodawanie, usuwanie, odwrócenie, przywrócenie kolejności z napisów, pobierz ponownie. Jeśli film ma już imiona bez fotek: przycisk **dociągnij zdjęcia** (albo **dociągnij brakujące zdjęcia (imiona zostają)** dla całego pakietu) uzupełnia tylko fotki, bez kasowania ręcznie wpisanych imion.
-- **Cytaty** (`#/quotes/ID`): cytaty przy każdym filmie (dodaj, edytuj, usuń, język PL/EN/oba). Wklejanie listy: `Tytuł (rok) = cytat`, tytuł oryginalny albo polski, rok opcjonalny, język tagiem `[pl]` albo `[en]` na początku cytatu. Podgląd pokazuje dopasowane, brak w pakiecie, niejednoznaczne, powtórki i zły format. Polska wersja gry woli cytaty `[pl]`, angielska `[en]`.
+- **Cytaty** (`#/quotes/ID`): Cytat nie jest już trybem gry (zastąpiła go gra Top). Dane cytatów zostają w bazie; edytor jest przygaszony, ale nadal działa. Cytaty przy każdym filmie (dodaj, edytuj, usuń, język PL/EN/oba). Wklejanie listy: `Tytuł (rok) = cytat`, tytuł oryginalny albo polski, rok opcjonalny, język tagiem `[pl]` albo `[en]` na początku cytatu. Podgląd pokazuje dopasowane, brak w pakiecie, niejednoznaczne, powtórki i zły format. Polska wersja gry woli cytaty `[pl]`, angielska `[en]`.
 - **Pytania do licytacji** (`#/questions/ID`): pytanie PL i EN, odpowiedzi jedna w linii, aliasy po średniku ("The Thing; Coś"). "wstaw filmy z pakietu" wypełnia odpowiedzi tytułami, polskimi tytułami i aliasami. Wklejanie wielu pytań: bloki oddzielone pustą linią, pierwsza linia `pytanie PL | pytanie EN`.
 
 ## Źródła plakatów i obsady
@@ -130,7 +135,7 @@ Blokady (403, 429, WAF) są zgłaszane w logu jako "blocked" z powodem. Scraper 
 
 1. Załóż darmowe konto na themoviedb.org i wygeneruj klucz API (v3) albo token (v4).
 2. Panel admina, Ustawienia: wklej klucz. Jest sprawdzany i zapisywany w `config.local.json` (poza gitem i poza eksportem .sql). Można też użyć zmiennej `TMDB_API_KEY`.
-3. TMDB staje się trzecim źródłem w trybie auto i można je wybrać wprost w edytorach.
+3. TMDB staje się trzecim źródłem w trybie auto i można je wybrać wprost w edytorach. Ten sam klucz zasila filmografię w grze Most. Na Cloudflare ustawiasz go osobno: `npx wrangler secret put TMDB_API_KEY` (nie trafia do gita ani do eksportu).
 
 Ta aplikacja korzysta z API TMDB, ale nie jest przez TMDB wspierana ani certyfikowana.
 
@@ -146,8 +151,10 @@ Ta aplikacja korzysta z API TMDB, ale nie jest przez TMDB wspierana ani certyfik
 
 ```
 python3 test_scraper_fallback.py
-python3 test_game.py            # na kopii quiz.db: migracje, wklejanie PL, atrapa TMDB, gra 2 graczy we wszystkich trybach
-python3 test_editors.py         # na kopii quiz.db: scraper IMDb/Filmweb na atrapie (blokady, fallback), edytory, licytacja z pytaniem
+python3 test_rules.py           # zasady: punktacja Top i Most, cykl bez self-guess, zoom_frame, dostępność Top
+python3 test_game.py            # na kopii quiz.db: migracje, wklejanie PL, atrapa TMDB, gra 2 graczy we wszystkich trybach (w tym Top)
+python3 test_editors.py         # na kopii quiz.db: scraper IMDb/Filmweb na atrapie, edytory (w tym kadr Zoom), Custom na liście pakietów, licytacja z pytaniem
+node cloudflare/test/rules.mjs  # ten sam zestaw zasad dla portu na Workers
 ```
 
 ## Odzyskiwanie quiz.db z Cloudflare
@@ -186,7 +193,7 @@ python pull_from_cloudflare.py --from-file kadr-export.json --url https://shot-q
 
 Przed pełnym deployem skrypt ostrzega, gdy lokalna baza ma mniej filmów/cytatów/pytań niż live (`--force` pomija pytanie).
 
-**Czego nie da się odzyskać z chmury:** tylko 3 kadry na film (hard/medium/easy); pełna historia scrapingu yt/trailer (`yt_url`, `video_id`, `tried_ids`, query/status). Edycje z nakładki Content (cytaty, pytania, PL, modes_off, obsada, plakaty) są w eksporcie i w merge przed deployem.
+**Czego nie da się odzyskać z chmury:** tylko kadry rozgrywki na film (trójka Kadry plus ewentualny kadr Zoom); pełna historia scrapingu yt/trailer (`yt_url`, `video_id`, `tried_ids`, query/status). Edycje z nakładki Content (cytaty, pytania, PL, modes_off, obsada, plakaty, kadr Zoom) są w eksporcie i w merge przed deployem.
 
 ## Wdrożenie na Cloudflare
 
@@ -196,7 +203,8 @@ Wersja w chmurze służy do grania ze znajomymi przez internet. **Scraping** (Yo
 
 Po zalogowaniu hasłem `ADMIN_PASSWORD` (sekret wranglera):
 
-- cytaty (CRUD + wklejanie listy z podglądem)
+- cytaty (CRUD + wklejanie listy z podglądem; to nie jest już tryb gry)
+- kadr do Zoomu (wskazanie albo wgranie, niezależny od Kadry)
 - pytania licytacji (CRUD + hurtem + auto-uzupełnianie odpowiedzi z filmów pakietu)
 - polskie tytuły i aliasy (inline + wklejanie listy)
 - włączanie/wyłączanie trybów w pakiecie
@@ -204,7 +212,7 @@ Po zalogowaniu hasłem `ADMIN_PASSWORD` (sekret wranglera):
 - obsada: edycja, kolejność i zdjęcia (link/plik); scraper obsady tylko lokalnie
 - metadane filmu (np. rok)
 
-Scraper, nowe pakiety i ustawienia TMDB w chmurze są ukryte / zwracają 405 z krótką notką.
+Scraper, nowe pakiety i ustawienia TMDB w chmurze są ukryte / zwracają 405 z krótką notką. Klucz TMDB do gry Most w chmurze to sekret `TMDB_API_KEY`, nie pole w panelu.
 
 ### Jak przechowywane są edycje (Content DO)
 

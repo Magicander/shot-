@@ -69,11 +69,63 @@ async function loadPacks() {
     upd(0);
     w.querySelector(".minus").onclick = () => upd(-1);
     w.querySelector(".plus").onclick = () => upd(1);
-    w.querySelector(".go").onclick = () => askName(T("pakiet {name}", {name: packName(p).toLowerCase()}), T("{rounds}. Jak cię nazywać?", {rounds: plRounds(rounds.n)}), async name => {
-      const d = await api("/api/rooms", {pack_id:p.id, rounds:rounds.n, name});
-      setCreds(d.code, d); location.href = "/r/" + d.code;
-    });
+    w.querySelector(".go").onclick = () => {
+      if (p.custom || p.id === "custom") return openCustom(packs.filter(x => !x.custom && x.id !== "custom"), rounds.n);
+      askName(T("pakiet {name}", {name: packName(p).toLowerCase()}), T("{rounds}. Jak cię nazywać?", {rounds: plRounds(rounds.n)}), async name => {
+        const d = await api("/api/rooms", {pack_id:p.id, rounds:rounds.n, name});
+        setCreds(d.code, d); location.href = "/r/" + d.code;
+      });
+    };
     box.append(w);
+  });
+  renderMostEntry(box.parentElement || box);
+}
+
+function openCustom(packs, nrounds) {
+  const f = $("#mform");
+  f.innerHTML = `<h2>${T("Custom")}</h2>
+    <p class="muted" style="margin:0 0 14px">${T("Zaznacz pakiety, które chcesz złożyć w jedną pulę. Potem jak zwykle dobierzesz tryby w lobby.")}</p>
+    <div class="packpicks">${packs.map(p => `<label class="check"><input type="checkbox" name="pk" value="${p.id}"><span class="dot" style="background:${esc(p.color)}"></span>${esc(packName(p))} <small class="muted">${p.total}</small></label>`).join("") || `<p class="muted">${T("Brak pakietów do złożenia.")}</p>`}</div>
+    <label class="field" style="margin-top:12px">${T("Twój nick")}<input class="input" name="n" maxlength="18" required value="${esc(savedName())}" placeholder="${T("np. Ola")}"></label>
+    <div class="actions"><button type="button" class="pill ghost" id="mcancel">${T("anuluj")}</button><button class="pill orange">${T("dalej")}</button></div>`;
+  $("#modal").classList.remove("hidden");
+  $("#mcancel").onclick = () => $("#modal").classList.add("hidden");
+  f.onsubmit = async e => {
+    e.preventDefault();
+    const ids = [...f.querySelectorAll("input[name=pk]:checked")].map(x => +x.value);
+    const name = f.n.value.trim();
+    if (!ids.length) return toast(T("Wybierz przynajmniej jeden pakiet"));
+    if (!name) return;
+    localStorage.setItem("kadr_name", name);
+    try {
+      const d = await api("/api/rooms", {kind:"custom", pack_id:"custom", pack_ids:ids, rounds:nrounds, name});
+      setCreds(d.code, d); location.href = "/r/" + d.code;
+    } catch (err) { toast(err.message); }
+  };
+}
+
+function renderMostEntry(after) {
+  const host = after && after.parentElement;
+  const wrap = document.createElement("div");
+  wrap.className = "most-entry";
+  wrap.innerHTML = `<div class="section-head" id="most">
+      <h2><span>${T("Most")}</span><span class="ast">*</span></h2>
+      <p class="muted" style="max-width:420px;margin:0">${T("Specjalna gra poza pakietami. Dostajecie dwóch aktorów i po filmografii szukacie drogi od jednego do drugiego. Im krótsza ścieżka, tym więcej punktów. Kto dojdzie pierwszy, dostaje premię.")}</p>
+    </div>
+    <div class="mostcard">
+      <div class="mostcard-body">
+        <h3>${T("Most")}</h3>
+        <p>${T("Wszyscy dostają tę samą parę. Ruchy robicie tutaj, na kadr* — nie na IMDb ani Filmwebie (tam jest tylko pomocniczy link do profilu).")}</p>
+      </div>
+      <button type="button" class="pill orange" id="mostgo">${T("graj w Most")}</button>
+    </div>`;
+  const target = document.querySelector("#jak") || after;
+  if (target && target.parentNode) target.parentNode.insertBefore(wrap, target);
+  else if (after) after.after(wrap);
+  const go = wrap.querySelector("#mostgo");
+  if (go) go.onclick = () => askName(T("Most"), T("Jak cię nazywać?"), async name => {
+    const d = await api("/api/rooms", {kind:"most", pack_id:"most", rounds:3, name});
+    setCreds(d.code, d); location.href = "/r/" + d.code;
   });
 }
 
@@ -109,7 +161,11 @@ const WS_MODE = window.KADR_RT === "ws";
 let ws = null, wsRetry = 0, wsSeq = 0, wsPending = {}, wsPing = null, wsDead = false;
 
 async function gotState(s) {
-  if (!titles.length || (S && S.pack.id !== s.pack.id)) titles = await api(`/api/packs/${s.pack.id}/titles`);
+  if (!titles.length || (S && S.pack.id !== s.pack.id)) {
+    if (s.kind === "most" || s.pack.id === "most") titles = [];
+    else if (s.pack.id === "custom") titles = await api(`/api/packs/custom/titles?packs=${(s.pack.source_ids || []).join(",")}`);
+    else titles = await api(`/api/packs/${s.pack.id}/titles`);
+  }
   S = s; localT0 = performance.now(); render();
 }
 function roomGone(msg) {
@@ -185,9 +241,10 @@ const MODE_INFO = {
   kolejnosc: ["Ułóż po kolei", "Ułóż 4 filmy od najstarszego do najnowszego. 250 pkt za każde dobre miejsce."],
   plakat: ["Plakat", "Plakat odsłania się stopniowo. Im wcześniej zgadniesz, tym więcej punktów."],
   aktorzy: ["Aktorzy", "Obsada pojawia się po kolei, od najmniej znanych nazwisk. Mniej nazwisk na ekranie to więcej punktów."],
-  cytat: ["Cytat", "Cytat z filmu. W połowie czasu pojawia się rok premiery jako podpowiedź."],
+  top: ["Top", "Najpierw układacie własną topkę tych samych filmów, od najlepszego do najgorszego. Potem odtwarzacie topkę wylosowanego gracza. Za każdy film: pełne punkty za dokładne miejsce, o 1 mniej za każde miejsce pomyłki."],
+  most: ["Most", "Idziecie po filmografii od jednego aktora do drugiego. Im krótsza droga, tym więcej punktów. Kto dojdzie pierwszy, dostaje premię."],
 };
-const modeName = k => T(MODE_INFO[k][0]);
+const modeName = k => T((MODE_INFO[k] && MODE_INFO[k][0]) || k);
 function modeHint(k, a) {
   const v = {need: a.need, have: a.have};
   return T({disabled: "Wyłączony przez admina dla tego pakietu.",
@@ -197,7 +254,8 @@ function modeHint(k, a) {
     years: k === "kolejnosc" ? "Potrzeba {need} filmów z różnymi latami premiery (jest {have})." : "Potrzeba {need} filmów z rokiem premiery (jest {have}).",
     posters: "Za mało plakatów ({have}/{need}). Admin: edytor trybów, plakaty.",
     cast: "Za mało filmów z obsadą ({have}/{need}). Admin: edytor trybów, aktorzy.",
-    quotes: "Za mało cytatów ({have}/{need}). Admin dopisuje je w edytorze trybów."}[a.reason] || "", v);
+    quotes: "Za mało cytatów ({have}/{need}). Admin dopisuje je w edytorze trybów.",
+    movies: "Za mało filmów w puli ({have}/{need})."}[a.reason] || "", v);
 }
 const showTitle = o => o.pl_title && LANG === "pl" && fold(o.pl_title) !== fold(o.title) ? `${esc(o.pl_title)} <small class="orig">(${esc(o.title)})</small>` : esc(o.title);
 
@@ -231,9 +289,9 @@ function render() {
 
 /* ---------------- ustawienia gry (lobby) ---------------- */
 const SKEY = "kadr_settings";
-const VOICE_OK = ["kadry", "zoom", "plakat", "aktorzy", "cytat", "licytacja"];
-const DEF_TIME = {kadry: 45, zoom: 30, plakat: 30, cytat: 30, rok: 25, kolejnosc: 40};
-const NUM_KEYS = new Set(["time", "lic_answer", "lic_bid", "final_x"]);
+const VOICE_OK = ["kadry", "zoom", "plakat", "aktorzy", "licytacja"];
+const DEF_TIME = {kadry: 45, zoom: 30, plakat: 30, top: 45, rok: 25, kolejnosc: 40, most: 90};
+const NUM_KEYS = new Set(["time", "lic_answer", "lic_bid", "final_x", "top_n", "top_own", "top_guess", "most_time"]);
 let ADV_OPEN = false;
 
 function saveSettings() {
@@ -296,6 +354,12 @@ function settingsPanel() {
     S.modes.includes("licytacja") ? grp(T("licytacja"), T("Gracze po kolei podbijają albo pasują. Zwycięzca ma {n} s na odpowiedź.", {n: c.lic_answer}),
       `<div class="sub2"><span>${T("czas na odpowiedź")}</span>${seg("lic_answer", [20, 30, 45, 60].map(n => [n, sec(n)]), c.lic_answer, dis)}</div>
        <div class="sub2"><span>${T("czas na turę")}</span>${seg("lic_bid", [5, 10, 15, 20].map(n => [n, sec(n)]), c.lic_bid, dis)}</div>`) : "",
+    S.modes.includes("top") ? grp(T("Top"), T("Za każdy film: {n} pkt za dokładne miejsce, o 1 mniej za każde miejsce pomyłki (minimum 0). Przy {n} filmach maksimum to {m}.", {n: c.top_n || 5, m: (c.top_n || 5) * (c.top_n || 5)}),
+      `<div class="sub2"><span>${T("liczba filmów")}</span>${seg("top_n", [3,4,5,6,7,8].map(n => [n, String(n)]), c.top_n || 5, dis)}</div>
+       <div class="sub2"><span>${T("czas na własną topkę")}</span>${seg("top_own", [30,45,60,90].map(n => [n, sec(n)]), c.top_own || 45, dis)}</div>
+       <div class="sub2"><span>${T("czas na zgadywanie")}</span>${seg("top_guess", [30,45,60,90].map(n => [n, sec(n)]), c.top_guess || 45, dis)}</div>`) : "",
+    S.kind === "most" ? grp(T("czas na rundę"), T("Macie {n} s, żeby dojść od startu do celu.", {n: c.most_time || 90}),
+      seg("most_time", [45,60,90,120].map(n => [n, sec(n)]), c.most_time || 90, dis)) : "",
   ].join("");
   const sel = (attr, k, opts, val) => `<select class="input sel" data-${attr}="${k}" ${d}>${opts.map(([v, l]) => `<option value="${v}" ${String(v) === String(val) ? "selected" : ""}>${l}</option>`).join("")}</select>`;
   const adv = [
@@ -310,9 +374,16 @@ function settingsPanel() {
       `<label class="toggle"><input type="checkbox" id="hints" ${c.hints ? "checked" : ""} ${d}><span>${c.hints ? T("włączone") : T("wyłączone")}</span></label>`),
     grp(T("finał"), T("Punkty w ostatniej rundzie są mnożone."), seg("final_x", [[1, "x1"], [2, "x2"], [3, "x3"]], c.final_x, dis)),
   ].join("");
+  if (S.kind === "most") {
+    return `<div class="panel setup" id="setup">
+      <div class="setup-head"><h3 style="font-size:30px">${T("Most")}</h3>${host ? "" : `<span class="tag">${T("ustawia gospodarz")}</span>`}</div>
+      <p class="muted" style="margin:0 0 14px">${T("Wszyscy dostają tę samą parę aktorów. Chodzicie po filmach i obsadzie w tej grze, aż ktoś dojdzie do celu.")}</p>
+      <div class="sgrid">${basic}</div>
+    </div>`;
+  }
   return `<div class="panel setup" id="setup">
     <div class="setup-head"><h3 style="font-size:30px">${T("ustawienia gry")}</h3>${host ? "" : `<span class="tag">${T("ustawia gospodarz")}</span>`}</div>
-    <div class="sgrp"><div class="sh"><b>${T("tryby gry")}</b><span>${host ? T("Zaznacz tryby. Filmy losujemy tylko z tego pakietu.") : T("Gospodarz wybiera tryby.")}</span></div>
+    <div class="sgrp"><div class="sh"><b>${T("tryby gry")}</b><span>${host ? (S.pack && S.pack.id === "custom" ? T("Zaznacz tryby. Filmy biorą się z wybranych pakietów.") : T("Zaznacz tryby. Filmy losujemy tylko z tego pakietu.")) : T("Gospodarz wybiera tryby.")}</span></div>
       ${seg("order", [["mix", T("losowa kolejność")], ["fixed", T("moja kolejność")]], c.order, dis)}</div>
     ${modePicker()}
     <div class="sgrid">${basic}</div>
@@ -340,7 +411,7 @@ function renderLobby(v) {
         : `<div class="wait"><span class="spin"></span>${T("Czekamy, aż gospodarz zacznie...")}</div>`}</div>
     </div>`;
   $("#copy").onclick = async () => { try { await navigator.clipboard.writeText(link); toast(T("Skopiowano link")); } catch { $("#link").select(); document.execCommand("copy"); toast(T("Skopiowano link")); } };
-  const adv = v.querySelector(".adv"); adv.ontoggle = () => { ADV_OPEN = adv.open; };
+  const adv = v.querySelector(".adv"); if (adv) adv.ontoggle = () => { ADV_OPEN = adv.open; };
   if (!isHost()) return;
   $("#start").onclick = () => act("start");
   const sp = $("#setup");
@@ -349,8 +420,10 @@ function renderLobby(v) {
     const k = b.dataset.set; patch({[k]: NUM_KEYS.has(k) ? +b.dataset.v : b.dataset.v});
   });
   const tr = $("#trange");
-  tr.oninput = () => { $("#tval").textContent = T("{n} s", {n: tr.value}); };
-  tr.onchange = () => patch({time: +tr.value});
+  if (tr) {
+    tr.oninput = () => { $("#tval").textContent = T("{n} s", {n: tr.value}); };
+    tr.onchange = () => patch({time: +tr.value});
+  }
   sp.querySelectorAll("[data-mt]").forEach(x => x.onchange = () => patch({mode_time: {...S.settings.mode_time, [x.dataset.mt]: +x.value}}));
   sp.querySelectorAll("[data-ma]").forEach(x => x.onchange = () => { const ma = {...S.settings.mode_answer}; if (x.value) ma[x.dataset.ma] = x.value; else delete ma[x.dataset.ma]; patch({mode_answer: ma}); });
   sp.querySelectorAll("[data-mr]").forEach(x => x.onchange = () => patch({mode_rounds: {...S.settings.mode_rounds, [x.dataset.mr]: +x.value}}));
@@ -442,10 +515,26 @@ function renderRound(v, keepInput) {
       <ol class="castlist">${Array.from({length:S.cast_total}, (_, i) => actorLi(S.cast[i])).join("")}</ol>
       <p class="muted small-note">${T("od najmniej do najbardziej znanych")}</p></div>${bar()}`;
     input = titleInput();
-  } else if (mode === "cytat") {
-    stage = `<div class="stage textstage"><span class="lvl">${T("cytat")}</span><span class="clock" id="clock"></span>
-      <blockquote class="quote">${esc(S.quote)}</blockquote><p class="hint ${S.hint_year ? "" : "ghosted"}">${S.hint_year ? T("podpowiedź: rok {y}", {y:S.hint_year}) : T("podpowiedź w połowie czasu")}</p></div>${bar()}`;
-    input = titleInput();
+  } else if (mode === "top") {
+    if (ORDER.round !== S.round || ORDER.sub !== S.sub) ORDER = {round: S.round, sub: S.sub, ids: (S.mine || S.items.map(i => i.id))};
+    const byId = Object.fromEntries(S.items.map(i => [i.id, i]));
+    const ids = S.mine || ORDER.ids;
+    const label = S.sub === "guess"
+      ? T("ułóż topkę tak, jak {name}", {name: (S.target && S.target.name) || "?"})
+      : T("twoja topka · od najlepszego do najgorszego");
+    stage = `<div class="stage textstage orderstage topstage"><span class="lvl">${esc(label)}</span><span class="clock" id="clock"></span>
+      <p class="muted small-note">${T("Przeciągnij film albo użyj strzałek. Za każdy film: {n} pkt za dokładne miejsce, o 1 mniej za każde miejsce pomyłki.", {n: S.top_n || S.items.length})}</p>
+      <ol class="orderlist toplist" id="toplist">${ids.map((id, i) => `<li draggable="false" data-i="${i}" data-id="${id}">
+        <span class="tpos">${i + 1}</span>
+        ${byId[id] && byId[id].img ? `<img src="${byId[id].img}" alt="">` : `<span class="noimg"></span>`}
+        <span class="ot">${byId[id] ? showTitle(byId[id]) : ""}</span>
+        ${S.mine ? "" : `<span class="ob"><button type="button" class="pill small" data-up="${i}" ${i ? "" : "disabled"} aria-label="${T("wyżej")}">&uarr;</button><button type="button" class="pill small" data-dn="${i}" ${i < ids.length - 1 ? "" : "disabled"} aria-label="${T("niżej")}">&darr;</button></span>`}
+      </li>`).join("")}</ol>
+      <div class="olabels"><span>${T("najlepszy")}</span><span>${T("najgorszy")}</span></div></div>${bar()}`;
+    input = S.mine ? waitBox(S.sub === "guess" ? T("Zgadnięcie wysłane") : T("Topka wysłana, czekamy na resztę"))
+      : `<button class="pill orange big" id="osend" style="width:100%">${T("zatwierdzam topkę")}</button>`;
+  } else if (mode === "most") {
+    [stage, input] = renderMost(m);
   } else if (mode === "rok") {
     stage = `<div class="stage textstage yearstage">${S.img ? `<img class="thumb" src="${S.img}" alt="">` : ""}<span class="lvl">${T("który rok?")}</span><span class="clock" id="clock"></span>
       <h2 class="ytitle">${showTitle(S.movie)}</h2></div>${bar()}`;
@@ -471,13 +560,15 @@ function renderRound(v, keepInput) {
     const y = $("#y"); y.value = prevY; if ((hadFocus || !keepInput) && matchMedia("(pointer:fine)").matches) y.focus();
     $("#yf").onsubmit = async e => { e.preventDefault(); const n = parseInt(y.value, 10); if (!(n >= 1880 && n <= 2100)) return toast(T("Podaj rok, np. 1984")); await guessAct({year:n}); };
   }
-  if (mode === "kolejnosc" && !S.mine) {
+  if ((mode === "kolejnosc" || mode === "top") && !S.mine) {
     v.querySelectorAll("[data-up],[data-dn]").forEach(b => b.onclick = () => {
       const i = +(b.dataset.up ?? b.dataset.dn), j = b.dataset.up !== undefined ? i - 1 : i + 1;
       [ORDER.ids[i], ORDER.ids[j]] = [ORDER.ids[j], ORDER.ids[i]]; lastKey = ""; render();
     });
-    $("#osend").onclick = () => guessAct({order: ORDER.ids});
+    if ($("#osend")) $("#osend").onclick = () => guessAct({order: ORDER.ids});
+    if (mode === "top") wireTopDrag();
   }
+  if (mode === "most") wireMost();
   if ($("#claim")) $("#claim").onclick = () => guessAct({claim: true});
   if ($("#peek")) $("#peek").onclick = () => { if (confirm(T("Zobaczysz odpowiedź i nie zdobędziesz punktów w tej rundzie. Na pewno?"))) guessAct({peek: true}); };
   v.querySelectorAll("[data-j]").forEach(b => b.onclick = () => guessAct({judge: b.dataset.j, verdict: b.dataset.v === "1"}));
@@ -649,6 +740,121 @@ function setupGuess(prev, focus, auction) {
   $("#gf").onsubmit = e => { e.preventDefault(); ac.classList.add("hidden"); submit(); };
 }
 
+function wireTopDrag() {
+  const list = $("#toplist");
+  if (!list) return;
+  let from = null;
+  list.querySelectorAll("li").forEach(li => {
+    li.addEventListener("pointerdown", e => {
+      if (e.target.closest("button")) return;
+      from = +li.dataset.i;
+      li.classList.add("dragging");
+      li.setPointerCapture(e.pointerId);
+    });
+    li.addEventListener("pointermove", e => {
+      if (from == null) return;
+      const over = document.elementFromPoint(e.clientX, e.clientY)?.closest("#toplist li");
+      if (!over || over === li) return;
+      const to = +over.dataset.i;
+      if (to === from) return;
+      const ids = ORDER.ids.slice();
+      const [item] = ids.splice(from, 1);
+      ids.splice(to, 0, item);
+      ORDER.ids = ids; from = to; lastKey = ""; render();
+    });
+    li.addEventListener("pointerup", () => { from = null; });
+    li.addEventListener("pointercancel", () => { from = null; });
+  });
+}
+
+function renderTopReveal(a) {
+  const row = (arr, cls="") => `<ol class="orderlist done ${cls}">${(arr || []).map((i, n) => `<li><span class="tpos">${n + 1}</span>${i.img ? `<img src="${i.img}" alt="">` : `<span class="noimg"></span>`}<span class="ot">${showTitle(i)}</span></li>`).join("")}</ol>`;
+  const mine = a.mine ? `<div class="toprev-me">
+      <h3>${T("twoja topka")}</h3>${row(a.mine.own)}
+      ${a.mine.target ? `<h3>${T("zgadywałeś topkę gracza {name}", {name: esc(a.mine.target)})}</h3>
+        <div class="topcmp"><div><b>${T("twój układ")}</b>${row(a.mine.guess)}</div>
+        <div><b>${T("prawdziwa topka")}</b>${row(a.mine.truth)}</div></div>
+        <p class="muted">${T("Masz {pts} pkt. Za każdy film: pełne punkty za dokładne miejsce, o 1 mniej za każde miejsce pomyłki.", {pts: a.mine.points})}</p>` : ""}
+    </div>` : "";
+  const all = (a.tops || []).map(t => `<div class="toprev">
+      <h3>${esc(t.name)}</h3>${row(t.own)}
+      ${t.guessed_by ? `<p class="muted">${T("układ od {name}:", {name: esc(t.guessed_by)})} ${T("+{pts} pkt", {pts: t.points})}</p>${row(t.guess, "guess")}` : ""}
+    </div>`).join("");
+  return `<h2>${T("topki")}</h2>${mine}${all}`;
+}
+
+function mostNode(n) {
+  if (!n) return "";
+  if (n.kind === "person") {
+    const img = n.photo ? `<img src="${n.photo}" alt="">` : `<span class="noimg"></span>`;
+    return `<div class="mostnode person">${img}<span>${esc(n.name || "")}</span></div>`;
+  }
+  const img = n.poster ? `<img src="${n.poster}" alt="">` : `<span class="noimg"></span>`;
+  return `<div class="mostnode movie">${img}<span>${esc(n.title || "")}${n.year ? ` <small>${n.year}</small>` : ""}</span></div>`;
+}
+
+function renderMost() {
+  const path = S.path || [S.start];
+  const cur = S.current || path[path.length - 1];
+  const link = (S.start && S.start.link) ? S.start.link : null;
+  const trail = `<ol class="mostpath">${path.map(n => `<li>${mostNode(n)}</li>`).join("")}</ol>`;
+  const goal = `<div class="mostpair">${mostNode(S.start)}<span class="mostarrow" aria-hidden="true">→</span>${mostNode(S.goal)}</div>`;
+  const stage = `<div class="stage textstage moststage"><span class="lvl">${T("Most")}</span><span class="clock" id="clock"></span>
+    ${goal}
+    ${link ? `<p class="muted small-note"><a href="${esc(link.url)}" target="_blank" rel="noopener">${T("otwórz profil startowy na {src}", {src: link.label})}</a> · ${T("ruchy zapisujemy tylko tutaj")}</p>` : ""}
+    <h3 class="mosth">${T("twoja ścieżka")}</h3>${trail}
+    <div id="mostopts" class="mostopts"><div class="wait"><span class="spin"></span>${T("Ładuję filmografię...")}</div></div>
+    </div>${bar()}`;
+  const input = S.finished ? waitBox(T("Jesteś na miejscu. Czekamy na resztę."))
+    : `<div class="row mostacts">${path.length > 1 ? `<button type="button" class="pill light" id="mund">${T("cofnij krok")}</button>` : ""}</div>`;
+  return [stage, input];
+}
+
+function wireMost() {
+  if ($("#mund")) $("#mund").onclick = () => guessAct({undo: true});
+  loadMostOptions();
+}
+
+async function loadMostOptions() {
+  const box = $("#mostopts");
+  if (!box || S.finished) { if (box && S.finished) box.innerHTML = `<p class="muted">${T("Cel osiągnięty.")}</p>`; return; }
+  const cur = S.current || (S.path || [])[(S.path || []).length - 1];
+  if (!cur) return;
+  try {
+    const kind = cur.kind === "person" ? "person" : "movie";
+    const d = await api(`/api/most/${kind}/${cur.id}`);
+    const items = kind === "person" ? (d.movies || []) : (d.cast || []);
+    const local = d.local ? `<p class="muted small-note">${T("Lokalny graf z obsady pakietów (brak klucza TMDB albo zapas).")}</p>` : "";
+    if (!items.length) {
+      box.innerHTML = local + `<p class="muted">${T("Brak dalszych pozycji.")}</p>`;
+      return;
+    }
+    const btn = n => n.kind === "person" || n.name
+      ? `<button type="button" class="mostopt" data-kind="person" data-id="${n.id}" data-name="${esc(n.name || "")}" data-photo="${esc(n.photo || "")}">${n.photo ? `<img src="${n.photo}" alt="">` : `<span class="noimg"></span>`}<span>${esc(n.name || "")}</span></button>`
+      : `<button type="button" class="mostopt" data-kind="movie" data-id="${n.id}" data-title="${esc(n.title || "")}" data-year="${n.year || ""}" data-poster="${esc(n.poster || "")}">${n.poster ? `<img src="${n.poster}" alt="">` : `<span class="noimg"></span>`}<span>${esc(n.title || "")}${n.year ? ` <small>${n.year}</small>` : ""}</span></button>`;
+    box.innerHTML = local + `<h3 class="mosth">${kind === "person" ? T("filmy tej osoby") : T("obsada filmu")}</h3><div class="mostgrid">${items.map(btn).join("")}</div>`;
+    box.querySelectorAll(".mostopt").forEach(b => b.onclick = () => {
+      const step = b.dataset.kind === "person"
+        ? {kind:"person", id:+b.dataset.id, name:b.dataset.name, photo:b.dataset.photo || null}
+        : {kind:"movie", id:+b.dataset.id, title:b.dataset.title, year:b.dataset.year ? +b.dataset.year : null, poster:b.dataset.poster || null};
+      guessAct(step.kind === "person" ? {person: step} : {movie: step});
+    });
+  } catch (e) {
+    box.innerHTML = `<p class="errbox">${esc(e.message)}</p>`;
+  }
+}
+
+function renderMostReveal(a) {
+  const row = p => `<div class="mostrev ${p.reached ? "ok" : ""}">
+    <h3>${esc(p.name)} <span class="muted">${p.reached ? T("{n} filmów", {n: p.movies}) + " · " + T("+{pts} pkt", {pts: p.points}) : T("nie doszedł")}</span></h3>
+    <ol class="mostpath">${(p.path || []).map(n => `<li>${mostNode(n)}</li>`).join("")}</ol>
+  </div>`;
+  return `<h2>${T("ścieżki")}</h2>
+    <div class="mostpair">${mostNode(a.start)}<span class="mostarrow">→</span>${mostNode(a.goal)}</div>
+    <p class="muted">${T("Im krótsza ścieżka, tym więcej punktów: 200 pkt za każde ogniwo poniżej 8 filmów (minimum 100, jeśli dojdziesz). Kto dojdzie pierwszy, +100.")}</p>
+    ${(a.paths || []).map(row).join("")}`;
+}
+
 function actorEntry(c) {
   if (!c) return null;
   if (typeof c === "string") return { name: c, photo: null };
@@ -674,7 +880,8 @@ function renderReveal(v) {
   if (mode === "kadry") body = titleBlock + `<div class="trio">${a.frames.map((id, i) => `<figure><img src="/frame/${id}.jpg" alt=""><figcaption><span class="lv ${LEVELS[i][0]}"></span>${T("kadr {lvl}", {lvl:LEVELS[i][1]})}</figcaption></figure>`).join("")}</div>`;
   else if (mode === "zoom" || mode === "plakat") body = titleBlock + `<div class="revimg ${mode}"><img src="${a.img}" alt=""></div>`;
   else if (mode === "aktorzy") body = titleBlock + `<ol class="castlist done">${a.cast.map(n => actorLi(n, true)).join("")}</ol>`;
-  else if (mode === "cytat") body = titleBlock + `<blockquote class="quote small">${esc(a.quote)}</blockquote>`;
+  else if (mode === "top") body = renderTopReveal(a);
+  else if (mode === "most") body = renderMostReveal(a);
   else if (mode === "rok") body = `<h2>${showTitle(a)}</h2><div class="year big">${a.year}</div>
     <ul class="guesses">${a.guesses.map(g => `<li><b>${esc(g.name)}</b><span>${g.year}</span><span class="d">${g.year === a.year ? T("dokładnie") : T("{d} lat różnicy", {d: Math.abs(g.year - a.year)})}</span><span class="sc">+${g.points}</span></li>`).join("") || `<li class="miss">${T("Nikt nie odpowiedział.")}</li>`}</ul>`;
   else if (mode === "kolejnosc") body = `<h2>${T("dobra kolejność")}</h2><ol class="orderlist done">${a.items.map(i => `<li>${i.img ? `<img src="${i.img}" alt="">` : `<span class="noimg"></span>`}<span class="ot">${showTitle(i)}</span><span class="oy">${i.year}</span></li>`).join("")}</ol>`;

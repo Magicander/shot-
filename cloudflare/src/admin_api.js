@@ -7,8 +7,8 @@ class ApiError extends Error {
   constructor(code, key) { super(key); this.code = code; this.key = key; }
 }
 
-const MODES = ["kadry", "zoom", "licytacja", "rok", "kolejnosc", "plakat", "aktorzy", "cytat"];
-const MIN = { frames: 1, movies: 1, years: 3, posters: 3, cast: 3, quotes: 5, questions: 1 };
+const MODES = ["kadry", "zoom", "licytacja", "rok", "kolejnosc", "plakat", "aktorzy", "top"];
+const MIN = { frames: 1, zoom: 1, movies: 5, years: 3, posters: 3, cast: 3, questions: 1 };
 
 function json(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data), {
@@ -77,8 +77,9 @@ function recomputeAvail(pack, movies) {
   const cast = movies.filter(m => (m.cast || []).length >= 3).length;
   const quotes = movies.reduce((s, m) => s + (m.quotes || []).length, 0);
   const questions = (pack.questions || []).length;
-  const have = { frames: framed, movies: movies.length, years, posters, cast, quotes, questions };
-  const needKey = { kadry: "frames", zoom: "frames", licytacja: "questions", rok: "years", kolejnosc: "years", plakat: "posters", aktorzy: "cast", cytat: "quotes" };
+  const zoomed = movies.filter(m => m.zoom_frame || (m.frames && m.frames.length)).length;
+  const have = { frames: framed, zoom: zoomed, movies: movies.length, years, posters, cast, quotes, questions };
+  const needKey = { kadry: "frames", zoom: "zoom", licytacja: "questions", rok: "years", kolejnosc: "years", plakat: "posters", aktorzy: "cast", top: "movies" };
   // licytacja can fall back to pack films, so questions need can be 0 effectively for "ok" if movies exist - match local rooms.availability
   const avail = {};
   for (const k of MODES) {
@@ -347,6 +348,8 @@ export async function handleAdmin(req, env, path, { isAdmin, body, detectLang })
           aliases, cast_json: JSON.stringify(mv.cast || []), cast_source: mv.cast_source || "",
           nquotes: (mv.quotes || []).length, poster: !!mv.poster,
           poster_meta: mv.poster ? `overlay|${Math.round(Date.now()/1000)}` : "|",
+          zoom: mv.zoom_frame || null, medium: (mv.frames && mv.frames[1]) || null,
+          easy: (mv.frames && mv.frames[2]) || null, hard: (mv.frames && mv.frames[0]) || null,
           status: mv.frames ? "ok" : "pending",
         };
       });
@@ -356,6 +359,9 @@ export async function handleAdmin(req, env, path, { isAdmin, body, detectLang })
         if (meta && !meta.deleted && meta.has_image)
           row.poster_meta = `${meta.source || "url"}|${Math.round(meta.updated_at || 0)}`;
         else if (meta && meta.deleted) { row.poster = false; row.poster_meta = "|"; }
+        const zm = await contentOp(env, { op: "getZoomMeta", movie_id: row.id });
+        if (zm && !zm.deleted && zm.frame_id) row.zoom = zm.frame_id;
+        else if (zm && zm.deleted) row.zoom = null;
       }
       return json(out);
     }
@@ -474,7 +480,34 @@ export async function handleAdmin(req, env, path, { isAdmin, body, detectLang })
       const { idx } = await movieIndex(env, req);
       const mv = idx[mid];
       if (!mv) throw new ApiError(404, "Nie ma filmu");
-      return json({ movie: mv, frames: [], pick: { easy: null, medium: null, hard: null } });
+      return json({ movie: mv, frames: (mv.frames || []).map((id, i) => ({ id, role: ["hard","medium","easy"][i] || null })), pick: { easy: (mv.frames||[])[2]||null, medium: (mv.frames||[])[1]||null, hard: (mv.frames||[])[0]||null, zoom: mv.zoom_frame || null } });
+    }
+  }
+
+  // /api/admin/movies/:id/zoom
+  m = path.match(/^\/api\/admin\/movies\/(\d+)\/zoom$/);
+  if (m) {
+    const mid = +m[1];
+    if (req.method === "DELETE") {
+      await contentOp(env, { op: "clearZoomFrame", movie_id: mid });
+      return json({ ok: true, zoom: null });
+    }
+    if (req.method === "POST") {
+      const d = await body(req);
+      if (d.frame_id) {
+        const r = await contentOp(env, { op: "setZoomFrame", movie_id: mid, frame_id: +d.frame_id });
+        return json({ ok: true, zoom: r.zoom });
+      }
+      if (!d.data) throw new ApiError(400, "Podaj kadr");
+      const raw = String(d.data);
+      const b64 = raw.startsWith("data:") ? raw.split(",", 2)[1] : raw;
+      if (!b64 || b64.length > MAX_POSTER * 1.4) throw new ApiError(413, "Kadr jest za duży (max 1,5 MB)");
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      if (!isImage(bytes)) throw new ApiError(400, "To nie jest obraz (JPEG, PNG albo WebP)");
+      const r = await contentOp(env, { op: "setZoomFrame", movie_id: mid, image_b64: b64FromBytes(bytes) });
+      return json({ ok: true, zoom: r.zoom });
     }
   }
 

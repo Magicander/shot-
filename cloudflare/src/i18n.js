@@ -13,5 +13,9 @@ const EN = {
   "Panel admina w chmurze jest wyłączony (brak sekretu ADMIN_PASSWORD)": "The cloud admin is disabled (no ADMIN_PASSWORD secret)",
   "Za duże żądanie": "Request too large",
   "Zły format danych": "Bad data format",
+  "Wybierz przynajmniej jeden pakiet": "Pick at least one pack",
+  "Nie udało się dobrać pary aktorów": "Could not pick an actor pair",
+  "Most wymaga klucza TMDB albo bogatszej obsady w pakietach": "Bridge needs a TMDB key or a richer local cast graph",
+  "Za mało filmów w wybranych pakietach": "Not enough movies in the selected packs",
 };
 export const errText = (key, lang) => (lang === "en" ? EN[key] || key : key);

@@ -1,6 +1,7 @@
 // Testy zasad portu (bez wranglera): node cloudflare/test/rules.mjs - te same scenariusze co test_rules.py
 import { readFileSync } from "node:fs";
-import { Game, newRoom, normSettings, JUDGE_GRACE, LIC_DONE_DELAY } from "../src/game.js";
+import { Game, newRoom, normSettings, JUDGE_GRACE, LIC_DONE_DELAY, topScore, topAssign, availability, mergePackData, MODES } from "../src/game.js";
+import { mostScore, pathMovies, pickPairFromGraph, localGraph } from "../src/most.js";
 
 const FX = JSON.parse(readFileSync(new URL("./fixture.json", import.meta.url)));
 let T = 1000;
@@ -25,7 +26,7 @@ function adv(g, s, off = []) {
 const st = (g, p) => g.state(p, "pl");
 
 console.log("ustawienia");
-const DEF = { time: 0, mode_time: {}, order: "mix", per_mode: false, mode_rounds: {}, answer: "type", mode_answer: {}, judge: "rotate", lic_answer: 30, lic_bid: 10, hints: true, final_x: 1 };
+const DEF = { time: 0, mode_time: {}, order: "mix", per_mode: false, mode_rounds: {}, answer: "type", mode_answer: {}, judge: "rotate", lic_answer: 30, lic_bid: 10, hints: true, final_x: 1, top_n: 5, top_own: 45, top_guess: 45, most_time: 90 };
 check(eq(normSettings({}), DEF), "domyślne ustawienia");
 let d = normSettings({ time: 5, mode_time: { kadry: 500, licytacja: 40, xx: 3 }, order: "fixed", answer: "voice", mode_answer: { rok: "voice", zoom: "type" }, judge: "vote", lic_answer: 999, lic_bid: 1, final_x: 7, hints: false, mode_rounds: { rok: 50 } });
 check(d.time === 10 && eq(d.mode_time, { kadry: 120 }), "czas przycięty do 10..120, licytacja bez nadpisania");
@@ -158,4 +159,72 @@ g.configure(null, 2); g.start(); g.next(); g.next();
 check(st(g, A).mult === 2, "ostatnia runda x2");
 g.answer(A, { text: "Movie " + g.r.task.movie.id }, "pl");
 check(A.got.points === 2 * 1100, "punkty podwojone");
+console.log("top, custom, zoom, most");
+check(topScore([1,2,3,4,5],[1,2,3,4,5]) === 25, "Top: komplet = N*N");
+check(topScore([2,1,3,4,5],[1,2,3,4,5]) === 23, "Top: pomyłka o 1 na dwóch miejscach");
+check(topScore([5,4,3,2,1],[1,2,3,4,5]) === 13, "Top: odwrotna kolejność = 13");
+let asg = topAssign(["A","B"], () => 0); // degenerates? better test structure
+asg = topAssign(["A","B"]);
+check(asg.A === "B" && asg.B === "A", "Top: przy 2 osobach zgadują siebie nawzajem");
+asg = topAssign(["A","B","C","D"]);
+check(Object.keys(asg).length === 4 && Object.keys(asg).every(k => asg[k] !== k) && new Set(Object.values(asg)).size === 4, "Top: cykl bez zgadywania siebie");
+check(eq(topAssign(["A"]), {}), "Top: jedna osoba — brak celów");
+
+// zoom_frame niezależny
+let moviesZ = clone(FX.movies);
+moviesZ[0].zoom_frame = 999;
+let rz = newRoom("TEST", { pack: clone(FX.pack), avail: FX.avail }, 1);
+let gz = new Game(rz, [moviesZ[0]]);
+gz.addPlayer("A"); gz.configure(["zoom"], null, {}); gz.start();
+check(gz.r.task.frame === 999, "Zoom: osobny kadr, nie frames[1]");
+let rz2 = newRoom("TEST", { pack: clone(FX.pack), avail: FX.avail }, 1);
+let gz2 = new Game(rz2, [clone(FX.movies[0])]);
+gz2.addPlayer("A"); gz2.configure(["zoom"], null, {}); gz2.start();
+check(gz2.r.task.frame === FX.movies[0].frames[1], "Zoom: zapas to środkowy kadr z Kadry");
+
+const avLow = availability(FX.pack, FX.movies.slice(0, 3), { top_n: 5 });
+check(!avLow.top.ok && avLow.top.need === 5 && avLow.top.reason === "movies", "Top niedostępny, gdy za mało filmów");
+const avOk = availability(FX.pack, FX.movies, { top_n: 5 });
+check(avOk.top.ok, "Top dostępny przy 8 filmach");
+
+// merge custom: duplikat tytułu+roku odpada, zostaje bogatszy
+const aPack = { pack: { id: 1, name: "A", name_en: "A", color: "#111", questions: [{ id: 1, prompt_pl: "q", prompt_en: "q", answers: [1, 2] }] },
+  movies: [{ id: 1, title: "Same", year: 2000, frames: [1,2,3], poster: false, cast: [] }] };
+const bPack = { pack: { id: 2, name: "B", name_en: "B", color: "#222", questions: [{ id: 2, prompt_pl: "q2", prompt_en: "q2", answers: [1, 2] }] },
+  movies: [{ id: 99, title: "Same", year: 2000, frames: [1,2,3], poster: true, cast: [{ name: "X" }, { name: "Y" }, { name: "Z" }], zoom_frame: 7 }, { id: 2, title: "Other", year: 2001, frames: [4,5,6], poster: false, cast: [] }] };
+const merged = mergePackData([aPack, bPack]);
+check(merged.pack.id === "custom" && merged.pack.source_ids.join(",") === "1,2", "Custom: wirtualny pakiet z source_ids");
+check(merged.movies.length === 2, "Custom: duplikat tytułu+roku scalony");
+const kept = merged.movies.find(m => m.title === "Same");
+check(kept.poster && kept.zoom_frame === 7 && (kept.cast || []).length === 3, "Custom: zostaje bogatsza wersja");
+check(merged.pack.questions.length === 2, "Custom: pytania z obu pakietów");
+
+check(mostScore(3, true, true) === 1100, "Most: 3 filmy i premia za pierwsze miejsce");
+check(mostScore(3, true, false) === 1000, "Most: 3 filmy bez premii");
+check(mostScore(8, true) === 100, "Most: 8 filmów = minimum 100");
+check(mostScore(2, false) === 0, "Most: brak dojścia = 0");
+const chain = [];
+const names = ["Ada", "Ben", "Cora", "Dan"];
+for (let i = 0; i < 3; i++) chain.push({ id: 100 + i, title: "Link " + i, year: 2000 + i, poster: false, frames: null,
+  cast: [{ name: names[i], source_id: String(10 + i) }, { name: names[i + 1], source_id: String(11 + i) }] });
+const pair = pickPairFromGraph(localGraph(chain), () => 0.3);
+check(!!pair, "Most: istnieje ścieżka w grafie lokalnym");
+const [stt, gl, path] = pair;
+check(stt.kind === "person" && gl.kind === "person" && stt.id !== gl.id, "Most: para to dwaj różni aktorzy");
+const nmov = pathMovies(path);
+check(nmov >= 3 && nmov <= 4, "Most: dobrana ścieżka ma 3–4 filmy");
+
+// przebieg Top w silniku
+[g, [A, B]] = room(2, { top_n: 5, order: "fixed" }, ["top"]);
+g.start();
+check(g.r.task.mode === "top" && g.r.task.sub === "own" && g.r.task.items.length === 5, "Top: start we własnej fazie, 5 filmów");
+const ids = g.r.task.items.map(m => m.id);
+g.answer(A, { order: ids }, "pl");
+g.answer(B, { order: ids.slice().reverse() }, "pl");
+check(g.r.task.sub === "guess" && g.r.task.targets[A.id] === B.id && g.r.task.targets[B.id] === A.id, "Top: faza zgadywania, bez self-guess");
+g.answer(A, { order: ids.slice().reverse() }, "pl");
+g.answer(B, { order: ids }, "pl");
+check(g.r.phase === "reveal", "Top: po zgadywaniu odsłona");
+check(A.history.at(-1) === 25 && B.history.at(-1) === 25, "Top: oboje zgadli dokładnie, 25 pkt");
+
 console.log(`\nOK: ${OK} sprawdzeń`);

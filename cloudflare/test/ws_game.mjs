@@ -21,7 +21,7 @@ function client(code, me, lang) {
 }
 async function until(c, f, ms = 15000) { const t = Date.now(); while (!f(c.s)) { if (Date.now() - t > ms) throw new Error("timeout " + JSON.stringify(c.s && [c.s.phase, c.s.mode, c.s.sub])); await sleep(50); } }
 
-const modes = ["kadry", "licytacja", "rok", "kolejnosc", "aktorzy", "zoom", "plakat", "cytat"].filter(k => data.avail[k].ok);
+const modes = ["kadry", "licytacja", "rok", "kolejnosc", "aktorzy", "zoom", "plakat", "top"].filter(k => data.avail[k].ok);
 const cr = await post("/api/rooms", { pack_id: PACK, rounds: modes.length, modes, name: "Ala" });
 check(cr.code && cr.pid, `create room ${cr.code}`);
 const jn = await post(`/api/rooms/${cr.code}/join`, { name: "Bob" });
@@ -38,7 +38,7 @@ for (;;) {
   await until(A, s => ["round", "final"].includes(s.phase));
   const s = A.s; if (s.phase === "final") break;
   const round = s.round, mode = s.mode; seen.add(mode);
-  if (["kadry", "zoom", "plakat", "aktorzy", "cytat"].includes(mode)) {
+  if (["kadry", "zoom", "plakat", "aktorzy"].includes(mode)) {
     let m = mode === "kadry" ? byFrame.get(s.frames[0]) : mode === "zoom" ? byFrame.get(+s.img.match(/(\d+)\.jpg/)[1]) :
       mode === "plakat" ? byId.get(+s.img.match(/(\d+)\.jpg/)[1]) : mode === "cytat" ? data.movies.find(x => (x.quotes || []).some(q => q.text === s.quote)) : data.movies.find(x => x.cast.length && x.cast[0].name === (s.cast[0].name || s.cast[0]));
     const w = await B.rpc("guess", { text: "zzzz nie ma takiego" }); check(w.ok && !w.d.correct, `${mode}: wrong answer rejected`);

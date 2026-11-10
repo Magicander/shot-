@@ -44,6 +44,7 @@ scrape_thread = None
 
 
 # --------------------------------------------------------------------- pokoje gry
+import rooms as rooms_lib  # noqa: E402
 from rooms import Room, norm_title, is_match, load_pack, availability, pack_data, MODES  # noqa: E402,F401
 
 
@@ -106,7 +107,12 @@ EN_ERRORS = {
     "Brak plakatu": "Poster not found",
     "Najpierw wpisz klucz TMDB w ustawieniach": "Enter a TMDB key in the settings first",
     "Klucz TMDB nie działa": "This TMDB key does not work",
+    "Wybierz przynajmniej jeden pakiet": "Pick at least one pack",
+    "Nie udało się dobrać pary aktorów": "Could not pick an actor pair",
+    "Most wymaga klucza TMDB albo bogatszej obsady w pakietach": "Bridge needs a TMDB key or a richer local cast graph",
+    "Za mało filmów w wybranych pakietach": "Not enough movies in the selected packs",
 }
+
 
 
 def detect_lang(headers):
@@ -269,26 +275,82 @@ class Handler(BaseHTTPRequestHandler):
                             "name_en": p["name_en"] or p["name"], "description_en": p["description_en"] or p["description"],
                             "playable": len(movies), "total": total, "thumbs": list(dict.fromkeys(thumbs))[:3],
                             "modes": [k for k in MODES if avail[k]["ok"]]})
+            custom = rooms_lib.custom_list_entry(con)
+            # tryby Custom zliczane z całej puli (host i tak wybierze podzbiór)
+            try:
+                all_ids = [p["id"] for p in out]
+                cp, cm = rooms_lib.merge_packs(con, all_ids) if all_ids else (None, [])
+                if cp:
+                    av = rooms_lib.availability(cp, cm, bool(db.tmdb_key()))
+                    custom["modes"] = [k for k in MODES if av[k]["ok"]]
+                    custom["playable"] = sum(1 for m in cm if m["frames"])
+                    custom["total"] = len(cm)
+            except ValueError:
+                pass
+            out.append(custom)
             return self.json(out)
-        m = re.fullmatch(r"/api/packs/(\d+)/titles", path)
+        if method == "GET" and path == "/api/most/status":
+            import most
+            key = bool(db.tmdb_key())
+            return self.json({"tmdb": key, "ok": True})
+        m = re.fullmatch(r"/api/most/(person|movie)/(\d+)(?:/(movies|cast))?", path)
+        if m and method == "GET":
+            return self.most_lookup(m.group(1), int(m.group(2)), m.group(3), con)
+        m = re.fullmatch(r"/api/packs/(custom|\d+)/titles", path)
         if m:
-            rows = con.execute("SELECT title, pl_title FROM movies WHERE pack_id=?", (int(m[1]),)).fetchall()
-            out = {r["title"] for r in rows}
+            if m.group(1) == "custom":
+                raw = q.get("packs") or ""
+                ids = [x for x in str(raw).split(",") if x.strip().isdigit()]
+                try:
+                    _, movies = rooms_lib.merge_packs(con, ids)
+                except ValueError:
+                    movies = []
+                rows = [(m["title"], m.get("pl_title")) for m in movies]
+            else:
+                rows = [(r["title"], r["pl_title"]) for r in
+                        con.execute("SELECT title, pl_title FROM movies WHERE pack_id=?", (int(m.group(1)),))]
+            out = {t for t, _ in rows}
             if self.lang == "pl":
-                out |= {r["pl_title"] for r in rows if r["pl_title"]}
+                out |= {pl for _, pl in rows if pl}
             return self.json(sorted(out, key=str.lower))
         if method == "POST" and path == "/api/rooms":
             d = self.body()
-            pack = con.execute("SELECT * FROM packs WHERE id=?", (int(d["pack_id"]),)).fetchone()
-            if not pack:
-                raise ApiError(404, "Nie ma takiego pakietu")
-            movies, avail = pack_avail(con, pack)
-            if not any(v["ok"] for v in avail.values()):
-                raise ApiError(400, "Ten pakiet nie ma jeszcze gotowych filmów")
+            kind = d.get("kind") or ("most" if d.get("pack_id") == "most" else
+                                     "custom" if d.get("pack_id") == "custom" else "pack")
             with rooms_lock:
                 code = new_code()
-                r = rooms[code] = Room(code, pack_data(con, pack), movies, int(d.get("rounds") or 10), avail)
-                if d.get("modes"):
+                if kind == "most":
+                    movies = []
+                    seen = set()
+                    for row in con.execute("SELECT * FROM packs ORDER BY sort, id"):
+                        for mv in rooms_lib.load_pack(con, row["id"]):
+                            key = (db.norm_title(mv["title"]), mv.get("year") or -1)
+                            if key in seen:
+                                continue
+                            seen.add(key)
+                            movies.append(mv)
+                    pack = {"id": "most", "slug": "most", "name": "Most", "name_en": "Bridge",
+                            "color": "#F26B1D", "questions": [], "modes_off": ""}
+                    avail = {"most": {"ok": True, "have": 1, "need": 1, "reason": None}}
+                    r = rooms[code] = Room(code, pack, movies, int(d.get("rounds") or 3), avail, kind="most")
+                elif kind == "custom":
+                    try:
+                        pack, movies = rooms_lib.merge_packs(con, d.get("pack_ids") or d.get("packs") or [])
+                    except ValueError:
+                        raise ApiError(400, "Wybierz przynajmniej jeden pakiet")
+                    avail = rooms_lib.availability(pack, movies, bool(db.tmdb_key()), rooms_lib.norm_settings(d.get("settings")))
+                    if not any(v["ok"] for v in avail.values()):
+                        raise ApiError(400, "Za mało filmów w wybranych pakietach")
+                    r = rooms[code] = Room(code, pack, movies, int(d.get("rounds") or 10), avail, kind="custom")
+                else:
+                    pack = con.execute("SELECT * FROM packs WHERE id=?", (int(d["pack_id"]),)).fetchone()
+                    if not pack:
+                        raise ApiError(404, "Nie ma takiego pakietu")
+                    movies, avail = pack_avail(con, pack)
+                    if not any(v["ok"] for v in avail.values()):
+                        raise ApiError(400, "Ten pakiet nie ma jeszcze gotowych filmów")
+                    r = rooms[code] = Room(code, pack_data(con, pack), movies, int(d.get("rounds") or 10), avail)
+                if d.get("modes") and kind != "most":
                     r.configure(modes=d["modes"])
                 if d.get("settings"):
                     r.configure(settings=d["settings"])
@@ -328,7 +390,12 @@ class Handler(BaseHTTPRequestHandler):
                 if action == "setup":
                     r.configure(d.get("modes"), d.get("rounds"), d.get("settings"))
                 elif action == "start" and r.phase in ("lobby", "final"):
-                    r.start()
+                    try:
+                        r.start()
+                    except LookupError as e:
+                        msg = "Most wymaga klucza TMDB albo bogatszej obsady w pakietach" if str(e) == "most_no_tmdb" \
+                            else "Nie udało się dobrać pary aktorów"
+                        raise ApiError(400, msg)
                 elif action == "next" and r.phase in ("round", "reveal"):
                     r.next()
                 elif action == "again":
@@ -484,7 +551,7 @@ class Handler(BaseHTTPRequestHandler):
                     (SELECT po.source || '|' || IFNULL(po.updated, 0) FROM posters po WHERE po.movie_id=m.id) poster_meta,
                     EXISTS(SELECT 1 FROM posters po WHERE po.movie_id=m.id) poster,
                     m.video_url, m.video_title, (SELECT COUNT(*) FROM frames f WHERE f.movie_id=m.id) nframes,
-                    p.easy_frame_id easy, p.medium_frame_id medium, p.hard_frame_id hard
+                    p.easy_frame_id easy, p.medium_frame_id medium, p.hard_frame_id hard, p.zoom_frame_id zoom
                     FROM movies m LEFT JOIN picks p ON p.movie_id=m.id WHERE m.pack_id=? ORDER BY m.id""",
                                    (pid,)).fetchall()
                 return self.json([dict(r) for r in rows])
@@ -517,7 +584,7 @@ class Handler(BaseHTTPRequestHandler):
         m = re.fullmatch(r"/api/admin/actors(?:/(\d+))?", path)
         if m:
             return self.actor_photo_api(method, int(m[1]) if m[1] else None, con)
-        m = re.fullmatch(r"/api/admin/movies/(\d+)/(poster|cast|quotes)", path)
+        m = re.fullmatch(r"/api/admin/movies/(\d+)/(poster|cast|quotes|zoom)", path)
         if m:
             return self.movie_data_api(method, int(m[1]), m[2], con)
         m = re.fullmatch(r"/api/admin/(quotes|questions)/(\d+)", path)
@@ -530,11 +597,12 @@ class Handler(BaseHTTPRequestHandler):
             if not mv:
                 raise ApiError(404, "Nie ma filmu")
             if method == "GET":
-                frames = con.execute("SELECT id, position, ts_seconds ts FROM frames WHERE movie_id=? "
-                                     "ORDER BY position", (mid,)).fetchall()
+                frames = con.execute("SELECT id, position, ts_seconds ts, IFNULL(kind,'kadry') kind FROM frames WHERE movie_id=? "
+                                     "ORDER BY position, id", (mid,)).fetchall()
                 p = con.execute("SELECT * FROM picks WHERE movie_id=?", (mid,)).fetchone()
-                pick = {"easy": p["easy_frame_id"], "medium": p["medium_frame_id"], "hard": p["hard_frame_id"]} \
-                    if p else {"easy": None, "medium": None, "hard": None}
+                pick = {"easy": p["easy_frame_id"], "medium": p["medium_frame_id"], "hard": p["hard_frame_id"],
+                        "zoom": p["zoom_frame_id"] if "zoom_frame_id" in p.keys() else None} \
+                    if p else {"easy": None, "medium": None, "hard": None, "zoom": None}
                 mvd = {k: mv[k] for k in mv.keys()}
                 return self.json({"movie": mvd, "frames": [dict(f) for f in frames], "pick": pick})
             if method == "PUT":
@@ -583,10 +651,14 @@ class Handler(BaseHTTPRequestHandler):
             valid = {r["id"] for r in con.execute("SELECT id FROM frames WHERE movie_id=?", (mid,))}
             if any(v not in valid for v in chosen):
                 raise ApiError(400, "Kadr nie należy do tego filmu")
+            zoom = int(d["zoom"]) if d.get("zoom") else None
+            if zoom and zoom not in valid:
+                raise ApiError(400, "Kadr nie należy do tego filmu")
+            fields = dict(easy=ids["easy"], medium=ids["medium"], hard=ids["hard"])
+            if "zoom" in d:
+                fields["zoom"] = zoom
             with con:
-                con.execute("""INSERT INTO picks VALUES (?,?,?,?) ON CONFLICT(movie_id) DO UPDATE SET
-                    easy_frame_id=excluded.easy_frame_id, medium_frame_id=excluded.medium_frame_id,
-                    hard_frame_id=excluded.hard_frame_id""", (mid, ids["easy"], ids["medium"], ids["hard"]))
+                db.upsert_picks(con, mid, **fields)
             return self.json({"ok": True})
         if path == "/api/admin/settings":
             if method == "PUT":
@@ -799,13 +871,89 @@ class Handler(BaseHTTPRequestHandler):
             return self.json({"ok": True})
         raise ApiError(404, "Nie ma takiego adresu")
 
+    def most_lookup(self, kind, nid, sub, con):
+        import most
+        most.ensure_cache_table(con)
+        key = db.tmdb_key()
+        lang = self.lang
+        if key:
+            try:
+                if kind == "person" and sub in (None, "movies"):
+                    p = most.person_detail(con, key, nid, lang)
+                    return self.json({"person": p, "movies": most.person_movies(con, key, nid)})
+                if kind == "movie" and sub in (None, "cast"):
+                    movies = []  # detail optional
+                    return self.json({"movie": {"kind": "movie", "id": nid}, "cast": most.movie_cast(con, key, nid)})
+            except Exception as e:
+                print("most lookup tmdb:", e)
+                raise ApiError(502, "Nie udało się pobrać")
+        # lokalny fallback
+        movies = []
+        for row in con.execute("SELECT * FROM packs"):
+            movies.extend(load_pack(con, row["id"]))
+        g = most.local_graph(movies)
+        node = (kind, int(nid))
+        meta = (g.get("_meta") or {}).get(node) or {}
+        neigh = []
+        for k, i in g.get(node) or []:
+            md = (g.get("_meta") or {}).get((k, i)) or {}
+            if k == "person":
+                neigh.append({"kind": "person", "id": i, "name": md.get("name") or "", "photo": md.get("photo")})
+            else:
+                neigh.append({"kind": "movie", "id": i, "title": md.get("title") or "", "year": md.get("year"),
+                              "poster": md.get("poster")})
+        if kind == "person":
+            p = {"kind": "person", "id": nid, "name": meta.get("name") or "", "photo": meta.get("photo")}
+            p["link"] = most.ext_links(p, lang)
+            return self.json({"person": p, "movies": neigh, "local": True})
+        return self.json({"movie": {"kind": "movie", "id": nid, **meta}, "cast": neigh, "local": True})
+
     def movie_data_api(self, method, mid, what, con):
+
         import base64
         import webscrape
         mv = con.execute("SELECT * FROM movies WHERE id=?", (mid,)).fetchone()
         if not mv:
             raise ApiError(404, "Nie ma filmu")
         row = movie_rows(con, ids=[mid])[0]
+        if what == "zoom":
+            if method == "DELETE":
+                with con:
+                    cur = con.execute("SELECT zoom_frame_id FROM picks WHERE movie_id=?", (mid,)).fetchone()
+                    db.upsert_picks(con, mid, zoom=None)
+                    if cur and cur["zoom_frame_id"]:
+                        con.execute("DELETE FROM frames WHERE id=? AND movie_id=? AND IFNULL(kind,'kadry')='zoom'",
+                                    (cur["zoom_frame_id"], mid))
+                return self.json({"ok": True})
+            d = self.body()
+            if method in ("POST", "PUT") and d.get("frame_id"):
+                fid = int(d["frame_id"])
+                ok = con.execute("SELECT id FROM frames WHERE id=? AND movie_id=?", (fid, mid)).fetchone()
+                if not ok:
+                    raise ApiError(400, "Kadr nie należy do tego filmu")
+                with con:
+                    db.upsert_picks(con, mid, zoom=fid)
+                return self.json({"ok": True, "zoom": fid})
+            if method in ("POST", "PUT") and d.get("data"):
+                import base64 as b64
+                raw = str(d["data"])
+                data = b64.b64decode(raw.split(",", 1)[1] if raw.startswith("data:") else raw)
+                if not webscrape.is_image(data):
+                    raise ApiError(400, "To nie jest obraz (JPEG, PNG albo WebP)")
+                # trzymaj w rozsądnym rozmiarze (kadr, nie plakat 4K)
+                try:
+                    data = db.shrink_headshot(data, max_edge=720, quality=85)
+                except Exception:
+                    if len(data) > 400_000:
+                        raise ApiError(400, "Za duże żądanie")
+                pos = (con.execute("SELECT COALESCE(MAX(position),0)+1 FROM frames WHERE movie_id=?", (mid,)).fetchone()[0])
+                with con:
+                    con.execute("INSERT INTO frames (movie_id, position, ts_seconds, image, kind) VALUES (?,?,?,?,?)",
+                                (mid, pos, None, data, "zoom"))
+                    fid = con.execute("SELECT last_insert_rowid()").fetchone()[0]
+                    db.upsert_picks(con, mid, zoom=fid)
+                return self.json({"ok": True, "zoom": fid})
+            raise ApiError(400, "Zły format danych")
         if what == "poster":
             if method == "DELETE":
                 with con:

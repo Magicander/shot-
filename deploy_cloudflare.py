@@ -109,6 +109,8 @@ def build(db_path: Path) -> dict:
         for m in movies:
             if m["frames"]:
                 frame_ids.update(m["frames"])
+            if m.get("zoom_frame"):
+                frame_ids.add(m["zoom_frame"])
             if m["poster"]:
                 poster_ids.add(m["id"])
         pack = {k: pdata.get(k) for k in ("id", "slug", "name", "name_en", "description", "description_en", "color", "questions")}
@@ -155,6 +157,14 @@ def build(db_path: Path) -> dict:
     # żeby nie zjadać limitu 20 000 Static Assets. Worker serwuje /actor/{id}.jpg z indeksu + shardu.
     actor_n, shard_n, actor_bytes = write_actor_shards(con)
     nbytes += actor_bytes
+    # wirtualny pakiet Custom zawsze na końcu listy
+    try:
+        custom = rooms.custom_list_entry(con)
+        packs_out.append({k: custom[k] for k in ("id", "slug", "name", "name_en", "description", "description_en",
+                                                 "color", "playable", "total", "thumbs", "modes")})
+        packs_out[-1]["custom"] = True
+    except Exception as e:
+        print("custom pack meta:", e)
     con.close()
     (BUILD / "data" / "packs.json").write_text(json.dumps(packs_out, ensure_ascii=False), encoding="utf-8")
     (BUILD / "_headers").write_text(

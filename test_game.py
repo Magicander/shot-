@@ -161,7 +161,7 @@ def main():
     md = adm.req("GET", f"/api/admin/packs/{pid}/modes")
     avail = [k for k, v in md["avail"].items() if v["ok"]]
     print("  dostępne tryby:", avail)
-    check({"plakat", "aktorzy", "cytat"} <= set(avail), "Plakat, Aktorzy, Cytat dostępne po danych")
+    check({"plakat", "aktorzy", "top"} <= set(avail), "Plakat, Aktorzy, Top dostępne po danych")
     adm.req("PUT", f"/api/admin/packs/{pid}", {"modes_off": ["zoom"]})
     check(not adm.req("GET", f"/api/admin/packs/{pid}/modes")["avail"]["zoom"]["ok"], "admin wyłącza tryb")
     adm.req("PUT", f"/api/admin/packs/{pid}", {"modes_off": []})
@@ -172,7 +172,7 @@ def main():
     code = ra["code"]; A = {"pid": ra["pid"], "token": ra["token"]}
     rb = b.req("POST", f"/api/rooms/{code}/join", {"name": "Bob"}); B = {"pid": rb["pid"], "token": rb["token"]}
     check(b.req("POST", f"/api/rooms/{code}/setup", {**B, "modes": ["rok"]}, ok=False).get("_code") == 403, "tylko gospodarz ustawia tryby")
-    modes = ["kadry", "zoom", "licytacja", "rok", "kolejnosc", "plakat", "aktorzy", "cytat"]
+    modes = ["kadry", "zoom", "licytacja", "rok", "kolejnosc", "plakat", "aktorzy", "top"]
     s = a.req("POST", f"/api/rooms/{code}/setup", {**A, "modes": modes, "rounds": 10})
     a.req("POST", f"/api/rooms/{code}/start", A)
     room = app.rooms[code]
@@ -211,6 +211,18 @@ def main():
             right = [m["id"] for m in sorted(t["items"], key=lambda m: m["year"])]
             a.req("POST", f"/api/rooms/{code}/guess", {**A, "order": right})
             b.req("POST", f"/api/rooms/{code}/guess", {**B, "order": right[::-1]})
+        elif mode == "top":
+            ids = [m["id"] for m in t["items"]]
+            check(len(ids) >= 3, "top: puli filmów wystarcza")
+            check(sa.get("sub") == "own" and sa.get("items"), "top: faza własnej topki")
+            a.req("POST", f"/api/rooms/{code}/guess", {**A, "order": ids})
+            b.req("POST", f"/api/rooms/{code}/guess", {**B, "order": list(reversed(ids))})
+            sa2 = a.req("GET", f"/api/rooms/{code}?pid={A['pid']}&token={A['token']}")
+            sb2 = b.req("GET", f"/api/rooms/{code}?pid={B['pid']}&token={B['token']}")
+            check(sa2.get("sub") == "guess" and sa2.get("target") and sa2["target"]["id"] == B["pid"], "top: Ala zgaduje Boba, nie siebie")
+            check(sb2.get("target") and sb2["target"]["id"] == A["pid"], "top: Bob zgaduje Alę")
+            a.req("POST", f"/api/rooms/{code}/guess", {**A, "order": list(reversed(ids))})  # dokładnie topka Boba
+            b.req("POST", f"/api/rooms/{code}/guess", {**B, "order": list(reversed(ids))})  # pomyłka
         elif mode == "licytacja":
             check(sa.get("sub") == "bid" and sa.get("turn") in (A["pid"], B["pid"]) and sa.get("starter"), "licytacja: losowy gracz zaczyna")
             t["order"] = [A["pid"], B["pid"]]; t["turn"] = 0          # deterministycznie: zaczyna Ala
@@ -249,6 +261,10 @@ def main():
             check(pts["Ala"] - scores.get("Ala", 0) == 1000 and pts["Bob"] - scores.get("Bob", 0) == 490, "Który rok: 1000 i 490 pkt")
         if mode == "kolejnosc":
             check(pts["Ala"] - scores.get("Ala", 0) == 1000, "Ułóż po kolei: 1000 pkt za komplet")
+        if mode == "top":
+            n = len(t["items"])
+            check(pts["Ala"] - scores.get("Ala", 0) == n * n, "Top: Ala zgadła dokładnie (N*N)")
+            check(pts["Bob"] - scores.get("Bob", 0) < n * n, "Top: Bob nie zgadł kompletnie, remis jest OK gdyby był")
         if mode == "licytacja":
             check(pts["Ala"] - scores.get("Ala", 0) == 400, "Licytacja: 2 x 200 pkt")
         scores = pts

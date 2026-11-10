@@ -302,6 +302,34 @@ def main():
     missed = [m["title"] for m in sr["answer"]["missed"]]
     check(missed == ["The Thing", "Blob", "Gremlin"] and sr["answer"]["prompt"] == "Wymień potwory z kosmosu", "odsłona: pominięte odpowiedzi")
 
+    # --- kadr Zoom niezależny od Kadry
+    mid = m0["id"]
+    before_pick = adm.req("GET", f"/api/admin/movies/{mid}")
+    old_pick = before_pick.get("pick") or {}
+    jpg_b64 = "data:image/jpeg;base64," + base64.b64encode(JPG).decode()
+    z = adm.req("POST", f"/api/admin/movies/{mid}/zoom", {"data": jpg_b64})
+    check(z.get("zoom"), "wgrano osobny kadr Zoom")
+    after = adm.req("GET", f"/api/admin/movies/{mid}")
+    check(after["pick"]["zoom"] == z["zoom"], "pick.zoom wskazuje wgrany kadr")
+    check((after["pick"].get("easy"), after["pick"].get("medium"), after["pick"].get("hard")) ==
+          (old_pick.get("easy"), old_pick.get("medium"), old_pick.get("hard")),
+          "wgranie Zoomu nie rusza trójki kadrów Kadry")
+    listed = next(x for x in adm.req("GET", f"/api/admin/packs/{pid}/movies") if x["id"] == mid)
+    check(listed.get("zoom") == z["zoom"], "lista filmów pokazuje kadr Zoom")
+    adm.req("DELETE", f"/api/admin/movies/{mid}/zoom")
+    gone = adm.req("GET", f"/api/admin/movies/{mid}")["pick"]
+    check(not gone.get("zoom"), "usunięcie kadru Zoom czyści wybór")
+
+    # --- pakiet Custom na końcu listy, merge i pokój
+    plist = a.req("GET", "/api/packs")
+    check(plist and plist[-1].get("id") == "custom" and plist[-1].get("custom"), "Custom jest zawsze ostatni na liście pakietów")
+    real = [p["id"] for p in plist if p.get("id") != "custom"][:2]
+    if len(real) >= 1:
+        rc = a.req("POST", "/api/rooms", {"kind": "custom", "pack_ids": real, "name": "Ala"})
+        check(rc.get("code"), "pokój Custom powstaje z wybranych pakietów")
+        stc = a.req("GET", f"/api/rooms/{rc['code']}?pid={rc['pid']}&token={rc['token']}")
+        check(stc.get("kind") == "custom" and stc.get("pack", {}).get("id") == "custom", "nowy pokój widzi złożoną pulę Custom")
+
     if SRC.exists():
         check(hashlib.sha256(SRC.read_bytes()).hexdigest() == SRC_HASH, "oryginalna baza nietknięta")
     print(f"\nOK: {OK} sprawdzeń")

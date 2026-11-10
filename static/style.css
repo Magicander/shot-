@@ -477,3 +477,43 @@ footer{padding:30px 0 50px;text-align:center;color:var(--muted);font-size:14px}
   .toast{bottom:calc(110px + env(safe-area-inset-bottom))}
   .verdict .pill{min-width:72px;font-size:18px}
 }
+
+
+/* Custom + Most na stronie głównej */
+.packpicks{display:flex;flex-direction:column;gap:8px;max-height:40vh;overflow:auto}
+.packpicks .check{display:flex;align-items:center;gap:10px;font-weight:700}
+.packpicks .dot{width:12px;height:12px;border-radius:50%;flex:none}
+.most-entry{margin:48px 0 20px}
+.mostcard{background:var(--paper);border-radius:24px;padding:22px 24px;box-shadow:var(--shadow);display:flex;gap:18px;align-items:center;justify-content:space-between;flex-wrap:wrap;border:2px solid var(--line)}
+.mostcard h3{font-size:32px;margin:0 0 6px}
+.mostcard p{margin:0;max-width:520px;color:var(--muted);font-weight:600}
+
+/* Top */
+.toplist li, .orderlist li{touch-action:none}
+.toplist .tpos, .orderlist .tpos{font-family:var(--display);font-size:22px;width:28px;flex:none;text-align:center}
+.toplist li.dragging{opacity:.6}
+.topcmp{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.toprev, .toprev-me{margin:14px 0}
+.toprev h3, .toprev-me h3{font-size:22px;margin:12px 0 6px}
+
+/* Most */
+.mostpair{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:8px 0 14px}
+.mostarrow{font-size:28px;font-weight:700;color:var(--orange)}
+.mostnode{display:flex;align-items:center;gap:8px;background:var(--paper);border-radius:16px;padding:8px 12px 8px 8px;box-shadow:var(--shadow);font-weight:700}
+.mostnode img, .mostnode .noimg{width:44px;height:54px;object-fit:cover;border-radius:8px;background:var(--line);flex:none}
+.mostpath{list-style:none;padding:0;margin:0 0 14px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.mostpath li{display:flex;align-items:center;gap:8px}
+.mostpath li:not(:last-child)::after{content:"→";color:var(--muted);font-weight:700}
+.mostopts{margin-top:8px}
+.mostgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}
+.mostopt{display:flex;align-items:center;gap:8px;text-align:left;background:var(--paper);border:2px solid var(--line);border-radius:14px;padding:8px;font-weight:700;cursor:pointer;min-height:56px}
+.mostopt:hover, .mostopt:focus{border-color:var(--orange)}
+.mostopt img, .mostopt .noimg{width:36px;height:44px;object-fit:cover;border-radius:6px;background:var(--line);flex:none}
+.mosth{font-size:18px;margin:10px 0 8px}
+.mostrev{margin:16px 0}
+.mostrev.ok h3{color:var(--orange-d)}
+@media (max-width:560px){
+  .topcmp{grid-template-columns:1fr}
+  .mostgrid{grid-template-columns:1fr 1fr}
+  .mostcard{padding:16px}
+}

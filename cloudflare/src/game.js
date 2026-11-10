@@ -6,10 +6,12 @@ export const REVEAL_SECONDS = 9;
 export const STAGE_POINTS = [1000, 600, 300];
 export const FIRST_BONUS = 100;
 export const MAX_PLAYERS = 16;
-export const MIN_QUOTES = 5;
 export const MAX_ROUNDS = 30;
-export const MODES = ["kadry", "zoom", "licytacja", "rok", "kolejnosc", "plakat", "aktorzy", "cytat"];
-export const DURATION = { kadry: 3 * STAGE_SECONDS, zoom: 30, plakat: 30, cytat: 30, rok: 25, kolejnosc: 40 };
+export const TOP_N = 5;
+export const TOP_N_MIN = 3, TOP_N_MAX = 8;
+export const TOP_OWN = 45, TOP_GUESS = 45, MOST_TIME = 90;
+export const MODES = ["kadry", "zoom", "licytacja", "rok", "kolejnosc", "plakat", "aktorzy", "top"];
+export const DURATION = { kadry: 3 * STAGE_SECONDS, zoom: 30, plakat: 30, top: TOP_OWN, rok: 25, kolejnosc: 40 };
 export const ACTOR_SECONDS = 6;
 export const MAX_ACTORS = 8;
 export const BID_SECONDS = 15;
@@ -22,7 +24,7 @@ function castView(members) {
   });
 }
 
-export const TITLE_MODES = new Set(["kadry", "zoom", "plakat", "aktorzy", "cytat"]);
+export const TITLE_MODES = new Set(["kadry", "zoom", "plakat", "aktorzy"]);
 export const VOICE_MODES = new Set([...TITLE_MODES, "licytacja"]);
 export const JUDGE_GRACE = 15;
 export const LIC_DONE_DELAY = 3;
@@ -53,7 +55,95 @@ export function normSettings(d) {
     lic_bid: toInt(d.lic_bid, 5, 60, 10),
     hints: d.hints !== false,
     final_x: toInt(d.final_x, 1, 3, 1),
+    top_n: toInt(d.top_n, TOP_N_MIN, TOP_N_MAX, TOP_N),
+    top_own: toInt(d.top_own, 15, 180, TOP_OWN),
+    top_guess: toInt(d.top_guess, 15, 180, TOP_GUESS),
+    most_time: toInt(d.most_time, 30, 180, MOST_TIME),
   };
+}
+
+export function topNeed(cfg) {
+  if (!cfg) return TOP_N;
+  return toInt(cfg.top_n, TOP_N_MIN, TOP_N_MAX, TOP_N);
+}
+
+export function topScore(guess, truth) {
+  const n = (truth || []).length;
+  const pos = new Map((truth || []).map((mid, i) => [mid, i]));
+  let s = 0;
+  (guess || []).forEach((mid, i) => { if (pos.has(mid)) s += Math.max(0, n - Math.abs(i - pos.get(mid))); });
+  return s;
+}
+
+export function topAssign(pids, rng = Math.random) {
+  const ids = [...pids];
+  if (ids.length < 2) return {};
+  for (let i = ids.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+  }
+  const out = {};
+  for (let i = 0; i < ids.length; i++) out[ids[i]] = ids[(i + 1) % ids.length];
+  return out;
+}
+
+function movieRichness(m) {
+  return (m.frames ? 1 : 0) + (m.poster ? 1 : 0) + ((m.cast || []).length >= 3 ? 1 : 0) + (m.zoom_frame ? 1 : 0);
+}
+
+export function mergePackData(datas) {
+  if (!datas || !datas.length) throw new GameError(400, "Wybierz przynajmniej jeden pakiet");
+  const movies = [], questions = [], seen = new Map(), qseen = new Set();
+  const packs = [];
+  for (const data of datas) {
+    const pack = data.pack || data;
+    packs.push(pack);
+    for (const m of (data.movies || [])) {
+      const key = `${normTitle(m.title)}|${m.year || -1}`;
+      const old = seen.get(key);
+      if (!old) { seen.set(key, m); movies.push(m); }
+      else if (movieRichness(m) > movieRichness(old)) {
+        movies[movies.indexOf(old)] = m;
+        seen.set(key, m);
+      }
+    }
+    for (const q of (pack.questions || [])) {
+      if (!qseen.has(q.id)) { qseen.add(q.id); questions.push(q); }
+    }
+  }
+  const pack = {
+    id: "custom", slug: "custom", name: "Custom", name_en: "Custom",
+    description: packs.map(p => p.name).join(" + "),
+    description_en: packs.map(p => p.name_en || p.name).join(" + "),
+    color: packs[0].color || "#1B1712",
+    modes_off: "", questions, source_ids: packs.map(p => p.id),
+  };
+  return { pack, movies };
+}
+
+export function availability(pack, movies, cfg = null) {
+  const off = new Set(String((pack && pack.modes_off) || "").split(",").filter(Boolean));
+  const framed = movies.filter(m => m.frames && m.frames.length).length;
+  const zoomed = movies.filter(m => m.zoom_frame || (m.frames && m.frames.length)).length;
+  const years = new Set(movies.map(m => m.year).filter(Boolean));
+  const tn = topNeed(cfg);
+  const info = {
+    kadry: [framed, 1, "frames"],
+    zoom: [zoomed, 1, "frames"],
+    licytacja: [(pack.questions || []).length || (movies.length >= 5 ? 1 : 0), 1, "questions"],
+    rok: [movies.filter(m => m.year).length, 3, "years"],
+    kolejnosc: [years.size, 4, "years"],
+    plakat: [movies.filter(m => m.poster).length, 3, "posters"],
+    aktorzy: [movies.filter(m => (m.cast || []).length >= 3).length, 3, "cast"],
+    top: [movies.length, tn, "movies"],
+  };
+  const out = {};
+  for (const k of MODES) {
+    const [have, need, what] = info[k];
+    const ok = have >= need && !off.has(k);
+    out[k] = { ok, have, need, reason: ok ? null : (off.has(k) ? "disabled" : what) };
+  }
+  return out;
 }
 
 export class GameError extends Error {
@@ -147,11 +237,11 @@ export function bestAnswer(guess, answers, idxs) {
 
 // --------------------------------------------------------------------- pokój
 // pack = {pack:{...,questions}, movies:[...], avail:{...}} z eksportu (deploy_cloudflare.py)
-export function newRoom(code, data, rounds) {
-  const avail = data.avail;
+export function newRoom(code, data, rounds, kind = "pack") {
+  const avail = data.avail || {};
   return {
-    code, pack: data.pack, avail,
-    modes: MODES.filter(k => avail[k].ok),
+    code, pack: data.pack, avail, kind,
+    modes: kind === "most" ? ["most"] : MODES.filter(k => avail[k] && avail[k].ok),
     rounds: Math.max(1, Math.min(parseInt(rounds || 10, 10) || 10, MAX_ROUNDS)),
     cfg: normSettings({}),
     players: {}, order: [], host: null, phase: "lobby", round: 0, plan: [], task: null, t0: 0, feed: [],
@@ -209,7 +299,16 @@ export class Game {
       if (chosen.length) r.modes = chosen;
     }
     if (rounds != null) r.rounds = toInt(rounds, 1, MAX_ROUNDS, r.rounds);
-    if (settings != null) r.cfg = normSettings(settings);
+    if (settings != null) {
+      r.cfg = normSettings(settings);
+      if (r.kind !== "most") {
+        r.avail = availability(r.pack, this.movies, r.cfg);
+        if (r.modes && r.modes.length)
+          r.modes = r.modes.filter(k => r.avail[k] && r.avail[k].ok).length
+            ? r.modes.filter(k => r.avail[k] && r.avail[k].ok)
+            : MODES.filter(k => r.avail[k] && r.avail[k].ok);
+      }
+    }
     r.version++;
   }
 
@@ -236,6 +335,8 @@ export class Game {
     if (mode === "licytacja") return [c.lic_answer, c.lic_bid];
     const s = c.mode_time[mode] || c.time;
     if (mode === "aktorzy") { const dur = s || ACTOR_SECONDS * t.cast.length; return [dur, r2(dur / t.cast.length)]; }
+    if (mode === "top") return [c.top_own, c.top_guess];
+    if (mode === "most") return [s || c.most_time, null];
     const dur = s || DURATION[mode] || 30;
     return [dur, mode === "kadry" ? r2(dur / 3) : null];
   }
@@ -245,13 +346,22 @@ export class Game {
     return VOICE_MODES.has(mode) && (c.mode_answer[mode] || c.answer) === "voice";
   }
 
-  start() {
+  start(opts = {}) {
     const r = this.r;
-    if (!r.modes.length) throw new GameError(400, "no modes");
+    if (r.kind !== "most" && !r.modes.length) throw new GameError(400, "no modes");
+    if (r.kind === "most") {
+      if (opts.pair) r.mostPair = opts.pair;
+      if (!r.mostPair) throw new GameError(400, "Most wymaga klucza TMDB albo bogatszej obsady w pakietach");
+    }
     const used = new Set(); r.plan = [];
-    for (const mode of this.planModes()) {
+    const modes = r.kind === "most" ? Array.from({ length: r.rounds }, () => "most") : this.planModes();
+    for (const mode of modes) {
       const t = this.makeTask(mode, used);
-      if (t) { [t.dur, t.step] = this.timing(t); r.plan.push(t); }
+      if (t) {
+        [t.dur, t.step] = this.timing(t);
+        if (mode === "top") { t.own_dur = t.dur; t.guess_dur = t.step; t.dur = t.own_dur; }
+        r.plan.push(t);
+      }
     }
     for (const p of Object.values(r.players)) { p.score = 0; p.history = []; }
     r.round = 0; r.feed = [];
@@ -267,11 +377,14 @@ export class Game {
 
   makeTask(mode, used) {
     const ms = this.movies;
-    if (mode === "kadry" || mode === "zoom") {
-      const m = this.pick(ms.filter(x => x.frames), used);
-      const t = { mode, movie: m };
-      if (mode === "zoom") Object.assign(t, { frame: m.frames[1], ox: Math.round((0.3 + rnd() * 0.4) * 1000) / 1000, oy: Math.round((0.3 + rnd() * 0.4) * 1000) / 1000 });
-      return t;
+    if (mode === "kadry") {
+      const m = this.pick(ms.filter(x => x.frames && x.frames.length), used);
+      return { mode, movie: m };
+    }
+    if (mode === "zoom") {
+      const m = this.pick(ms.filter(x => x.zoom_frame || (x.frames && x.frames.length)), used);
+      const frame = m.zoom_frame || (m.frames && m.frames[1]);
+      return { mode, movie: m, frame, ox: Math.round((0.3 + rnd() * 0.4) * 1000) / 1000, oy: Math.round((0.3 + rnd() * 0.4) * 1000) / 1000 };
     }
     if (mode === "plakat") {
       const m = this.pick(ms.filter(x => x.poster), used);
@@ -281,18 +394,15 @@ export class Game {
       const m = this.pick(ms.filter(x => (x.cast || []).length >= 3), used);
       return { mode, movie: m, cast: castView(m.cast.slice(-MAX_ACTORS)) };
     }
-    if (mode === "cytat") {
-      const m = this.pick(ms.filter(x => (x.quotes || []).length), used);
-      const qs = m.quotes;
-      const neutral = qs.filter(q => !q.lang);
-      const base = choice(neutral.length ? neutral : qs);
-      const quote = {};
-      for (const lg of ["pl", "en"]) {
-        const own = qs.filter(q => q.lang === lg);
-        const q = (["", lg].includes(base.lang) && !own.length) ? base : choice(own.length ? own : [base]);
-        quote[lg] = q.text;
-      }
-      return { mode, movie: m, quote };
+    if (mode === "top") {
+      const n = topNeed(this.cfg);
+      if (ms.length < n) return null;
+      return { mode, items: sample(ms, n), sub: "own", own: {}, guess: {}, targets: {} };
+    }
+    if (mode === "most") {
+      const pair = this.r.mostPair;
+      if (!pair) return null;
+      return { mode, start: pair.start, goal: pair.goal, witness: pair.witness, paths: {}, done_at: {} };
     }
     if (mode === "rok") return { mode, movie: this.pick(ms.filter(x => x.year), used) };
     if (mode === "kolejnosc") {
@@ -327,6 +437,13 @@ export class Game {
       const s = pl.length ? Math.floor(rnd() * pl.length) : 0;
       Object.assign(t, { order: pl.slice(s).concat(pl.slice(0, s)), turn: 0, passed: [], leader: null, bids: [], bid: 0, bidder: null,
         found: [], type_end: null, done_at: null, turn_end: r.t0 + t.step });
+    } else if (t.mode === "top") {
+      Object.assign(t, { sub: "own", own: t.own || {}, guess: {}, targets: {} });
+      t.dur = t.own_dur || this.cfg.top_own;
+    } else if (t.mode === "most") {
+      t.paths = t.paths || {};
+      t.done_at = t.done_at || {};
+      for (const pid of pl) if (!t.paths[pid]) t.paths[pid] = [{ ...t.start }];
     } else if (t.voice) Object.assign(t, { claims: [], peek: [] });
     r.version++;
   }
@@ -422,8 +539,14 @@ export class Game {
         const players = act.filter(p => this.plays(p));
         if (el >= this.duration() + JUDGE_GRACE) { for (const c of pend) c.st = "late"; this.endRound(); }
         else if (!pend.length && (el >= this.duration() || (players.length && players.every(p => p.got)))) this.endRound();
+      } else if (t.mode === "top") {
+        if (t.sub === "own") {
+          if (el >= this.duration() || (act.length && act.every(p => p.id in t.own))) this.topToGuess();
+        } else if (el >= this.duration() || (act.length && act.every(p => p.id in t.guess))) this.endRound();
+      } else if (t.mode === "most") {
+        if (el >= this.duration() || (act.length && act.every(p => p.id in (t.done_at || {})))) this.endRound();
       } else if (el >= this.duration() || (act.length && act.every(p => p.ans !== null || p.got))) this.endRound();
-    } else if (r.phase === "reveal" && n - r.t0 >= REVEAL_SECONDS + (["kolejnosc", "licytacja"].includes(this.mode) ? 3 : 0)) {
+    } else if (r.phase === "reveal" && n - r.t0 >= REVEAL_SECONDS + (["kolejnosc", "licytacja", "top", "most"].includes(this.mode) ? 6 : 0)) {
       this.next();
     }
   }
@@ -431,7 +554,7 @@ export class Game {
   // kiedy stan zmieni się sam z siebie (granica etapu, koniec rundy, koniec tury) - pod alarm Durable Object
   nextWake() {
     const r = this.r;
-    if (r.phase === "reveal") return r.t0 + REVEAL_SECONDS + (["kolejnosc", "licytacja"].includes(this.mode) ? 3 : 0);
+    if (r.phase === "reveal") return r.t0 + REVEAL_SECONDS + (["kolejnosc", "licytacja", "top", "most"].includes(this.mode) ? 6 : 0);
     if (r.phase !== "round") return null;
     const t = r.task, n = now();
     const marks = [];
@@ -444,7 +567,6 @@ export class Game {
       if (t.voice) marks.push(r.t0 + dur + JUDGE_GRACE);
       if (t.mode === "kadry") marks.push(r.t0 + t.step, r.t0 + 2 * t.step);
       if (t.mode === "aktorzy") for (let k = 1; k < t.cast.length; k++) marks.push(r.t0 + k * t.step);
-      if (t.mode === "cytat") marks.push(r.t0 + dur / 2);
     }
     const future = marks.filter(x => x > n + 0.001);
     return future.length ? Math.min(...future) : (t.voice && t.mode !== "licytacja" ? null : n);
@@ -500,6 +622,30 @@ export class Game {
         if (t.success) pts[pid] = pid === t.bidder ? 200 * t.bid * x : 0;
         else pts[pid] = pid === t.bidder ? 0 : 100 * t.bid * x;
       }
+    } else if (t.mode === "top") {
+      this.topLockRemaining();
+      for (const pid of Object.keys(r.players)) {
+        const target = (t.targets || {})[pid], guess = (t.guess || {})[pid], truth = (t.own || {})[target];
+        pts[pid] = (guess && truth) ? topScore(guess, truth) * x : 0;
+      }
+    } else if (t.mode === "most") {
+      const finished = [];
+      for (const [pid, at] of Object.entries(t.done_at || {})) {
+        const path = (t.paths || {})[pid] || [];
+        const last = path[path.length - 1];
+        if (last && last.kind === "person" && Number(last.id) === Number(t.goal.id))
+          finished.push([at, pid, path.filter(n => n.kind === "movie").length]);
+      }
+      finished.sort((a, b) => a[0] - b[0]);
+      const firstPid = finished.length ? finished[0][1] : null;
+      const mostScore = (n, ok, first) => ok ? Math.max(100, (8 - n) * 200) + (first ? 100 : 0) : 0;
+      const pathMovies = pth => (pth || []).filter(x => x.kind === "movie").length;
+      for (const pid of Object.keys(r.players)) {
+        const path = (t.paths || {})[pid] || [];
+        const last = path[path.length - 1];
+        const reached = !!(last && last.kind === "person" && Number(last.id) === Number(t.goal.id));
+        pts[pid] = mostScore(pathMovies(path), reached, pid === firstPid) * x;
+      }
     }
     for (const [pid, p] of Object.entries(r.players)) {
       if (!TITLE_MODES.has(t.mode)) { p.score += pts[pid]; p.got = pts[pid] ? { points: pts[pid] } : null; }
@@ -521,6 +667,66 @@ export class Game {
     r.phase = "lobby";
     for (const p of Object.values(r.players)) { p.score = 0; p.history = []; p.got = null; }
     r.version++;
+  }
+
+  topLockRemaining() {
+    const r = this.r, t = r.task;
+    const def = t.items.map(m => m.id);
+    if (t.sub === "own" || !t.own) {
+      for (const pid of Object.keys(r.players))
+        if (!(pid in t.own)) t.own[pid] = (r.players[pid].ans && r.players[pid].ans.length) ? r.players[pid].ans.slice() : def.slice();
+    }
+    if (t.sub === "guess") {
+      for (const [pid] of Object.entries(t.targets || {})) {
+        if (!(pid in t.guess)) t.guess[pid] = (t.own[pid] || def).slice();
+      }
+    }
+  }
+
+  topToGuess() {
+    const r = this.r, t = r.task;
+    const def = t.items.map(m => m.id);
+    for (const pid of Object.keys(r.players)) {
+      if (!(pid in t.own)) t.own[pid] = (r.players[pid].ans && r.players[pid].ans.length) ? r.players[pid].ans.slice() : def.slice();
+      r.players[pid].ans = null;
+    }
+    t.targets = topAssign(Object.keys(r.players));
+    t.sub = "guess";
+    t.dur = t.guess_dur || this.cfg.top_guess;
+    r.t0 = now();
+    r.version++;
+    if (!Object.keys(t.targets).length) this.endRound();
+  }
+
+  mostStepLocal(p, d) {
+    const r = this.r, t = r.task;
+    if ((t.done_at || {})[p.id]) return { ok: false };
+    t.paths = t.paths || {};
+    const path = t.paths[p.id] || (t.paths[p.id] = [{ ...t.start }]);
+    if (d.undo) {
+      if (path.length > 1) { path.pop(); r.version++; }
+      return { ok: true, path };
+    }
+    const step = d.person || d.movie || d.step;
+    if (!step) return { ok: false };
+    const kind = (d.person || (step && step.kind === "person")) ? "person" : "movie";
+    const nxt = typeof step === "object" ? { ...step, kind: step.kind || kind } : { kind, id: Number(step) };
+    return { ok: "check", path, nxt };
+  }
+
+  applyMostStep(p, path, nxt, ok) {
+    const r = this.r, t = r.task;
+    if (!ok) return { ok: false, illegal: true };
+    path.push(nxt);
+    const reached = nxt.kind === "person" && Number(nxt.id) === Number(t.goal.id);
+    if (reached) {
+      t.done_at = t.done_at || {};
+      t.done_at[p.id] = now();
+      this.event("guess", p.name);
+    }
+    r.version++;
+    this.tick();
+    return { ok: true, reached, path };
   }
 
   // --- odpowiedzi
@@ -616,6 +822,34 @@ export class Game {
       r.version++; this.tick();
       return { ok: true, correct: true, title: ans[i].text };
     }
+    if (mode === "top") {
+      const ids = (d.order || []).map(x => parseInt(x, 10));
+      const expect = t.items.map(m => m.id).slice().sort((a, b) => a - b);
+      if (JSON.stringify(ids.slice().sort((a,b)=>a-b)) !== JSON.stringify(expect)) throw new GameError(400, "order");
+      const bucket = t.sub === "own" ? "own" : "guess";
+      if (p.id in t[bucket]) return { ok: false };
+      t[bucket][p.id] = ids;
+      p.ans = ids;
+      this.event("answered", p.name);
+      this.tick();
+      return { ok: true };
+    }
+    if (mode === "most") {
+      const prep = this.mostStepLocal(p, d);
+      if (prep.ok !== "check") return prep;
+      const graph = this._localGraph || null;
+      let ok = false, nxt = prep.nxt;
+      if (graph) {
+        const a = prep.path[prep.path.length - 1];
+        const list = graph[`${a.kind}:${a.id}`] || [];
+        ok = list.some(n => n[0] === nxt.kind && Number(n[1]) === Number(nxt.id));
+        if (ok) {
+          const meta = (graph._meta && (graph._meta[`${nxt.kind}:${nxt.id}`] || graph._meta[[nxt.kind, Number(nxt.id)]])) || {};
+          nxt = { ...nxt, ...meta };
+        }
+      }
+      return this.applyMostStep(p, prep.path, nxt, ok);
+    }
     return { ok: false };
   }
 
@@ -644,10 +878,11 @@ export class Game {
     const out = {
       code: r.code, phase: r.phase, round: r.round + 1,
       rounds: r.phase !== "lobby" && r.plan.length ? r.plan.length : this.totalRounds(),
-      pack: { id: pk.id, name: pk.name, name_en: pk.name_en, slug: pk.slug, color: pk.color },
+      pack: { id: pk.id, name: pk.name, name_en: pk.name_en, slug: pk.slug, color: pk.color, source_ids: pk.source_ids },
+      kind: r.kind || "pack",
       host: r.host, me: me ? me.id : null, feed: r.feed.slice(-6),
       stage_seconds: STAGE_SECONDS, reveal_seconds: REVEAL_SECONDS,
-      modes: r.modes, avail: r.avail, all_modes: MODES, min_quotes: MIN_QUOTES,
+      modes: r.modes, avail: r.avail, all_modes: r.kind === "most" ? ["most"] : MODES, min_top: topNeed(this.cfg),
       settings: this.cfg, max_rounds: MAX_ROUNDS,
       players: players.map(p => ({
         id: p.id, name: p.name, score: p.score, online: this.isOnline(p),
@@ -669,8 +904,17 @@ export class Game {
       else if (mode === "aktorzy") {
         const k = Math.min(t.cast.length, Math.floor(el / t.step) + 1);
         Object.assign(out, { cast: t.cast.slice(0, k), cast_total: t.cast.length, actor_seconds: t.step });
-      } else if (mode === "cytat") {
-        Object.assign(out, { quote: t.quote[["pl", "en"].includes(lang) ? lang : "pl"], hint_year: el >= this.duration() / 2 ? t.movie.year : null });
+      } else if (mode === "top") {
+        const items = t.items.map(m => ({ ...Game.mview(m, lang), img: Game.thumb(m) }));
+        const mine = me && (t[t.sub === "own" ? "own" : "guess"] || {})[me.id];
+        const target = me && (t.targets || {})[me.id];
+        Object.assign(out, { sub: t.sub || "own", items, mine,
+          target: target ? { id: target, name: this.pname(target) } : null,
+          top_n: t.items.length, score_hint: "n-d" });
+      } else if (mode === "most") {
+        const path = (me && (t.paths || {})[me.id]) || [t.start];
+        Object.assign(out, { start: t.start, goal: t.goal, path, current: path[path.length - 1],
+          finished: !!(me && (t.done_at || {})[me.id]) });
       } else if (mode === "rok") {
         Object.assign(out, { movie: Game.mview(t.movie, lang, false), img: Game.thumb(t.movie), mine: me ? me.ans : null });
       } else if (mode === "kolejnosc") {
@@ -726,12 +970,36 @@ export class Game {
       const m = t.movie;
       Object.assign(ans, Game.mview(m, lang), { frames: m.frames || [], poster: m.poster, img: Game.thumb(m) });
       if (mode === "aktorzy") ans.cast = t.cast;
-      if (mode === "cytat") ans.quote = t.quote[["pl", "en"].includes(lang) ? lang : "pl"];
       if (mode === "zoom") ans.img = `/frame/${t.frame}.jpg`;
       if (mode === "plakat") ans.img = `/poster/${m.id}.jpg`;
       if (mode === "rok") ans.guesses = players.filter(p => p.ans !== null).map(p => ({ name: p.name, year: p.ans, points: p.history.length ? p.history[p.history.length - 1] : 0 }));
     }
     if (mode === "kolejnosc") ans.items = t.items.slice().sort((a, b) => a.year - b.year).map(m => ({ ...Game.mview(m, lang), img: Game.thumb(m) }));
+    if (mode === "top") {
+      const byId = Object.fromEntries(t.items.map(m => [m.id, { ...Game.mview(m, lang), img: Game.thumb(m) }]));
+      const row = ids => (ids || []).map(i => byId[i]).filter(Boolean);
+      ans.items = t.items.map(m => byId[m.id]);
+      ans.tops = [];
+      for (const p of players) {
+        const guesser = Object.entries(t.targets || {}).find(([, tgt]) => tgt === p.id)?.[0];
+        const guessed = guesser ? t.guess[guesser] : null;
+        const gpts = guesser && r.players[guesser] && r.players[guesser].history.length ? r.players[guesser].history[r.players[guesser].history.length - 1] : 0;
+        ans.tops.push({ id: p.id, name: p.name, own: row(t.own[p.id]), guessed_by: guesser ? this.pname(guesser) : null, guess: row(guessed), points: gpts });
+      }
+      if (me) {
+        const tgt = (t.targets || {})[me.id];
+        ans.mine = { own: row(t.own[me.id]), target: this.pname(tgt), guess: row(t.guess[me.id]), truth: row(t.own[tgt]), points: me.history.length ? me.history[me.history.length - 1] : 0 };
+      }
+    }
+    if (mode === "most") {
+      ans.start = t.start; ans.goal = t.goal;
+      ans.paths = players.map(p => {
+        const path = (t.paths || {})[p.id] || [];
+        const last = path[path.length - 1];
+        const reached = !!(last && last.kind === "person" && Number(last.id) === Number(t.goal.id));
+        return { id: p.id, name: p.name, path, movies: path.filter(n => n.kind === "movie").length, reached, points: p.history.length ? p.history[p.history.length - 1] : 0 };
+      });
+    }
     if (mode === "licytacja") {
       const got = new Set(t.found.map(f => f.i));
       Object.assign(ans, {

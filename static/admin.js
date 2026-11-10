@@ -111,7 +111,7 @@ Object.assign(EN, {
   "Brak trailera: {x}": "No trailer: {x}",
 });
 const ROLES = [["hard",T("trudny")],["medium",T("średni")],["easy",T("łatwy")]];
-const KEYS_PL = "Klawisze: <span class=\"kbd\">&larr;</span> <span class=\"kbd\">&rarr;</span> filmy, <span class=\"kbd\">N</span> nast\u0119pny bez wyboru, najed\u017a na kadr i <span class=\"kbd\">1</span> trudny <span class=\"kbd\">2</span> \u015bredni <span class=\"kbd\">3</span> \u0142atwy.";
+const KEYS_PL = "Klawisze: <span class=\"kbd\">&larr;</span> <span class=\"kbd\">&rarr;</span> filmy, <span class=\"kbd\">N</span> nast\u0119pny bez wyboru, najed\u017a na kadr i <span class=\"kbd\">1</span> trudny <span class=\"kbd\">2</span> \u015bredni <span class=\"kbd\">3</span> \u0142atwy <span class=\"kbd\">4</span> zoom.";
 const CLOUD = !!window.KADR_CLOUD;
 const CLOUD_NOTE_PL = "Chmura: edytujesz cytaty, licytację, polskie tytuły, tryby, plakaty (link/plik do 1,5 MB) i obsadę. Scraper, nowe pakiety i kadry z YouTube działają tylko lokalnie (python app.py), a potem deploy_cloudflare.py.";
 const CLOUD_NOTE_EN = "Cloud: edit quotes, auction questions, Polish titles, mode toggles, posters (URL/file up to 1.5 MB) and cast. Scraper, new packs and YouTube frames stay local (python app.py), then deploy_cloudflare.py.";
@@ -195,7 +195,7 @@ async function route() {
   if (h === "/new") { if (CLOUD) return (location.hash = "#/"); return packForm(null); }
   if ((m = h.match(/^\/pack\/(\d+)$/))) return packPage(+m[1]);
   if ((m = h.match(/^\/pick\/(\d+)\/(\d+)$/))) { if (CLOUD) return (location.hash = "#/pack/" + m[1]); return picker(+m[1], +m[2]); }
-  if ((m = h.match(/^\/(modes|posters|cast|quotes|questions)\/(\d+)$/))) return EDITORS[m[1]](+m[2]);
+  if ((m = h.match(/^\/(modes|posters|cast|quotes|questions|zoom)\/(\d+)$/))) return EDITORS[m[1]](+m[2]);
   location.hash = "#/";
 }
 
@@ -412,6 +412,9 @@ async function picker(packId, movieId) {
           ${movie.status !== "ok" ? `<div class="errbox" style="margin-top:12px">${T("Brak kadrów: {x}", {x: esc(errText(movie.error) || T("film jeszcze nie pobrany"))})}</div>` : `
           <div class="muted" style="margin-top:6px">${T("Trailer")}: <a href="${esc(movie.video_url)}" target="_blank" rel="noopener">${esc(movie.video_title || movie.video_url)}</a></div>
           <div class="picksum">${ROLES.map(([r, l]) => `<span class="badge ${pick[r] ? "ok" : "pending"}">${l}: ${pick[r] ? T("jest") : T("brak")}</span>`).join("")}
+            <span class="badge ${pick.zoom ? "ok" : "pending"}">${T("Zoom")}: ${pick.zoom ? T("jest") : T("brak")}</span>
+            ${CLOUD ? "" : `<label class="pill small light" style="cursor:pointer">${T("wgraj kadr do Zoomu")}<input type="file" accept="image/jpeg,image/png,image/webp" id="zup" hidden></label>`}
+            ${pick.zoom && !CLOUD ? `<button class="pill small ghost" id="zclear">${T("usuń kadr Zoom")}</button>` : ""}
             <span class="saved" id="saved">${T("zapisano")}</span>
             <span style="flex:1"></span>
             <button class="pill small light" id="prev">${T("&larr; poprzedni")}</button><button class="pill small light" id="next">${T("następny &rarr;")}</button>
@@ -420,10 +423,11 @@ async function picker(packId, movieId) {
           <p class="muted" style="font-size:14px;margin:-6px 0 14px">${T(KEYS_PL)}</p>
           <div class="picker-grid">${frames.map(f => {
             const role = ROLES.find(([r]) => pick[r] === f.id);
-            return `<div class="fcard ${role ? role[0] : ""}" data-f="${f.id}"><div class="iw"><img src="/frame/${f.id}.jpg" alt="" loading="lazy">
-              ${role ? `<span class="role ${role[0]}">${role[1]}</span>` : ""}${p.cover_frame_id === f.id ? `<span class="cover">${T("okładka")}</span>` : ""}
-              <span class="ts">${Math.floor(f.ts / 60)}:${String(Math.floor(f.ts % 60)).padStart(2, "0")}</span></div>
-              <div class="btns">${ROLES.map(([r, l]) => `<button class="rb ${r} ${pick[r] === f.id ? "on" : ""}" data-r="${r}">${l}</button>`).join("")}<button class="rb" data-cover title="${T("ustaw jako okładkę pakietu")}">${T("okł.")}</button></div></div>`; }).join("")}</div>`}
+            const isZ = pick.zoom === f.id;
+            return `<div class="fcard ${role ? role[0] : ""} ${isZ ? "zoom" : ""}" data-f="${f.id}"><div class="iw"><img src="/frame/${f.id}.jpg" alt="" loading="lazy">
+              ${role ? `<span class="role ${role[0]}">${role[1]}</span>` : ""}${isZ ? `<span class="role zoom">${T("Zoom")}</span>` : ""}${p.cover_frame_id === f.id ? `<span class="cover">${T("okładka")}</span>` : ""}
+              ${f.kind === "zoom" ? `<span class="ts">${T("tylko Zoom")}</span>` : `<span class="ts">${Math.floor(f.ts / 60)}:${String(Math.floor(f.ts % 60)).padStart(2, "0")}</span>`}</div>
+              <div class="btns">${ROLES.map(([r, l]) => `<button class="rb ${r} ${pick[r] === f.id ? "on" : ""}" data-r="${r}">${l}</button>`).join("")}<button class="rb zoom ${isZ ? "on" : ""}" data-r="zoom">${T("Zoom")}</button><button class="rb" data-cover title="${T("ustaw jako okładkę pakietu")}">${T("okł.")}</button></div></div>`; }).join("")}</div>`}
         </div></div>`;
     $(".mlist a.on")?.scrollIntoView({block: "nearest"});
     if (movie.status !== "ok") return;
@@ -435,10 +439,22 @@ async function picker(packId, movieId) {
       c.querySelector("[data-cover]").onclick = async () => { await api(`/api/admin/packs/${packId}`, "PUT", {...p, cover_frame_id: fid}); p.cover_frame_id = fid; toast(T("Ustawiono okładkę pakietu")); render(); };
       c.onmouseenter = () => hover = fid;
     });
+    const zup = $("#zup");
+    if (zup) zup.onchange = async () => {
+      const f = zup.files && zup.files[0]; if (!f) return;
+      const data = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(f); });
+      try { const r = await api(`/api/admin/movies/${movieId}/zoom`, "POST", {data}); pick.zoom = r.zoom; toast(T("Zapisano")); location.reload(); }
+      catch (e) { toast(e.message); }
+    };
+    if ($("#zclear")) $("#zclear").onclick = async () => {
+      try { await api(`/api/admin/movies/${movieId}/zoom`, "DELETE"); pick.zoom = null; toast(T("Zapisano")); picker(packId, movieId); }
+      catch (e) { toast(e.message); }
+    };
   };
   let hover = null;
   const setRole = async (role, fid) => {
-    if (pick[role] === fid) pick[role] = null;
+    if (role === "zoom") pick.zoom = pick.zoom === fid ? null : fid;
+    else if (pick[role] === fid) pick[role] = null;
     else { for (const [r] of ROLES) if (pick[r] === fid) pick[r] = null; pick[role] = fid; }
     try { await api("/api/admin/pick", "POST", {movie_id: movieId, ...pick}); }
     catch (e) { return toast(e.message); }
@@ -452,6 +468,7 @@ async function picker(packId, movieId) {
     else if (e.key === "ArrowLeft") go(-1);
     else if (e.key.toLowerCase() === "n") nextTodo();
     else if (hover && ["1","2","3"].includes(e.key)) setRole(ROLES[+e.key - 1][0], hover);
+    else if (hover && e.key === "4") setRole("zoom", hover);
   };
 }
 
@@ -469,9 +486,9 @@ boot();
 /* faza 3: tryby, TMDB, polskie tytuły */
 const castN = m => { try { return JSON.parse(m.cast_json || "[]").length; } catch { return 0; } };
 const quoteN = m => m.nquotes || 0;
-const MODE_NAMES = {kadry: "Kadry", zoom: "Zoom", licytacja: "Licytacja", rok: "Który rok", kolejnosc: "Ułóż po kolei", plakat: "Plakat", aktorzy: "Aktorzy", cytat: "Cytat"};
-const NEED_TXT = {frames: "filmy z kadrami", movies: "filmy w pakiecie", years: "filmy z rokiem", posters: "plakaty", cast: "filmy z obsadą", quotes: "cytaty", questions: "pytania"};
-const MODE_NEED = {kadry: "frames", zoom: "frames", licytacja: "questions", rok: "years", kolejnosc: "years", plakat: "posters", aktorzy: "cast", cytat: "quotes"};
+const MODE_NAMES = {kadry: "Kadry", zoom: "Zoom", licytacja: "Licytacja", rok: "Który rok", kolejnosc: "Ułóż po kolei", plakat: "Plakat", aktorzy: "Aktorzy", top: "Top"};
+const NEED_TXT = {frames: "filmy z kadrami", movies: "filmy w pakiecie", years: "filmy z rokiem", posters: "plakaty", cast: "filmy z obsadą", questions: "pytania"};
+const MODE_NEED = {kadry: "frames", zoom: "frames", licytacja: "questions", rok: "years", kolejnosc: "years", plakat: "posters", aktorzy: "cast", top: "movies"};
 
 async function modesPanel(id) {
   const box = $("#modespanel"); if (!box) return;
@@ -562,15 +579,15 @@ async function plTitlesPage(id) {
 const SRC_NAMES = {auto: "auto (z zapasowym)", imdb: "IMDb", filmweb: "Filmweb", tmdb: "TMDB", upload: "plik", url: "link", manual: "ręcznie"};
 const MODE_DESC = {
   kadry: "Zgadnij film po kadrze. Dane: kadry z YouTube i Twoje wybory.",
-  zoom: "Kadr powoli się oddala. Dane: te same kadry.",
+  zoom: "Kadr powoli się oddala. Możesz wybrać albo wgrać osobny kadr, niezależny od trójki z Kadry. Jeśli nic nie ustawisz, gra weźmie środkowy kadr z Kadry.",
   licytacja: "Gracze licytują, ile odpowiedzi podadzą. Dane: Twoje pytania.",
   rok: "Zgadnij rok premiery. Dane: rok filmu.",
   kolejnosc: "Ułóż filmy od najstarszego. Dane: rok filmu.",
   plakat: "Rozmyty plakat wyostrza się. Dane: plakaty z IMDb, Filmweb albo TMDB.",
   aktorzy: "Nazwiska z obsady odsłaniane po kolei, gwiazda na końcu. Dane: obsada.",
-  cytat: "Zgadnij film po cytacie. Dane: cytaty, które wpiszesz."};
-const MODE_EDITOR = {kadry: "pack", zoom: "pack", rok: "pack", kolejnosc: "pack", plakat: "posters", aktorzy: "cast", cytat: "quotes", licytacja: "questions"};
-const EDIT_NAMES = {pack: "lista filmów", posters: "edytor plakatów", cast: "edytor obsady", quotes: "edytor cytatów", questions: "pytania do licytacji"};
+  top: "Każdy układa topkę tych samych filmów, potem odgaduje topkę innego gracza. Dane: filmy w pakiecie (domyślnie 5)."};
+const MODE_EDITOR = {kadry: "pack", zoom: "zoom", rok: "pack", kolejnosc: "pack", plakat: "posters", aktorzy: "cast", licytacja: "questions"};
+const EDIT_NAMES = {pack: "lista filmów", posters: "edytor plakatów", cast: "edytor obsady", quotes: "edytor cytatów", questions: "pytania do licytacji", zoom: "kadr do Zoomu"};
 
 function edHead(p, title, extra = "") {
   return `<div class="ph1"><div><a href="#/modes/${p.id}" class="muted backl">&larr; ${esc(packName(p))} · ${T("edytor trybów")}</a><h1>${title}<span class="ast">*</span></h1></div>${extra}</div>`;
@@ -767,11 +784,46 @@ function castModal(id, m) {
 /* cytaty */
 const Q_STATUS = {matched: "dopasowano", unmatched: "nie ma w pakiecie", ambiguous: "kilka filmów, dopisz rok", duplicate: "już jest taki cytat", bad_format: "zły format"};
 const langSel = (v, attr = "") => `<select class="input sm qlang" ${attr} aria-label="${T("Język")}"><option value="" ${!v ? "selected" : ""}>${T("oba")}</option><option value="pl" ${v === "pl" ? "selected" : ""}>PL</option><option value="en" ${v === "en" ? "selected" : ""}>EN</option></select>`;
+async function zoomPage(id) {
+  const p = packs.find(x => x.id === id); if (!p) return (location.hash = "#/");
+  const movies = await api(`/api/admin/packs/${id}/movies`);
+  const n = movies.filter(m => m.zoom).length;
+  $("#main").innerHTML = edHead(p, T("kadr do Zoomu"), `<span class="tag">${T("{a} z {b} ma kadr Zoom", {a: n, b: movies.length})}</span>`) + `
+    <div class="panel">
+      <p class="muted" style="font-size:15px;margin:0 0 14px">${T("Ten kadr jest niezależny od trójki trudny/średni/łatwy z trybu Kadry. Możesz wskazać istniejący kadr albo wgrać zupełnie inny. Jeśli nic nie ustawisz, gra użyje środkowego kadru z Kadry.")}</p>
+      <div class="pgrid">${movies.map(m => `
+        <div class="pcard" data-id="${m.id}">
+          <div class="pimg">${m.zoom ? `<img src="/frame/${m.zoom}.jpg" alt="${esc(m.title)}" loading="lazy">` : (m.medium ? `<img src="/frame/${m.medium}.jpg" alt="" style="opacity:.55" loading="lazy">` : `<span>${T("brak kadru")}</span>`)}</div>
+          <div class="t">${esc(m.title)} <span class="muted">${m.year || ""}</span></div>
+          <div class="sub">${m.zoom ? T("ustawiony kadr Zoom") : (m.medium ? T("zapas: środkowy kadr z Kadry") : T("brak kadru"))}</div>
+          <div class="pacts">${CLOUD ? "" : `<a class="pill small orange" href="#/pick/${id}/${m.id}">${T("wybierz kadr")}</a>
+            <label class="pill small light">${T("wgraj")}<input type="file" accept="image/jpeg,image/png,image/webp" hidden></label>
+            ${m.zoom ? `<button class="pill small ghost" data-a="del">${T("usuń")}</button>` : ""}`}</div>
+        </div>`).join("") || `<p class="empty">${T("Brak filmów.")}</p>`}</div>
+    </div>`;
+  document.querySelectorAll(".pcard").forEach(c => {
+    const mid = +c.dataset.id, m = movies.find(x => x.id === mid);
+    const inp = c.querySelector("input[type=file]");
+    if (inp) inp.onchange = async () => {
+      const f = inp.files && inp.files[0]; if (!f) return;
+      const data = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(f); });
+      try { await api(`/api/admin/movies/${mid}/zoom`, "POST", {data}); toast(T("Zapisano")); zoomPage(id); }
+      catch (e) { toast(e.message); }
+    };
+    const del = c.querySelector("[data-a=del]");
+    if (del) del.onclick = async () => {
+      try { await api(`/api/admin/movies/${mid}/zoom`, "DELETE"); toast(T("Zapisano")); zoomPage(id); }
+      catch (e) { toast(e.message); }
+    };
+  });
+}
+
 async function quotesPage(id, keepText) {
   const p = packs.find(x => x.id === id); if (!p) return (location.hash = "#/");
   const films = await api(`/api/admin/packs/${id}/quotes`);
   const total = films.reduce((s, f) => s + f.quotes.length, 0);
   $("#main").innerHTML = edHead(p, T("cytaty"), `<span class="tag">${T("{a} cytatów · {b} filmów z cytatem", {a: total, b: films.filter(f => f.quotes.length).length})}</span>`) + `
+    <div class="panel" style="margin-bottom:16px"><p class="muted" style="margin:0;font-size:15px">${T("Cytat nie jest już trybem gry — zastąpiła go gra Top. Dane cytatów zostają w bazie, możesz je dalej edytować.")}</p></div>
     <div class="ed-grid">
       <div class="panel"><h2>${T("wklej listę")}</h2>
         <p class="muted" style="font-size:14px;margin:0 0 10px">${T("Jedna linia na cytat: <b>Tytuł filmu = cytat</b>. Tytuł oryginalny albo polski, rok opcjonalnie, np. <b>Lśnienie (1980) = Here's Johnny!</b>. Język oznacz na początku cytatu: <b>[pl]</b> albo <b>[en]</b>. Polska wersja gry woli cytaty [pl].")}</p>
@@ -870,4 +922,4 @@ async function questionsPage(id) {
   $("#bqsave").onclick = () => { if ($("#bqtext").value !== last) return preview(false); preview(true).catch(e => toast(e.message)); };
   $("#bqtext").oninput = () => { $("#bqsave").disabled = true; };
 }
-const EDITORS = {modes: modesHub, posters: postersPage, cast: castPage, quotes: quotesPage, questions: questionsPage};
+const EDITORS = {modes: modesHub, posters: postersPage, cast: castPage, quotes: quotesPage, questions: questionsPage, zoom: zoomPage};

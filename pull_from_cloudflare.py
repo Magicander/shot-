@@ -162,7 +162,7 @@ def write_db(data: dict, out: Path, images: dict):
     for i, p in enumerate(data["packs"]):
         # modes w eksporcie = włączone; modes_off = reszta z pełnej listy
         # modes_off w bazie to lista CSV (jak w app.py), nie JSON
-        ALL_MODES = ["kadry", "zoom", "licytacja", "rok", "kolejnosc", "plakat", "aktorzy", "cytat"]
+        ALL_MODES = ["kadry", "zoom", "licytacja", "rok", "kolejnosc", "plakat", "aktorzy", "top"]
         modes_on = set(p.get("modes") or ALL_MODES)
         if isinstance(p.get("modes_off"), str):
             modes_off = p["modes_off"]
@@ -203,6 +203,7 @@ def write_db(data: dict, out: Path, images: dict):
                 con.execute("INSERT INTO quotes (movie_id, text, lang) VALUES (?,?,?)", (m["id"], text, lang or ""))
                 quotes_n += 1
             frames = m.get("frames") or []
+            zoom_fid = m.get("zoom_frame")
             if frames and len(frames) >= 3:
                 # zachowaj oryginalne id kadrów (linki /frame/{id}.jpg)
                 for pos, fid in enumerate(frames[:3]):
@@ -210,16 +211,26 @@ def write_db(data: dict, out: Path, images: dict):
                     if not img:
                         continue
                     con.execute(
-                        "INSERT INTO frames (id, movie_id, position, ts_seconds, image) VALUES (?,?,?,?,?)",
-                        (fid, m["id"], pos, 0, img),
+                        "INSERT INTO frames (id, movie_id, position, ts_seconds, image, kind) VALUES (?,?,?,?,?,?)",
+                        (fid, m["id"], pos, 0, img, "kadry"),
                     )
                     frame_ok += 1
-                con.execute(
-                    "INSERT INTO picks (movie_id, hard_frame_id, medium_frame_id, easy_frame_id) VALUES (?,?,?,?) "
-                    "ON CONFLICT(movie_id) DO UPDATE SET hard_frame_id=excluded.hard_frame_id, "
-                    "medium_frame_id=excluded.medium_frame_id, easy_frame_id=excluded.easy_frame_id",
-                    (m["id"], frames[0], frames[1], frames[2]),
-                )
+            if zoom_fid and zoom_fid not in (frames[:3] if frames else []):
+                img = images["frame"].get(zoom_fid)
+                if img:
+                    con.execute(
+                        "INSERT INTO frames (id, movie_id, position, ts_seconds, image, kind) VALUES (?,?,?,?,?,?) "
+                        "ON CONFLICT(id) DO UPDATE SET image=excluded.image, kind=excluded.kind",
+                        (zoom_fid, m["id"], 1000, 0, img, "zoom"),
+                    )
+                    frame_ok += 1
+            if frames and len(frames) >= 3:
+                import db as _db
+                _db.upsert_picks(con, m["id"], hard=frames[0], medium=frames[1], easy=frames[2],
+                                 zoom=zoom_fid)
+            elif zoom_fid:
+                import db as _db
+                _db.upsert_picks(con, m["id"], zoom=zoom_fid)
             if m.get("poster"):
                 img = images["poster"].get(m["id"])
                 if img:
@@ -274,6 +285,8 @@ def collect_image_ids(data: dict):
         for m in p.get("movies") or []:
             for fid in m.get("frames") or []:
                 frames.add(fid)
+            if m.get("zoom_frame"):
+                frames.add(m["zoom_frame"])
             if m.get("poster"):
                 posters.add(m["id"])
             for c in m.get("cast") or []:

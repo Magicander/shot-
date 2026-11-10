@@ -219,6 +219,14 @@ def migrate(con):
             con.execute("UPDATE movies SET quotes='' WHERE id=?", (r["id"],))
         if "modes_off" not in pc:
             con.execute("ALTER TABLE packs ADD COLUMN modes_off TEXT NOT NULL DEFAULT ''")
+        pkc = _cols(con, "picks")
+        if "zoom_frame_id" not in pkc:
+            con.execute("ALTER TABLE picks ADD COLUMN zoom_frame_id INTEGER REFERENCES frames(id) ON DELETE SET NULL")
+        fc = _cols(con, "frames")
+        if "kind" not in fc:
+            con.execute("ALTER TABLE frames ADD COLUMN kind TEXT NOT NULL DEFAULT 'kadry'")
+        con.execute("CREATE TABLE IF NOT EXISTS tmdb_cache ("
+                    "key TEXT PRIMARY KEY, body TEXT NOT NULL, updated REAL)")
         for slug, (n, d) in SEED_EN.items():
             con.execute("UPDATE packs SET name_en=? WHERE slug=? AND name_en=''", (n, slug))
             con.execute("UPDATE packs SET description_en=? WHERE slug=? AND description_en=''", (d, slug))
@@ -308,19 +316,27 @@ def import_legacy(con: sqlite3.Connection, legacy: Path) -> int:
                     (mid, f["position"], f["ts_seconds"], f["image"])).lastrowid
             p = old.execute("SELECT * FROM picks WHERE movie_id=?", (m["id"],)).fetchone()
             if p:
-                con.execute("INSERT OR REPLACE INTO picks VALUES (?,?,?,?)",
-                            (mid, idmap.get(p["easy_frame_id"]), idmap.get(p["medium_frame_id"]),
-                             idmap.get(p["hard_frame_id"])))
+                upsert_picks(con, mid,
+                             easy=idmap.get(p["easy_frame_id"]),
+                             medium=idmap.get(p["medium_frame_id"]),
+                             hard=idmap.get(p["hard_frame_id"]),
+                             zoom=idmap.get(p["zoom_frame_id"]) if "zoom_frame_id" in p.keys() else None)
             n += 1
     old.close()
     print(f"Zaimportowano {n} filmów ze starej bazy {legacy.name} do pakietu Horrory.")
     return n
 
 
+def kadry_frame_ids(con, movie_id):
+    """Kadry do trybu Kadry (bez kadrów wgranych specjalnie do Zoomu)."""
+    return [r["id"] for r in con.execute(
+        "SELECT id FROM frames WHERE movie_id=? AND IFNULL(kind,'kadry')!='zoom' ORDER BY position", (movie_id,))]
+
+
 def game_frames(con, movie_id):
     """Zwraca (hard, medium, easy) id kadrów - z wyborów admina albo sensowny zapas."""
     p = con.execute("SELECT * FROM picks WHERE movie_id=?", (movie_id,)).fetchone()
-    ids = [r["id"] for r in con.execute("SELECT id FROM frames WHERE movie_id=? ORDER BY position", (movie_id,))]
+    ids = kadry_frame_ids(con, movie_id)
     if len(ids) < 3:
         return None
     if p and p["hard_frame_id"] and p["medium_frame_id"] and p["easy_frame_id"]:
@@ -331,6 +347,36 @@ def game_frames(con, movie_id):
     easy = (p and p["easy_frame_id"]) or rest[-1]
     medium = (p and p["medium_frame_id"]) or rest[len(rest) // 2]
     return [hard, medium, easy]
+
+
+def game_zoom_frame(con, movie_id):
+    """Kadr do Zoomu: wybór admina albo zapas (środkowy kadr z Kadry)."""
+    p = con.execute("SELECT * FROM picks WHERE movie_id=?", (movie_id,)).fetchone()
+    zid = p["zoom_frame_id"] if p and "zoom_frame_id" in p.keys() else None
+    if zid:
+        row = con.execute("SELECT id FROM frames WHERE id=? AND movie_id=?", (zid, movie_id)).fetchone()
+        if row:
+            return row["id"]
+    fr = game_frames(con, movie_id)
+    return fr[1] if fr else None
+
+
+def upsert_picks(con, movie_id, **fields):
+    """Aktualizuje wybory kadrów. Klucze: easy, medium, hard, zoom (None kasuje pole, brak klucza zostawia)."""
+    allowed = {"easy": "easy_frame_id", "medium": "medium_frame_id", "hard": "hard_frame_id", "zoom": "zoom_frame_id"}
+    row = con.execute("SELECT * FROM picks WHERE movie_id=?", (movie_id,)).fetchone()
+    vals = {}
+    for col in allowed.values():
+        vals[col] = row[col] if row and col in row.keys() else None
+    for k, col in allowed.items():
+        if k in fields:
+            vals[col] = fields[k]
+    con.execute(
+        "INSERT INTO picks (movie_id, easy_frame_id, medium_frame_id, hard_frame_id, zoom_frame_id) "
+        "VALUES (?,?,?,?,?) ON CONFLICT(movie_id) DO UPDATE SET "
+        "easy_frame_id=excluded.easy_frame_id, medium_frame_id=excluded.medium_frame_id, "
+        "hard_frame_id=excluded.hard_frame_id, zoom_frame_id=excluded.zoom_frame_id",
+        (movie_id, vals["easy_frame_id"], vals["medium_frame_id"], vals["hard_frame_id"], vals["zoom_frame_id"]))
 
 
 # ---------------------------------------------------------- lokalna konfiguracja (poza gitem)
