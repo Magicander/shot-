@@ -57,7 +57,7 @@ def fake_http(url, accept="", lang="", raw=False, extra=None):
         elif "/info" in url:
             out = json.dumps({"title": "Lśnienie", "originalTitle": "The Shining", "year": 1980, "posterPath": "/11/23/1123/7.$.jpg"})
         elif "/cast/actors" in url:
-            item = ('filmFullCastSection__item castRoleListElement"><a href="/person/x-{i}" class="a"><img src="p" alt="{n}"></a>'
+            item = ('filmFullCastSection__item castRoleListElement"><a href="/person/x-{i}" class="a"><img src="https://fwcdn.pl/ppo/{i}.jpg" alt="{n}"></a>'
                     '<div class="castRoleListElement__role"><span>{c}</span></div>')
             out = "<div>" + "".join(item.format(i=i, n=n, c=c) for i, (n, c) in enumerate(
                 [("Jack Nicholson", "Jack Torrance"), ("Shelley Duvall", "Wendy"), ("Danny Lloyd", "Danny"),
@@ -92,9 +92,10 @@ def scraper_tests():
         except LookupError as e:
             check("blocked" in str(e) and "2 stars" in str(e), "obsada IMDb: blokada zgłoszona czytelnie")
         cast, meta, src = webscrape.fetch_one("cast", "auto", mv, 4)
-        check(src == "filmweb" and len(cast) == 4 and cast[0] == {"name": "Jack Nicholson", "character": "Jack Torrance"},
+        check(src == "filmweb" and len(cast) == 4 and cast[0]["name"] == "Jack Nicholson" and cast[0]["character"] == "Jack Torrance",
               "obsada Filmweb: kolejność z napisów i postacie, limit N")
         check(meta["filmweb_id"] == 1123 and meta["pl"] == "Lśnienie", "Filmweb: id i polski tytuł")
+        check(cast[0].get("photo_url", "").startswith("https://fwcdn.pl/ppo/"), "Filmweb: URL zdjęcia aktora")
         data, meta, src = webscrape.fetch_one("poster", "filmweb", mv)
         check(meta["url"] == "https://fwcdn.pl/fpo/11/23/1123/7.3.jpg", "plakat Filmweb: adres fwcdn")
         MODE["filmweb"] = "blocked"
@@ -189,6 +190,45 @@ def main():
     adm.req("PUT", f"/api/admin/movies/{m0['id']}/cast", {"cast": cast + [{"name": "  "}]})
     mv = {m["id"]: m for m in adm.req("GET", f"/api/admin/packs/{pid}/movies")}
     check([c["name"] for c in json.loads(mv[m0["id"]]["cast_json"])] == ["Trzeci Plan", "Drugi Plan", "Gwiazda"], "obsada: kolejność zapisana, puste pominięte")
+    # zdjęcia: upload, serwowanie, deduplikacja, zachowanie photo_id, fill bez zmiany imion
+    a1 = adm.req("POST", "/api/admin/actors", {"data": "data:image/png;base64," + base64.b64encode(PNG).decode(), "name": "Trzeci Plan"})
+    check(a1.get("id"), "upload zdjęcia aktora zwraca id")
+    # raw fetch (endpoint zwraca obraz, nie JSON)
+    import urllib.request as ur
+    with adm.op.open(ur.Request(base + f"/actor/{a1['id']}.jpg")) as resp:
+        raw = resp.read()
+    check(raw[:8] == b"\x89PNG\r\n\x1a\n" or raw[:3] == b"\xff\xd8\xff" or len(raw) > 10, "zdjęcie aktora serwowane")
+    # zachowaj photo_id przy zapisie obsady
+    cast_ph = [{"name": "Trzeci Plan", "character": "Gość", "photo_id": a1["id"]},
+               {"name": "Drugi Plan", "character": ""},
+               {"name": "Gwiazda", "character": "Bohater"}]
+    adm.req("PUT", f"/api/admin/movies/{m0['id']}/cast", {"cast": cast_ph})
+    saved = json.loads(adm.req("GET", f"/api/admin/packs/{pid}/movies")[0]["cast_json"] if False else
+                       [m for m in adm.req("GET", f"/api/admin/packs/{pid}/movies") if m["id"]==m0["id"]][0]["cast_json"])
+    check(saved[0].get("photo_id") == a1["id"] and [c["name"] for c in saved] == ["Trzeci Plan", "Drugi Plan", "Gwiazda"],
+          "obsada: photo_id zostaje przy zapisie kolejności")
+    # dedup: to samo imię / ten sam klucz
+    import webscrape, db as dbmod
+    conp = dbmod.connect(DBF)
+    id2 = dbmod.save_actor_photo(conp, key=f"upload:{a1['id']}" if False else "name:trzeci plan", name="Trzeci Plan",
+                                 source="upload", image=PNG)
+    # might create new or reuse name key - second save with name key
+    id3 = dbmod.save_actor_photo(conp, key="name:trzeci plan", name="Trzeci Plan", source="upload", image=PNG)
+    n_same = conp.execute("SELECT COUNT(*) FROM actor_photos WHERE key='name:trzeci plan'").fetchone()[0]
+    check(n_same <= 1, "deduplikacja zdjęć po kluczu imienia")
+    conp.close()
+    # packi shardów na Cloudflare: kilka plików, nie jedno na aktora
+    import deploy_cloudflare
+    build_dir = TMP / "cf-build"
+    # write_actor_shards używa BUILD
+    deploy_cloudflare.BUILD = build_dir
+    (build_dir / "data").mkdir(parents=True)
+    conp = db.connect(DBF)
+    n, shards, nbytes = deploy_cloudflare.write_actor_shards(conp)
+    conp.close()
+    files = list((build_dir / "data").glob("actors-*.bin")) + list((build_dir / "data").glob("actors-index.json"))
+    check(n >= 1 and (build_dir / "data" / "actors-index.json").exists(), "deploy: indeks zdjęć aktorów")
+    check(shards <= n and shards <= 8, "deploy: shardy, nie osobny plik na aktora")
     check(adm.req("POST", f"/api/admin/movies/{m0['id']}/cast", {"source": "zly"}, ok=False)["_code"] == 400, "nieznane źródło -> 400")
     check(adm.req("POST", f"/api/admin/packs/{pid}/web", {"kind": "cast", "source": "tmdb"}, ok=False)["_code"] == 400,
           "TMDB bez klucza -> 400")

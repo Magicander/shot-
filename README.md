@@ -76,7 +76,7 @@ Gospodarz wybiera pakiet, a w poczekalni zaznacza tryby i liczbę rund. Filmy lo
 | Który rok | podaj rok premiery: dokładnie 1000 pkt, każdy rok różnicy około -30 procent, ponad 8 lat 0 | 3 filmy z rokiem |
 | Ułóż po kolei | 4 filmy od najstarszego do najnowszego, 250 pkt za każde dobre miejsce | 4 różne lata |
 | Plakat | plakat się wyostrza (pikseloza) albo odsłania kafelkami | 3 plakaty (IMDb, Filmweb, TMDB albo ręcznie) |
-| Aktorzy | obsada pojawia się co 6 s, od najmniej znanych nazwisk; mniej nazwisk = więcej punktów | 3 filmy z obsadą (Filmweb, IMDb, TMDB albo ręcznie) |
+| Aktorzy | obsada pojawia się co 6 s, od najmniej znanych nazwisk (ze zdjęciem, jeśli jest); mniej nazwisk = więcej punktów | 3 filmy z obsadą (Filmweb, IMDb, TMDB albo ręcznie) |
 | Cytat | cytat wpisany przez admina, w połowie czasu podpowiedź z rokiem | 5 cytatów w pakiecie |
 
 W trybach z tytułem pierwsza poprawna odpowiedź dostaje +100 pkt. Tryb bez wystarczających danych jest wyszarzony z podpowiedzią, czego brakuje.
@@ -111,7 +111,7 @@ Aktualizacja wersji na Cloudflare: zobacz sekcję **Aktualizacja do wersji z edy
 Strona pakietu, "edytor trybów" (`/admin#/modes/ID`): karta każdego trybu z gotowością (ile danych jest, ile trzeba), przełącznikiem włącz/wyłącz w tym pakiecie i linkiem do edytora.
 
 - **Plakaty** (`#/posters/ID`): siatka plakatów. "pobierz dla pakietu" w tle z logiem na żywo (źródło: auto, IMDb, Filmweb, TMDB; opcjonalnie od nowa i z uzupełnieniem polskich tytułów). Na każdym plakacie: pobierz ponownie (z wybranego źródła), link do obrazka, plik z dysku (max 6 MB), usuń. Plakaty są zapisywane lokalnie w bazie, ze źródłem i datą.
-- **Obsada** (`#/cast/ID`): pobieranie top N aktorów (3 do 15, domyślnie 6) w kolejności z napisów. W grze nazwiska pojawiają się od ostatniego na liście, gwiazda na końcu. Edytor: zmiana kolejności, edycja nazwiska i postaci, dodawanie, usuwanie, odwrócenie, przywrócenie kolejności z napisów, pobierz ponownie.
+- **Obsada** (`#/cast/ID`): pobieranie top N aktorów (3 do 15, domyślnie 6) w kolejności z napisów, **razem ze zdjęciami**. W grze nazwiska i fotki pojawiają się od ostatniego na liście, gwiazda na końcu. Edytor: miniatury, zmiana kolejności, edycja nazwiska i postaci, wgranie zdjęcia, dodawanie, usuwanie, odwrócenie, przywrócenie kolejności z napisów, pobierz ponownie. Jeśli film ma już imiona bez fotek: przycisk **dociągnij zdjęcia** (albo **dociągnij brakujące zdjęcia (imiona zostają)** dla całego pakietu) uzupełnia tylko fotki, bez kasowania ręcznie wpisanych imion.
 - **Cytaty** (`#/quotes/ID`): cytaty przy każdym filmie (dodaj, edytuj, usuń, język PL/EN/oba). Wklejanie listy: `Tytuł (rok) = cytat`, tytuł oryginalny albo polski, rok opcjonalny, język tagiem `[pl]` albo `[en]` na początku cytatu. Podgląd pokazuje dopasowane, brak w pakiecie, niejednoznaczne, powtórki i zły format. Polska wersja gry woli cytaty `[pl]`, angielska `[en]`.
 - **Pytania do licytacji** (`#/questions/ID`): pytanie PL i EN, odpowiedzi jedna w linii, aliasy po średniku ("The Thing; Coś"). "wstaw filmy z pakietu" wypełnia odpowiedzi tytułami, polskimi tytułami i aliasami. Wklejanie wielu pytań: bloki oddzielone pustą linią, pierwsza linia `pytanie PL | pytanie EN`.
 
@@ -120,7 +120,7 @@ Strona pakietu, "edytor trybów" (`/admin#/modes/ID`): karta każdego trybu z go
 Auto próbuje po kolei i zapisuje, z którego źródła przyszły dane:
 
 - plakat: IMDb, Filmweb, TMDB
-- obsada: Filmweb, IMDb, TMDB
+- obsada (imiona i zdjęcia): Filmweb, IMDb (gdy strona tytułu nie jest zablokowana), TMDB. Gdy źródło nie ma fotki, próba dociągnięcia z TMDB po imieniu (jeśli jest klucz).
 
 IMDb: wyszukiwanie przez publiczny endpoint podpowiedzi. Strony tytułów IMDb są często zablokowane (AWS WAF, HTTP 202), wtedy plakat jest brany z podpowiedzi, a obsady z IMDb nie da się pobrać (podpowiedź ma tylko 2 nazwiska), więc auto przechodzi na Filmweb.
 Filmweb: publiczne API strony (wyszukiwanie, dane filmu, plakat z fwcdn.pl) i strona obsady.
@@ -201,7 +201,7 @@ Po zalogowaniu hasłem `ADMIN_PASSWORD` (sekret wranglera):
 - polskie tytuły i aliasy (inline + wklejanie listy)
 - włączanie/wyłączanie trybów w pakiecie
 - plakat: podmiana URL albo upload do 1,5 MB
-- obsada: edycja i kolejność
+- obsada: edycja, kolejność i zdjęcia (link/plik); scraper obsady tylko lokalnie
 - metadane filmu (np. rok)
 
 Scraper, nowe pakiety i ustawienia TMDB w chmurze są ukryte / zwracają 405 z krótką notką.
@@ -307,7 +307,7 @@ i ponownie uruchomić `python deploy_cloudflare.py`.
 
 ### Limity planu Free
 
-- 20 000 plików statycznych na wersję. Przy 3 kadrach i plakacie na film to około 4 900 filmów. Skrypt przerwie wysyłkę, gdy limit zostanie przekroczony.
+- 20 000 plików statycznych na wersję. Przy 3 kadrach i plakacie na film to około 4 900 filmów. Zdjęcia aktorów nie idą jako osobny plik na osobę: są spakowane w kilka plików `data/actors-XX.bin` plus indeks (deduplikacja po aktorze, małe headshoty). Skrypt przerwie wysyłkę, gdy łączny limit plików zostanie przekroczony.
 - 100 000 żądań dziennie do Workera (kadry i plakaty jako pliki statyczne są darmowe i się nie liczą).
 - Dla Durable Objects: 100 000 żądań dziennie i 13 000 GB-s dziennie. Wiadomości WebSocket liczą się 20:1. Wieczór ze znajomymi to drobny ułamek tego limitu.
 

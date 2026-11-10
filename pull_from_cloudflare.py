@@ -153,11 +153,11 @@ def write_db(data: dict, out: Path, images: dict):
     import db
     con = db.init_db(out, seed=False)
     # wyczyść ewentualny seed
-    for t in ("quotes", "questions", "frames", "posters", "picks", "movies", "packs"):
+    for t in ("quotes", "questions", "frames", "posters", "actor_photos", "picks", "movies", "packs"):
         con.execute(f"DELETE FROM {t}")
     con.commit()
 
-    frame_ok = poster_ok = 0
+    frame_ok = poster_ok = actor_ok = 0
     movies_n = quotes_n = questions_n = 0
     for i, p in enumerate(data["packs"]):
         # modes w eksporcie = włączone; modes_off = reszta z pełnej listy
@@ -228,10 +228,30 @@ def write_db(data: dict, out: Path, images: dict):
                         (m["id"], img, "cloud", ""),
                     )
                     poster_ok += 1
+    # zdjęcia aktorów (unikalne id z obsady)
+    for aid, img in (images.get("actor") or {}).items():
+        if not img:
+            continue
+        name = ""
+        try:
+            con.execute(
+                "INSERT INTO actor_photos (id, key, name, source, source_id, image, url, updated) "
+                "VALUES (?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(id) DO UPDATE SET image=excluded.image",
+                (int(aid), f"cloud:{aid}", name, "cloud", "", img, "", time.time()),
+            )
+            actor_ok += 1
+        except sqlite3.IntegrityError:
+            con.execute(
+                "INSERT INTO actor_photos (key, name, source, image, url, updated) VALUES (?,?,?,?,?,?)",
+                (f"cloud:{aid}-dup", name, "cloud", img, "", time.time()),
+            )
+            actor_ok += 1
     con.commit()
     # sqlite_sequence
     try:
-        for table, col in (("packs", "id"), ("movies", "id"), ("frames", "id"), ("questions", "id"), ("quotes", "id")):
+        for table, col in (("packs", "id"), ("movies", "id"), ("frames", "id"), ("questions", "id"),
+                           ("quotes", "id"), ("actor_photos", "id")):
             mx = con.execute(f"SELECT MAX({col}) FROM {table}").fetchone()[0] or 0
             row = con.execute("SELECT seq FROM sqlite_sequence WHERE name=?", (table,)).fetchone()
             if row is None:
@@ -242,12 +262,12 @@ def write_db(data: dict, out: Path, images: dict):
     except sqlite3.Error as e:
         print("uwaga sqlite_sequence:", e)
     con.close()
-    return {"movies": movies_n, "frames": frame_ok, "posters": poster_ok, "quotes": quotes_n, "questions": questions_n,
-            "packs": len(data["packs"])}
+    return {"movies": movies_n, "frames": frame_ok, "posters": poster_ok, "actors": actor_ok,
+            "quotes": quotes_n, "questions": questions_n, "packs": len(data["packs"])}
 
 
 def collect_image_ids(data: dict):
-    frames, posters = set(), set()
+    frames, posters, actors = set(), set(), set()
     for p in data["packs"]:
         if p.get("cover_frame_id"):
             frames.add(p["cover_frame_id"])
@@ -256,12 +276,18 @@ def collect_image_ids(data: dict):
                 frames.add(fid)
             if m.get("poster"):
                 posters.add(m["id"])
-    return frames, posters
+            for c in m.get("cast") or []:
+                if isinstance(c, dict) and c.get("photo_id"):
+                    actors.add(int(c["photo_id"]))
+    for a in (data.get("overlay") or {}).get("actors") or []:
+        if a.get("id") and not a.get("deleted"):
+            actors.add(int(a["id"]))
+    return frames, posters, actors
 
 
-def download_images(c: Client, frames, posters):
-    out = {"frame": {}, "poster": {}}
-    miss_f, miss_p = [], []
+def download_images(c: Client, frames, posters, actors=None):
+    out = {"frame": {}, "poster": {}, "actor": {}}
+    miss_f, miss_p, miss_a = [], [], []
     for fid in sorted(frames):
         st, img = c.get_bytes(f"/frame/{fid}.jpg")
         if st == 200 and img:
@@ -274,7 +300,13 @@ def download_images(c: Client, frames, posters):
             out["poster"][mid] = img
         else:
             miss_p.append(mid)
-    return out, miss_f, miss_p
+    for aid in sorted(actors or []):
+        st, img = c.get_bytes(f"/actor/{aid}.jpg")
+        if st == 200 and img:
+            out["actor"][aid] = img
+        else:
+            miss_a.append(aid)
+    return out, miss_f, miss_p, miss_a
 
 
 def main():
@@ -312,17 +344,17 @@ def main():
         pw = a.password or getpass.getpass("Hasło admina Cloudflare: ")
         data = fetch_export(c, pw)
 
-    frames, posters = collect_image_ids(data)
+    frames, posters, actors = collect_image_ids(data)
     print(f"Eksport: {len(data['packs'])} pakietów, {sum(len(p.get('movies') or []) for p in data['packs'])} filmów, "
-          f"{len(frames)} kadrów, {len(posters)} plakatów (built={data.get('built')})")
+          f"{len(frames)} kadrów, {len(posters)} plakatów, {len(actors)} zdjęć aktorów (built={data.get('built')})")
 
     if c is None:
-        print("Uwaga: bez --url nie pobiorę obrazów (/frame, /poster). Baza będzie bez kadrów/plakatów.")
+        print("Uwaga: bez --url nie pobiorę obrazów (/frame, /poster, /actor). Baza będzie bez kadrów/plakatów/zdjęć.")
         print("Uruchom ponownie z --url albo najpierw zapisz JSON i podaj oba argumenty.")
-        images, miss_f, miss_p = {"frame": {}, "poster": {}}, list(frames), list(posters)
+        images, miss_f, miss_p, miss_a = {"frame": {}, "poster": {}, "actor": {}}, list(frames), list(posters), list(actors)
     else:
-        images, miss_f, miss_p = download_images(c, frames, posters)
-        print(f"Pobrano obrazów: {len(images['frame'])} kadrów, {len(images['poster'])} plakatów")
+        images, miss_f, miss_p, miss_a = download_images(c, frames, posters, actors)
+        print(f"Pobrano obrazów: {len(images['frame'])} kadrów, {len(images['poster'])} plakatów, {len(images['actor'])} zdjęć aktorów")
 
     backup_if_needed(out)
     stats = write_db(data, out, images)
@@ -333,9 +365,9 @@ def main():
     print("  - historia scrapingu (yt_url, video_id, tried_ids, query, status/error)")
     print("  - tabela picks poza tymi 3 kadrami; dodatkowe wybory admina giną")
     print("  - modes_off admina: w chmurze są tylko tryby faktycznie dostępne (z builda); ręczne wyłączenia giną")
-    if miss_f or miss_p:
+    if miss_f or miss_p or miss_a:
         print(f"\nBrakujące obrazy: {len(miss_f)} kadrów {miss_f[:10]}{'...' if len(miss_f)>10 else []}, "
-              f"{len(miss_p)} plakatów {miss_p[:10]}")
+              f"{len(miss_p)} plakatów {miss_p[:10]}, {len(miss_a)} zdjęć aktorów {miss_a[:10]}")
     if data.get("note"):
         print(f"\n{data['note']}")
 

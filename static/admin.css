@@ -148,13 +148,24 @@ input[type=color]{width:100%;height:44px;border:2px solid var(--ink);border-radi
 .busy{opacity:.5;pointer-events:none}
 .clist{display:flex;flex-direction:column;gap:10px}
 .ccard{border:2px solid var(--line);border-radius:16px;padding:12px;background:var(--card)}
-.castol{margin:8px 0 0;padding-left:22px;font-size:14px;columns:2;column-gap:24px}
-.castol li{break-inside:avoid;margin:2px 0}
+.castol{margin:8px 0 0;padding-left:0;font-size:14px;columns:2;column-gap:24px;list-style:none}
+.castol li{break-inside:avoid;margin:4px 0;display:flex;gap:8px;align-items:center}
 .castol li:last-child b{color:var(--orange-d)}
-.castrows{display:flex;flex-direction:column;gap:6px;max-height:52vh;overflow:auto}
-.crow{display:grid;grid-template-columns:24px 1fr 1fr auto auto auto;gap:6px;align-items:center}
-.crow .num{font-weight:700;color:var(--muted);text-align:right}
+.athumb{width:36px;height:44px;border-radius:6px;object-fit:cover;flex:none;background:var(--line,#ddd)}
+.athumb.empty{box-shadow:inset 0 0 0 1px var(--line,#ccc)}
+.crow{display:grid;grid-template-columns:28px 40px 1fr 1fr auto auto auto;grid-template-areas:"num photo name name up down del" ". . char char upl upl upl";gap:6px 8px;align-items:center;padding:2px 0}
+.crow .num{grid-area:num;font-weight:700;color:var(--muted);text-align:right}
+.crow .athumb{grid-area:photo;width:40px;height:50px}
+.crow input[data-f=name]{grid-area:name}
+.crow input[data-f=character]{grid-area:char}
+.crow .phup{grid-area:upl;justify-self:start;font-size:12px;cursor:pointer;color:var(--muted);text-decoration:underline;white-space:nowrap}
 .crow .ibtn{min-width:36px;min-height:36px;padding:0 8px}
+.crow .ibtn[data-m="-1"]{grid-area:up}
+.crow .ibtn[data-m="1"]{grid-area:down}
+.crow .ibtn[data-m="x"]{grid-area:del}
+.castrows{display:flex;flex-direction:column;gap:8px;max-height:52vh;overflow:auto}
+.modal .box:has(#castrows){max-width:680px}
+.webpanel .pill{white-space:normal;height:auto;line-height:1.2;padding:8px 14px;max-width:100%;text-align:center}
 .qfilms{display:flex;flex-direction:column;gap:8px}
 .qfilm{border:2px solid var(--line);border-radius:14px;padding:8px 12px;background:var(--card)}
 .qfilm summary{cursor:pointer;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
@@ -172,8 +183,7 @@ input[type=color]{width:100%;height:44px;border:2px solid var(--ink);border-radi
 @media (max-width:560px){
   .pgrid{grid-template-columns:repeat(2,1fr);gap:10px}
   .castol{columns:1}
-  .crow{grid-template-columns:20px 1fr auto auto auto}
-  .crow input[data-f=character]{grid-column:2/-1;grid-row:2}
+  .crow{grid-template-columns:20px 40px 1fr auto auto auto;grid-template-areas:"num photo name name name name" ". . char char char char" ". . upl up down del"}
   .qrow{grid-template-columns:1fr 76px auto}
   .hub{grid-template-columns:1fr}
 }

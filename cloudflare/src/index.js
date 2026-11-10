@@ -120,7 +120,7 @@ async function exportDb(env, req) {
   }
   return json({
     format: "kadr-export-v1",
-    built: meta.built, frames: meta.frames, posters: meta.posters, bytes: meta.bytes,
+    built: meta.built, frames: meta.frames, posters: meta.posters, actors: meta.actors, bytes: meta.bytes,
     note: "Merged export: static assets + Content Durable Object overlay. Cloud holds at most 3 gameplay frames per film.",
     overlay_stats: await contentOp(env, { op: "stats" }),
     overlay,
@@ -178,6 +178,32 @@ async function gameApi(req, env, path, url) {
   throw new ApiError(404, "Nie ma takiego adresu");
 }
 
+
+let _actorIndex = null;
+async function actorsIndex(env, req) {
+  if (_actorIndex) return _actorIndex;
+  const r = await asset(env, req, "/data/actors-index.json");
+  if (!r.ok) return (_actorIndex = {});
+  _actorIndex = await r.json();
+  return _actorIndex;
+}
+
+async function serveActor(env, req, id) {
+  const stub = contentStub(env);
+  const ov = await stub.fetch(new Request(`https://content/actor?id=${id}`));
+  if (ov.ok) return ov;
+  const idx = await actorsIndex(env, req);
+  const e = idx[String(id)];
+  if (!e) return new Response("Brak zdjęcia", { status: 404 });
+  const shard = String(e.s).padStart(2, "0");
+  const res = await asset(env, req, `/data/actors-${shard}.bin`);
+  if (!res.ok) return new Response("Brak zdjęcia", { status: 404 });
+  const buf = await res.arrayBuffer();
+  const slice = buf.slice(e.o, e.o + e.n);
+  const ct = e.t || "image/jpeg";
+  return new Response(slice, { headers: { "Content-Type": ct, "Cache-Control": "public, max-age=3600" } });
+}
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
@@ -194,6 +220,10 @@ export default {
         const r = await stub.fetch(new Request(`https://content/poster?id=${pm[1]}`));
         if (r.ok) return r;
         return env.ASSETS.fetch(req);
+      }
+      let am = path.match(/^\/actor\/(\d+)\.jpg$/);
+      if (req.method === "GET" && am) {
+        return serveActor(env, req, +am[1]);
       }
       if (path.startsWith("/data/") || path === "/static/index.html" || path === "/static/admin.html" || path === "/static/cloud-admin.html")
         throw new ApiError(404, "Nie ma takiej strony");

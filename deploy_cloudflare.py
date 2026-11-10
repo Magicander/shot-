@@ -1,4 +1,4 @@
-"""deploy_cloudflare.py - wysyła lokalny quiz (quiz.db + kadry + plakaty) na Cloudflare.
+"""deploy_cloudflare.py - wysyła lokalny quiz (quiz.db + kadry + plakaty + zdjęcia aktorów) na Cloudflare.
 
 Synchronizacja dwukierunkowa treści edytowalnych:
   1) przed pełnym deployem: pobiera nakładkę Content DO z chmury i scala ją do lokalnego quiz.db
@@ -39,6 +39,44 @@ MAX_FILE = 25 * 1024 * 1024
 
 def image_ext(img: bytes) -> str:
     return "png" if img[:4] == b"\x89PNG" else "webp" if img[8:12] == b"WEBP" else "jpg"
+
+
+ACTOR_SHARD = 400_000  # bajty na plik data/actors-XX.bin
+
+
+def write_actor_shards(con) -> tuple[int, int, int]:
+    """Zwraca (liczba zdjęć, liczba shardów, bajty). Zero zdjęć -> pusty indeks, 0 shardów."""
+    try:
+        rows = con.execute("SELECT id, image FROM actor_photos ORDER BY id").fetchall()
+    except Exception:
+        rows = []
+    index, buf, shard, nbytes = {}, bytearray(), 0, 0
+
+    def flush():
+        nonlocal buf, shard
+        if not buf:
+            return
+        (BUILD / "data" / f"actors-{shard:02d}.bin").write_bytes(bytes(buf))
+        buf = bytearray()
+        shard += 1
+
+    for r in rows:
+        img = bytes(r["image"] or b"")
+        if not img:
+            continue
+        if len(img) > MAX_FILE:
+            print(f"  pomijam zdjęcie aktora {r['id']}: ponad 25 MiB")
+            continue
+        if buf and len(buf) + len(img) > ACTOR_SHARD:
+            flush()
+        ctype = "image/png" if img[:4] == b"\x89PNG" else "image/webp" if img[8:12] == b"WEBP" else "image/jpeg"
+        index[str(r["id"])] = {"s": shard, "o": len(buf), "n": len(img), "t": ctype}
+        buf.extend(img)
+        nbytes += len(img)
+    flush()
+    (BUILD / "data" / "actors-index.json").write_text(
+        json.dumps(index, separators=(",", ":")), encoding="utf-8")
+    return len(index), shard, nbytes
 
 
 def build(db_path: Path) -> dict:
@@ -113,6 +151,10 @@ def build(db_path: Path) -> dict:
             nbytes += len(img)
             # adres zawsze /poster/{id}.jpg (jak lokalnie); przeglądarka rozpozna PNG/WebP po treści
             (BUILD / "poster" / f"{mid}.jpg").write_bytes(img)
+    # Zdjęcia aktorów: jeden wpis na unikalnego aktora, spakowane w kilka plików (nie jeden plik/aktor),
+    # żeby nie zjadać limitu 20 000 Static Assets. Worker serwuje /actor/{id}.jpg z indeksu + shardu.
+    actor_n, shard_n, actor_bytes = write_actor_shards(con)
+    nbytes += actor_bytes
     con.close()
     (BUILD / "data" / "packs.json").write_text(json.dumps(packs_out, ensure_ascii=False), encoding="utf-8")
     (BUILD / "_headers").write_text(
@@ -120,9 +162,11 @@ def build(db_path: Path) -> dict:
         "/static/*\n  Cache-Control: no-cache\n", encoding="utf-8")
     files = sum(1 for f in BUILD.rglob("*") if f.is_file())
     meta = {"built": time.strftime("%Y-%m-%d %H:%M:%S %z"), "frames": len(frame_ids), "posters": len(poster_ids),
+            "actors": actor_n, "actor_shards": shard_n,
             "files": files + 1, "bytes": nbytes, "packs": meta_packs, "limit_files": MAX_FILES}
     (BUILD / "data" / "meta.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
     print(f"Zbudowano {BUILD}: {len(packs_out)} pakietów, {len(frame_ids)} kadrów, {len(poster_ids)} plakatów, "
+          f"{actor_n} zdjęć aktorów ({shard_n} plików), "
           f"{meta['files']} plików ({nbytes / 1e6:.1f} MB obrazów).")
     if meta["files"] > MAX_FILES:
         sys.exit(f"Za dużo plików ({meta['files']}) - limit planu Free to {MAX_FILES}.")
@@ -146,6 +190,7 @@ def local_counts(db_path: Path) -> dict:
         "questions": con.execute("SELECT COUNT(*) FROM questions").fetchone()[0],
         "frames": con.execute("SELECT COUNT(*) FROM frames").fetchone()[0],
         "posters": con.execute("SELECT COUNT(*) FROM posters").fetchone()[0],
+        "actors": con.execute("SELECT COUNT(*) FROM actor_photos").fetchone()[0],
         "packs": con.execute("SELECT COUNT(*) FROM packs").fetchone()[0],
     }
     con.close()

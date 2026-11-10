@@ -49,9 +49,17 @@ export class Content extends DurableObject {
         deleted INTEGER NOT NULL DEFAULT 0,
         updated_at REAL NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS actor_photos (
+        id INTEGER PRIMARY KEY,
+        key TEXT, name TEXT, source TEXT, source_id TEXT,
+        image BLOB, url TEXT,
+        deleted INTEGER NOT NULL DEFAULT 0,
+        updated_at REAL NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS seq (name TEXT PRIMARY KEY, n INTEGER NOT NULL);
       INSERT OR IGNORE INTO seq(name, n) VALUES ('quotes', ${NEW_ID_BASE});
       INSERT OR IGNORE INTO seq(name, n) VALUES ('questions', ${NEW_ID_BASE});
+      INSERT OR IGNORE INTO seq(name, n) VALUES ('actors', ${NEW_ID_BASE});
     `);
   }
 
@@ -73,6 +81,19 @@ export class Content extends DurableObject {
       questions: rows("SELECT id, pack_id, prompt_pl, prompt_en, answers, deleted, updated_at, base FROM questions"),
       packs: rows("SELECT * FROM packs"),
       posters: posters.map(p => ({ ...p, has_image: (p.bytes || 0) > 0 })),
+      actors: [...this.ctx.storage.sql.exec("SELECT id, key, name, source, source_id, url, deleted, updated_at, image FROM actor_photos")].map(r => {
+        const { image, ...rest } = r;
+        let image_b64 = null;
+        const bytes = image && (image.byteLength || image.length);
+        if (image && bytes && bytes <= 200000) {
+          const u8 = image instanceof Uint8Array ? image : new Uint8Array(image);
+          let s = "";
+          const CH = 0x8000;
+          for (let i = 0; i < u8.length; i += CH) s += String.fromCharCode(...u8.subarray(i, i + CH));
+          image_b64 = btoa(s);
+        }
+        return { ...rest, has_image: !!(bytes), bytes: bytes || 0, image_b64 };
+      }),
       seq: Object.fromEntries(rows("SELECT name, n FROM seq").map(r => [r.name, r.n])),
     };
   }
@@ -83,6 +104,7 @@ export class Content extends DurableObject {
     this.ctx.storage.sql.exec("DELETE FROM questions");
     this.ctx.storage.sql.exec("DELETE FROM packs");
     this.ctx.storage.sql.exec("DELETE FROM posters");
+    this.ctx.storage.sql.exec("DELETE FROM actor_photos");
     this.ctx.storage.sql.exec(`UPDATE seq SET n = ${NEW_ID_BASE}`);
     return { ok: true };
   }
@@ -97,6 +119,7 @@ export class Content extends DurableObject {
       questions_deleted: one("SELECT COUNT(*) AS n FROM questions WHERE deleted=1"),
       packs: one("SELECT COUNT(*) AS n FROM packs"),
       posters: one("SELECT COUNT(*) AS n FROM posters WHERE deleted=0"),
+      actors: one("SELECT COUNT(*) AS n FROM actor_photos WHERE deleted=0"),
     };
   }
 
@@ -403,6 +426,35 @@ export class Content extends DurableObject {
     return { pack, movies, avail, modes_off: modesOff };
   }
 
+  setActorPhoto(id, imageBytes, meta = {}) {
+    if (imageBytes && imageBytes.byteLength > MAX_POSTER)
+      throw Object.assign(new Error("Zdjęcie jest za duże (max 1,5 MB)"), { code: 413, key: "Zdjęcie jest za duże (max 1,5 MB)" });
+    const ts = this.now();
+    let aid = id ? +id : 0;
+    if (!aid) aid = this.nextId("actors");
+    this.ctx.storage.sql.exec(
+      `INSERT INTO actor_photos(id, key, name, source, source_id, image, url, deleted, updated_at)
+       VALUES (?,?,?,?,?,?,?,0,?)
+       ON CONFLICT(id) DO UPDATE SET
+         image=COALESCE(excluded.image, actor_photos.image),
+         name=COALESCE(NULLIF(excluded.name,''), actor_photos.name),
+         source=COALESCE(NULLIF(excluded.source,''), actor_photos.source),
+         source_id=COALESCE(NULLIF(excluded.source_id,''), actor_photos.source_id),
+         url=COALESCE(NULLIF(excluded.url,''), actor_photos.url),
+         key=COALESCE(NULLIF(excluded.key,''), actor_photos.key),
+         deleted=0, updated_at=excluded.updated_at`,
+      aid, meta.key || `cloud:${aid}`, meta.name || "", meta.source || "upload",
+      meta.source_id || "", imageBytes || null, meta.url || "", ts,
+    );
+    return { ok: true, id: aid, updated_at: ts };
+  }
+
+  getActorPhoto(id) {
+    const row = [...this.ctx.storage.sql.exec(
+      "SELECT image, source, url, deleted, updated_at, name FROM actor_photos WHERE id=?", +id)][0];
+    return row || null;
+  }
+
   getModesOff(packId) {
     const row = [...this.ctx.storage.sql.exec("SELECT modes_off FROM packs WHERE pack_id=?", +packId)][0];
     return row ? (row.modes_off || "") : null;
@@ -419,6 +471,14 @@ export class Content extends DurableObject {
         const bytes = row.image;
         const ct = bytes[0] === 0x89 ? "image/png" : bytes[8] === 0x57 ? "image/webp" : "image/jpeg";
         return new Response(bytes, { headers: { "Content-Type": ct, "Cache-Control": "no-store" } });
+      }
+      if (request.method === "GET" && url.pathname === "/actor") {
+        const id = +url.searchParams.get("id");
+        const row = this.getActorPhoto(id);
+        if (!row || row.deleted || !row.image) return new Response("gone", { status: 404 });
+        const bytes = row.image;
+        const ct = bytes[0] === 0x89 ? "image/png" : bytes[8] === 0x57 ? "image/webp" : "image/jpeg";
+        return new Response(bytes, { headers: { "Content-Type": ct, "Cache-Control": "public, max-age=3600" } });
       }
       const d = await request.json();
       const op = d.op;
@@ -445,6 +505,23 @@ export class Content extends DurableObject {
         return Response.json(this.setPoster(d.movie_id, bytes, d.source, d.url));
       }
       if (op === "deletePoster") return Response.json(this.deletePoster(d.movie_id));
+      if (op === "setActorPhoto") {
+        let bytes = null;
+        if (d.image_b64) {
+          const bin = atob(d.image_b64);
+          bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        }
+        return Response.json(this.setActorPhoto(d.id, bytes, d.meta || {}));
+      }
+      if (op === "getActorMeta") {
+        const row = this.getActorPhoto(d.id);
+        if (!row) return Response.json(null);
+        return Response.json({
+          deleted: !!row.deleted, source: row.source, url: row.url, name: row.name,
+          updated_at: row.updated_at, has_image: !!(row.image && row.image.byteLength),
+        });
+      }
       if (op === "getPosterMeta") {
         const row = this.getPoster(d.movie_id);
         if (!row) return Response.json(null);

@@ -44,7 +44,7 @@ def merge_overlay(con: sqlite3.Connection, overlay: dict, *, verbose=True) -> di
     """Apply overlay dict (from /api/admin/overlay or export.overlay) into open quiz.db connection.
     Returns summary {applied, skipped, conflicts: [...]}."""
     summary = {"movies": 0, "quotes_upsert": 0, "quotes_delete": 0, "questions_upsert": 0,
-               "questions_delete": 0, "packs": 0, "posters": 0, "conflicts": [], "skipped": 0}
+               "questions_delete": 0, "packs": 0, "posters": 0, "actors": 0, "conflicts": [], "skipped": 0}
     now = time.time()
 
     for m in overlay.get("movies") or []:
@@ -193,13 +193,53 @@ def merge_overlay(con: sqlite3.Connection, overlay: dict, *, verbose=True) -> di
         elif not po.get("has_image"):
             pass  # metadata-only, no local change without bytes
 
+    for a in overlay.get("actors") or []:
+        aid = int(a["id"])
+        ots = float(a.get("updated_at") or 0)
+        row = con.execute("SELECT id, updated FROM actor_photos WHERE id=?", (aid,)).fetchone()
+        lts = float(row["updated"] or 0) if row else 0.0
+        if lts > ots and lts > 0:
+            summary["conflicts"].append({"type": "actor", "id": aid, "winner": "local",
+                                         "local_ts": lts, "cloud_ts": ots})
+            summary["skipped"] += 1
+            continue
+        if a.get("deleted"):
+            if row:
+                con.execute("DELETE FROM actor_photos WHERE id=?", (aid,))
+                summary["actors"] += 1
+            continue
+        if not a.get("image_b64"):
+            continue
+        import base64
+        img = base64.b64decode(a["image_b64"])
+        key = a.get("key") or f"cloud:{aid}"
+        if row:
+            con.execute(
+                "UPDATE actor_photos SET key=?, name=COALESCE(NULLIF(?, ''), name), source=?, source_id=?, "
+                "image=?, url=?, updated=? WHERE id=?",
+                (key, a.get("name") or "", a.get("source") or "cloud", a.get("source_id") or "",
+                 img, a.get("url") or "", ots or now, aid))
+        else:
+            try:
+                con.execute(
+                    "INSERT INTO actor_photos (id, key, name, source, source_id, image, url, updated) "
+                    "VALUES (?,?,?,?,?,?,?,?)",
+                    (aid, key, a.get("name") or "", a.get("source") or "cloud", a.get("source_id") or "",
+                     img, a.get("url") or "", ots or now))
+            except Exception:
+                summary["skipped"] += 1
+                continue
+            import db as _db
+            _db.bump_actor_photo_seq(con, aid)
+        summary["actors"] += 1
+
     return summary
 
 
 def print_summary(summary: dict):
     print("Merge overlay -> quiz.db:")
     for k in ("movies", "quotes_upsert", "quotes_delete", "questions_upsert",
-              "questions_delete", "packs", "posters", "skipped"):
+              "questions_delete", "packs", "posters", "actors", "skipped"):
         print(f"  {k}: {summary.get(k, 0)}")
     conflicts = summary.get("conflicts") or []
     if conflicts:

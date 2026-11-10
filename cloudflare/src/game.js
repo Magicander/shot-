@@ -14,6 +14,14 @@ export const ACTOR_SECONDS = 6;
 export const MAX_ACTORS = 8;
 export const BID_SECONDS = 15;
 export const ORDER_N = 4;
+function castView(members) {
+  return (members || []).map(c => {
+    if (typeof c === "string") return { name: c, photo: null };
+    const pid = c.photo_id;
+    return { name: c.name || "", photo: pid ? `/actor/${pid}.jpg` : null };
+  });
+}
+
 export const TITLE_MODES = new Set(["kadry", "zoom", "plakat", "aktorzy", "cytat"]);
 export const VOICE_MODES = new Set([...TITLE_MODES, "licytacja"]);
 export const JUDGE_GRACE = 15;
@@ -271,7 +279,7 @@ export class Game {
     }
     if (mode === "aktorzy") {
       const m = this.pick(ms.filter(x => (x.cast || []).length >= 3), used);
-      return { mode, movie: m, cast: m.cast.slice(-MAX_ACTORS).map(c => c.name) };
+      return { mode, movie: m, cast: castView(m.cast.slice(-MAX_ACTORS)) };
     }
     if (mode === "cytat") {
       const m = this.pick(ms.filter(x => (x.quotes || []).length), used);

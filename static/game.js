@@ -439,7 +439,7 @@ function renderRound(v, keepInput) {
     input = titleInput();
   } else if (mode === "aktorzy") {
     stage = `<div class="stage textstage"><span class="lvl">${T("aktorzy · {k} z {n}", {k:S.cast.length, n:S.cast_total})}</span><span class="clock" id="clock"></span>
-      <ol class="castlist">${Array.from({length:S.cast_total}, (_, i) => S.cast[i] ? `<li class="in">${esc(S.cast[i])}</li>` : `<li class="hid">...</li>`).join("")}</ol>
+      <ol class="castlist">${Array.from({length:S.cast_total}, (_, i) => actorLi(S.cast[i])).join("")}</ol>
       <p class="muted small-note">${T("od najmniej do najbardziej znanych")}</p></div>${bar()}`;
     input = titleInput();
   } else if (mode === "cytat") {
@@ -649,6 +649,18 @@ function setupGuess(prev, focus, auction) {
   $("#gf").onsubmit = e => { e.preventDefault(); ac.classList.add("hidden"); submit(); };
 }
 
+function actorEntry(c) {
+  if (!c) return null;
+  if (typeof c === "string") return { name: c, photo: null };
+  return { name: c.name || "", photo: c.photo || (c.photo_id ? "/actor/" + c.photo_id + ".jpg" : null) };
+}
+function actorLi(c, always) {
+  const a = actorEntry(c);
+  if (!a) return `<li class="hid">...</li>`;
+  const img = a.photo ? `<img class="ahot" src="${a.photo}" alt="">` : `<span class="anoimg" aria-hidden="true"></span>`;
+  return `<li class="in">${img}<span>${esc(a.name)}</span></li>`;
+}
+
 function roundResults() {
   const last = p => p.history.length ? p.history[p.history.length - 1] : 0;
   return `<ul class="results">${S.players.slice().sort((a, b) => last(b) - last(a)).map(p => `<li class="${last(p) ? "" : "miss"}">${esc(p.name)} ${last(p) ? "+" + last(p) : "0"}</li>`).join("")}</ul>`;
@@ -661,7 +673,7 @@ function renderReveal(v) {
   const titleBlock = `<h2>${showTitle(a)}</h2><div class="year">${a.year || ""}</div>`;
   if (mode === "kadry") body = titleBlock + `<div class="trio">${a.frames.map((id, i) => `<figure><img src="/frame/${id}.jpg" alt=""><figcaption><span class="lv ${LEVELS[i][0]}"></span>${T("kadr {lvl}", {lvl:LEVELS[i][1]})}</figcaption></figure>`).join("")}</div>`;
   else if (mode === "zoom" || mode === "plakat") body = titleBlock + `<div class="revimg ${mode}"><img src="${a.img}" alt=""></div>`;
-  else if (mode === "aktorzy") body = titleBlock + `<ol class="castlist done">${a.cast.map(n => `<li class="in">${esc(n)}</li>`).join("")}</ol>`;
+  else if (mode === "aktorzy") body = titleBlock + `<ol class="castlist done">${a.cast.map(n => actorLi(n, true)).join("")}</ol>`;
   else if (mode === "cytat") body = titleBlock + `<blockquote class="quote small">${esc(a.quote)}</blockquote>`;
   else if (mode === "rok") body = `<h2>${showTitle(a)}</h2><div class="year big">${a.year}</div>
     <ul class="guesses">${a.guesses.map(g => `<li><b>${esc(g.name)}</b><span>${g.year}</span><span class="d">${g.year === a.year ? T("dokładnie") : T("{d} lat różnicy", {d: Math.abs(g.year - a.year)})}</span><span class="sc">+${g.points}</span></li>`).join("") || `<li class="miss">${T("Nikt nie odpowiedział.")}</li>`}</ul>`;

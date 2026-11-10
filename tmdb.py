@@ -9,6 +9,7 @@ import db
 
 API = "https://api.themoviedb.org/3"
 IMG = "https://image.tmdb.org/t/p/w500"
+IMG_FACE = "https://image.tmdb.org/t/p/w185"
 TOP_CAST = 8          # bierzemy główną obsadę (wg kolejności w napisach), potem sortujemy wg popularności
 
 
@@ -68,8 +69,20 @@ def run(rows, progress, key, fill_pl=False, redo=False, db_path=None):
                     tid = hit["id"]
                 det = _get(key, f"/movie/{tid}", {"append_to_response": "credits"})
                 cast = sorted(det.get("credits", {}).get("cast", []), key=lambda c: c.get("order", 99))[:TOP_CAST]
-                cast = [{"name": c["name"], "character": c.get("character") or "", "billing": i + 1}
-                        for i, c in enumerate(c for c in cast if c.get("name"))][::-1]   # odsłanianie: od końca napisów
+                billed = []
+                for i, c in enumerate(c for c in cast if c.get("name")):
+                    rec = {"name": c["name"], "character": c.get("character") or "", "billing": i + 1,
+                           "source_id": str(c.get("id") or "")}
+                    if c.get("profile_path"):
+                        rec["photo_url"] = IMG_FACE + c["profile_path"]
+                    billed.append(rec)
+                # zdjęcia przed odwróceniem kolejności (billing zachowany)
+                for rec in billed:
+                    import webscrape
+                    pid = webscrape.attach_photo(con, rec, "tmdb")
+                    if pid:
+                        rec["photo_id"] = pid
+                cast = [webscrape.store_cast_row(c, c["billing"]) for c in billed][::-1]
                 img = None
                 if det.get("poster_path"):
                     img = _get(key, det["poster_path"], base=IMG, raw=True)

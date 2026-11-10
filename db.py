@@ -74,6 +74,20 @@ CREATE TABLE IF NOT EXISTS questions (
 CREATE INDEX IF NOT EXISTS questions_pack ON questions(pack_id);
 """
 
+SCHEMA5 = """
+CREATE TABLE IF NOT EXISTS actor_photos (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    key       TEXT NOT NULL UNIQUE,
+    name      TEXT NOT NULL DEFAULT '',
+    source    TEXT NOT NULL DEFAULT '',
+    source_id TEXT NOT NULL DEFAULT '',
+    image     BLOB NOT NULL,
+    url       TEXT NOT NULL DEFAULT '',
+    updated   REAL
+);
+CREATE INDEX IF NOT EXISTS actor_photos_name ON actor_photos(name);
+"""
+
 HORRORS = [
     ("The Exorcist", 1973), ("Halloween", 1978), ("The Shining", 1980),
     ("A Nightmare on Elm Street", 1984), ("The Thing", 1982), ("Alien", 1979),
@@ -197,6 +211,7 @@ def migrate(con):
         if "updated" not in poc:
             con.execute("ALTER TABLE posters ADD COLUMN updated REAL")
         con.executescript(SCHEMA4)
+        con.executescript(SCHEMA5)
         # stare cytaty (kolumna movies.quotes, jeden w linii) -> tabela quotes, jednorazowo
         for r in con.execute("SELECT id, quotes FROM movies WHERE quotes<>''").fetchall():
             for q in split_list(r["quotes"]):
@@ -353,6 +368,72 @@ def split_list(s) -> list:
 
 def split_aliases(s) -> list:
     return [x.strip() for x in re.split(r"[\n;]", str(s or "")) if x.strip()]
+
+
+def actor_photo_key(source="", source_id="", name=""):
+    sid = str(source_id or "").strip()
+    if source and sid:
+        return f"{source}:{sid}"
+    n = norm_title(name)
+    return f"name:{n}" if n else ""
+
+
+def shrink_headshot(data, max_edge=256, quality=80):
+    """Mały JPEG (headshot). Pillow jest opcjonalny: bez niego zapisujemy oryginał, jeśli mieści się w 150 KB."""
+    if not data:
+        raise ValueError("empty image")
+    try:
+        from io import BytesIO
+        from PIL import Image
+        im = Image.open(BytesIO(data))
+        im = im.convert("RGB")
+        im.thumbnail((max_edge, int(max_edge * 1.35)))
+        buf = BytesIO()
+        im.save(buf, "JPEG", quality=quality, optimize=True)
+        out = buf.getvalue()
+        if out:
+            return out
+    except Exception:
+        pass
+    if len(data) <= 150_000:
+        return data
+    raise ValueError("photo too large")
+
+
+def save_actor_photo(con, *, key, name, source="", source_id="", image=None, url=""):
+    """Zapisuje zdjęcie aktora z deduplikacją po kluczu źródła albo znormalizowanym imieniu. Zwraca id."""
+    name = (name or "").strip()[:80]
+    key = (key or actor_photo_key(source, source_id, name) or "").strip()
+    if not key or not image:
+        raise ValueError("actor photo key/image required")
+    image = shrink_headshot(image)
+    now = time.time()
+    name_key = actor_photo_key("", "", name) if name else ""
+    row = con.execute("SELECT id, key FROM actor_photos WHERE key=?", (key,)).fetchone()
+    if not row and name_key and name_key != key:
+        row = con.execute("SELECT id, key FROM actor_photos WHERE key=?", (name_key,)).fetchone()
+    if row:
+        new_key = key if ":" in key and not key.startswith("name:") else row["key"]
+        con.execute(
+            "UPDATE actor_photos SET key=?, name=COALESCE(NULLIF(?, ''), name), source=COALESCE(NULLIF(?, ''), source), "
+            "source_id=COALESCE(NULLIF(?, ''), source_id), image=?, url=COALESCE(NULLIF(?, ''), url), updated=? "
+            "WHERE id=?",
+            (new_key, name, source or "", str(source_id or ""), image, url or "", now, row["id"]))
+        return row["id"]
+    con.execute(
+        "INSERT INTO actor_photos (key, name, source, source_id, image, url, updated) VALUES (?,?,?,?,?,?,?)",
+        (key, name, source or "", str(source_id or ""), image, url or "", now))
+    return con.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+
+def bump_actor_photo_seq(con, last_id):
+    if not last_id:
+        return
+    row = con.execute("SELECT seq FROM sqlite_sequence WHERE name='actor_photos'").fetchone()
+    if row is None:
+        con.execute("INSERT INTO sqlite_sequence (name, seq) VALUES ('actor_photos', ?)", (int(last_id),))
+    elif row[0] < int(last_id):
+        con.execute("UPDATE sqlite_sequence SET seq=? WHERE name='actor_photos'", (int(last_id),))
 
 
 def save_poster(con, movie_id, data, source="", url=""):

@@ -23,6 +23,20 @@ MAX_ACTORS = 8
 BID_SECONDS = 15
 ORDER_N = 4
 TITLE_MODES = {"kadry", "zoom", "plakat", "aktorzy", "cytat"}
+
+
+def cast_view(members):
+    """Lista {name, photo} do gry. photo to /actor/{id}.jpg albo None."""
+    out = []
+    for c in members or []:
+        if isinstance(c, str):
+            out.append({"name": c, "photo": None})
+            continue
+        pid = c.get("photo_id")
+        name = c.get("name") or ""
+        out.append({"name": name, "photo": f"/actor/{int(pid)}.jpg" if pid else None})
+    return out
+
 VOICE_MODES = TITLE_MODES | {"licytacja"}   # tryby, w których można odpowiadać na głos
 JUDGE_GRACE = 15            # po końcu czasu sędzia ma jeszcze tyle sekund na rozstrzygnięcie zgłoszeń
 LIC_DONE_DELAY = 3          # licytacja na głos: chwila na cofnięcie ostatniego "+1" po osiągnięciu deklaracji
@@ -340,8 +354,8 @@ class Room:
             return {"mode": mode, "movie": m, "style": random.choice(["pix", "tiles"]), "seed": random.randint(1, 10**6)}
         if mode == "aktorzy":
             m = self.pick([x for x in ms if len(x["cast"]) >= 3], used)
-            cast = m["cast"][-MAX_ACTORS:]      # w bazie już w kolejności odsłaniania (gwiazda na końcu)
-            return {"mode": mode, "movie": m, "cast": [c["name"] for c in cast]}
+            raw = m["cast"][-MAX_ACTORS:]      # w bazie już w kolejności odsłaniania (gwiazda na końcu)
+            return {"mode": mode, "movie": m, "cast": cast_view(raw)}
         if mode == "cytat":
             m = self.pick([x for x in ms if x["quotes"]], used)
             qs = m["quotes"]

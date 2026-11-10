@@ -49,7 +49,8 @@ class FakeTMDB(BaseHTTPRequestHandler):
             elif p.startswith("/movie/"):
                 mid = p.split("/")[2]
                 obj = {"id": int(mid), "poster_path": "/p.jpg", "release_date": "2000-01-01", "title": "Testowy tytuł " + mid,
-                       "credits": {"cast": [{"name": f"Aktor {mid}-{i}", "popularity": 10 - i, "order": i} for i in range(8)]}}
+                       "credits": {"cast": [{"id": 1000+i, "name": f"Aktor {mid}-{i}", "popularity": 10 - i, "order": i,
+                                             "profile_path": "/face.jpg"} for i in range(8)]}}
             else:
                 self.send_response(404); self.end_headers(); return
             body, ct = json.dumps(obj).encode(), "application/json"
@@ -85,7 +86,9 @@ def main():
     global POSTER
     con = db.init_db()
     cols = {r[1] for r in con.execute("PRAGMA table_info(movies)")}
+    tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     check({"pl_title", "aliases", "quotes", "cast_json", "tmdb_id"} <= cols, "migracja dodała kolumny movies")
+    check("actor_photos" in tables, "migracja dodała tabelę actor_photos")
     before = con.execute("SELECT COUNT(*) FROM movies").fetchone()[0], con.execute("SELECT COUNT(*) FROM frames").fetchone()[0]
     print("  baza:", SRC, "filmy/kadry:", before)
     pack = con.execute("""SELECT p.id FROM packs p JOIN movies m ON m.pack_id=p.id WHERE m.status='ok'
@@ -99,6 +102,7 @@ def main():
     base = f"http://127.0.0.1:{port}"
     tport = serve(FakeTMDB)
     tmdb.API, tmdb.IMG = f"http://127.0.0.1:{tport}", f"http://127.0.0.1:{tport}/img"
+    tmdb.IMG_FACE = tmdb.IMG
 
     adm = Client(base)
     adm.req("POST", "/api/admin/login", {"password": PW})
@@ -137,13 +141,19 @@ def main():
     adm.req("PUT", "/api/admin/settings", {"tmdb_key": "testkey1234567890"})
     check(adm.req("GET", "/api/admin/settings")["tmdb_key"], "klucz zapisany (w configu testowym)")
     r = adm.req("POST", f"/api/admin/packs/{pid}/tmdb", {"fill_pl": True})
-    for _ in range(200):
+    for _ in range(400):
         time.sleep(0.1)
         if not app.tmdb_thread.is_alive():
             break
     mv = {m["id"]: m for m in adm.req("GET", f"/api/admin/packs/{pid}/movies")}
     check(sum(1 for m in mv.values() if m["poster"]) == len(mv), "plakaty pobrane dla każdego filmu")
     check(all(len(json.loads(m["cast_json"])) == 8 for m in mv.values()), "obsada zapisana")
+    photos = [c.get("photo_id") for m in mv.values() for c in json.loads(m["cast_json"])]
+    check(all(photos) and len(set(photos)) <= len(photos), "zdjęcia aktorów zapisane (z deduplikacją)")
+    pid0 = next(p for p in photos if p)
+    with adm.op.open(urllib.request.Request(base + f"/actor/{pid0}.jpg")) as resp:
+        raw = resp.read()
+    check(len(raw) > 10, "zdjęcie aktora z TMDB jest serwowane")
     check(mv[m0["id"]]["pl_title"] == "Polski Test Jeden", "fill_pl nie nadpisuje istniejącego polskiego tytułu")
     # testowe cytaty (tylko w kopii)
     for m in list(mv.values())[:3]:
@@ -178,6 +188,11 @@ def main():
             mv_ = t["movie"]
             check(mv_["id"] in pack_ids, "film z wybranego pakietu")
             check(mv_["title"] not in leak or mode == "kolejnosc", "stan rundy nie zdradza tytułu")
+            if mode == "aktorzy":
+                check(sa.get("cast") and isinstance(sa["cast"][0], dict) and sa["cast"][0].get("name"),
+                      "aktorzy: stan ma imię i obiekt, nie samo string")
+                check(any(str((c.get("photo") if isinstance(c, dict) else "") or "").startswith("/actor/") for c in sa["cast"]),
+                      "aktorzy: stan rundy zawiera zdjęcie")
             wrong = a.req("POST", f"/api/rooms/{code}/guess", {**A, "text": "zzzz qqqq"})
             check(wrong.get("correct") is False, "zła odpowiedź odrzucona")
             ans = mv_["pl_title"] if (mv_["pl_title"] and not pl_tested) else mv_["title"]

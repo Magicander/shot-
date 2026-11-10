@@ -587,24 +587,28 @@ function webPanel(id, kind) {
   return `<div class="panel webpanel"><h2>${kind === "poster" ? T("pobierz plakaty") : T("pobierz obsadę")}</h2>
     <p class="muted" style="font-size:14px;margin:0 0 10px">${kind === "poster"
       ? T("Auto: najpierw IMDb, potem Filmweb, potem TMDB (jeśli masz klucz). Plakaty zapisuję lokalnie w bazie.")
-      : T("Auto: najpierw Filmweb (pełna obsada), potem IMDb, potem TMDB (jeśli masz klucz). Zapisuję aktorów w kolejności z napisów.")}</p>
+      : T("Auto: najpierw Filmweb (pełna obsada), potem IMDb, potem TMDB (jeśli masz klucz). Zapisuję aktorów w kolejności z napisów, razem ze zdjęciami.")}</p>
     <div class="form-grid">
       <label class="field">${T("Źródło")}${srcSelect("wsrc", kind)}</label>
       ${kind === "cast" ? `<label class="field">${T("Ilu aktorów")}<input class="input sm" type="number" id="wn" min="3" max="15" value="6"></label>` : "<span></span>"}
       <label class="check full"><input type="checkbox" id="wredo">${T("pobierz od nowa także filmy, które już mają dane")}</label>
       <label class="check full"><input type="checkbox" id="wfill">${T("uzupełnij puste polskie tytuły (Filmweb, TMDB)")}</label>
-      <div class="full row"><button class="pill orange" id="wgo">${T("pobierz dla pakietu")}</button></div>
+      <div class="full row"><button class="pill orange" id="wgo">${T("pobierz dla pakietu")}</button>
+        ${kind === "cast" ? `<button class="pill light" id="wphotos">${T("dociągnij brakujące zdjęcia (imiona zostają)")}</button>` : ""}</div>
     </div>
     <div id="scrapebox" style="margin-top:14px"></div></div>`;
 }
 function bindWeb(id, kind) {
   if (CLOUD || !$("#wgo")) return;
-  $("#wgo").onclick = async () => {
-    try {
-      const r = await api(`/api/admin/packs/${id}/web`, "POST", {kind, source: $("#wsrc").value, n: +($("#wn")?.value || 6), redo: $("#wredo").checked, fill_pl: $("#wfill").checked});
-      toast(T("Start: {n} filmów", {n: r.count})); const b = $("#scrapebox"); b.dataset.was = "1"; b.dataset.reload = "1";
-    } catch (e) { toast(e.message); }
+  const startJob = async (extra) => {
+    const r = await api(`/api/admin/packs/${id}/web`, "POST", {
+      kind, source: $("#wsrc").value, n: +($("#wn")?.value || 6),
+      redo: $("#wredo").checked, fill_pl: $("#wfill").checked, ...extra});
+    toast(extra && extra.photos_only ? T("Zdjęcia: {n} filmów w kolejce", {n: r.count}) : T("Start: {n} filmów", {n: r.count}));
+    const b = $("#scrapebox"); b.dataset.was = "1"; b.dataset.reload = "1";
   };
+  $("#wgo").onclick = async () => { try { await startJob({}); } catch (e) { toast(e.message); } };
+  if ($("#wphotos")) $("#wphotos").onclick = async () => { try { await startJob({photos_only: true, redo: false}); } catch (e) { toast(e.message); } };
   startLog(); $("#scrapebox").dataset.reload = "1";
 }
 
@@ -693,8 +697,8 @@ async function castPage(id) {
           return `<div class="ccard" data-id="${m.id}"><div class="row" style="justify-content:space-between;flex-wrap:nowrap;align-items:flex-start">
               <div><div class="t">${esc(m.title)} <span class="muted">${m.year || ""}</span></div>
               <div class="sub">${c.length ? T("{n} aktorów · {x}", {n: c.length, x: T(SRC_NAMES[m.cast_source] || m.cast_source || "?")}) : T("brak obsady")}</div></div>
-              <div class="row" style="gap:6px;flex-wrap:nowrap"><button class="pill small light" data-a="edit">${T("edytuj")}</button>${CLOUD ? "" : `<button class="pill small orange" data-a="fetch">${T("pobierz")}</button>`}</div></div>
-            ${c.length ? `<ol class="castol">${c.map(a => `<li><b>${esc(a.name)}</b>${a.character ? ` <span class="muted">${esc(a.character)}</span>` : ""}</li>`).join("")}</ol>` : ""}</div>`; }).join("") || `<p class="empty">${T("Brak filmów.")}</p>`}</div>
+              <div class="row" style="gap:6px;flex-wrap:nowrap"><button class="pill small light" data-a="edit">${T("edytuj")}</button>${CLOUD ? "" : `<button class="pill small orange" data-a="fetch">${T("pobierz")}</button>`}${!CLOUD && c.length && c.some(a => !a.photo_id) ? `<button class="pill small light" data-a="photos">${T("dociągnij zdjęcia")}</button>` : ""}</div></div>
+            ${c.length ? `<ol class="castol">${c.map(a => `<li>${a.photo_id ? `<img class="athumb" src="/actor/${a.photo_id}.jpg" alt="">` : `<span class="athumb empty" title="${T("brak zdjęcia")}"></span>`}<span><b>${esc(a.name)}</b>${a.character ? ` <span class="muted">${esc(a.character)}</span>` : ""}</span></li>`).join("")}</ol>` : ""}</div>`; }).join("") || `<p class="empty">${T("Brak filmów.")}</p>`}</div>
       </div></div>`;
   bindWeb(id, "cast");
   document.querySelectorAll(".ccard").forEach(c => {
@@ -705,6 +709,12 @@ async function castPage(id) {
       try { const r = await api(`/api/admin/movies/${mid}/cast`, "POST", {source: $("#csrc").value, n: +($("#wn")?.value || 6)}); toast(T("Obsada: {x}", {x: T(SRC_NAMES[r.source])})); castPage(id); }
       catch (e) { c.classList.remove("busy"); toast(e.message); }
     };
+    const phBtn = c.querySelector("[data-a=photos]");
+    if (phBtn) phBtn.onclick = async () => {
+      c.classList.add("busy");
+      try { await api(`/api/admin/movies/${mid}/cast`, "POST", {source: $("#csrc")?.value || "auto", n: +($("#wn")?.value || 6), photos_only: true}); toast(T("Zapisano")); castPage(id); }
+      catch (e) { c.classList.remove("busy"); toast(e.message); }
+    };
     c.querySelector("[data-a=edit]").onclick = () => castModal(id, m);
   });
 }
@@ -713,11 +723,27 @@ function castModal(id, m) {
   const draw = () => {
     const box = $("#castrows"); if (!box) return;
     box.innerHTML = rows.map((a, i) => `<div class="crow" data-i="${i}"><span class="num">${i + 1}</span>
+      ${a.photo_id ? `<img class="athumb" src="/actor/${a.photo_id}.jpg?t=${Date.now()}" alt="">` : `<span class="athumb empty" title="${T("brak zdjęcia")}"></span>`}
       <input class="input sm" data-f="name" value="${esc(a.name)}" placeholder="${T("Aktor")}" aria-label="${T("Aktor")}">
       <input class="input sm" data-f="character" value="${esc(a.character || "")}" placeholder="${T("Postać")}" aria-label="${T("Postać")}">
+      <label class="phup" title="${T("wgraj zdjęcie")}"><input type="file" accept="image/jpeg,image/png,image/webp" data-up hidden>${T("wgraj zdjęcie")}</label>
       <button type="button" class="ibtn" data-m="-1" aria-label="${T("wyżej")}">&uarr;</button><button type="button" class="ibtn" data-m="1" aria-label="${T("niżej")}">&darr;</button>
       <button type="button" class="ibtn" data-m="x" aria-label="${T("usuń")}">&times;</button></div>`).join("") || `<p class="muted">${T("Brak aktorów. Dodaj albo pobierz.")}</p>`;
-    box.querySelectorAll("input").forEach(inp => inp.oninput = () => { rows[+inp.closest(".crow").dataset.i][inp.dataset.f] = inp.value; });
+    box.querySelectorAll("input[data-f]").forEach(inp => inp.oninput = () => { rows[+inp.closest(".crow").dataset.i][inp.dataset.f] = inp.value; });
+    box.querySelectorAll("input[data-up]").forEach(inp => inp.onchange = async () => {
+      const i = +inp.closest(".crow").dataset.i, f = inp.files && inp.files[0];
+      if (!f) return;
+      const data = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(f); });
+      try {
+        const body = { data, name: rows[i].name || "" };
+        const r = rows[i].photo_id
+          ? await api(`/api/admin/actors/${rows[i].photo_id}`, "PUT", body)
+          : await api(`/api/admin/actors`, "POST", body);
+        rows[i].photo_id = r.id;
+        toast(T("Zapisano"));
+        draw();
+      } catch (e) { toast(e.message); }
+    });
     box.querySelectorAll("[data-m]").forEach(b => b.onclick = () => {
       const i = +b.closest(".crow").dataset.i, d = b.dataset.m;
       if (d === "x") rows.splice(i, 1); else { const j = i + +d; if (j < 0 || j >= rows.length) return; [rows[i], rows[j]] = [rows[j], rows[i]]; }

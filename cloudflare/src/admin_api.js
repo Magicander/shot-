@@ -501,6 +501,7 @@ export async function handleAdmin(req, env, path, { isAdmin, body, detectLang })
           if (name) cast.push({
             name, character: String(c.character || "").trim().slice(0, 80),
             ...(String(c.billing || "").match(/^\d+$/) ? { billing: +c.billing } : {}),
+            ...(String(c.photo_id || "").match(/^\d+$/) ? { photo_id: +c.photo_id } : {}),
           });
         }
         await contentOp(env, {
@@ -540,6 +541,36 @@ export async function handleAdmin(req, env, path, { isAdmin, body, detectLang })
         return json({ ok: true });
       }
     }
+  }
+
+  // /api/admin/actors  /api/admin/actors/:id
+  m = path.match(/^\/api\/admin\/actors(?:\/(\d+))?$/);
+  if (m) {
+    const aid = m[1] ? +m[1] : 0;
+    if (req.method === "POST" || (req.method === "PUT" && aid)) {
+      const d = await body(req);
+      let bytes, source = "url", url = "";
+      if (d.data) {
+        const raw = String(d.data);
+        const b64 = raw.startsWith("data:") ? raw.split(",", 2)[1] : raw;
+        if (!b64 || b64.length > MAX_POSTER * 1.4) throw new ApiError(413, "Zdjęcie jest za duże (max 1,5 MB)");
+        const bin = atob(b64);
+        bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        source = "upload";
+      } else {
+        url = String(d.url || "").trim();
+        bytes = await fetchImage(url);
+        source = "url";
+      }
+      if (!isImage(bytes)) throw new ApiError(400, "To nie jest obraz (JPEG, PNG albo WebP)");
+      const r = await contentOp(env, {
+        op: "setActorPhoto", id: aid || 0, image_b64: b64FromBytes(bytes),
+        meta: { name: String(d.name || "").trim().slice(0, 80), source, url },
+      });
+      return json({ ok: true, id: r.id });
+    }
+    throw new ApiError(404, "Nie ma takiego adresu");
   }
 
   // /api/admin/quotes/:id  /api/admin/questions/:id

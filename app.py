@@ -231,6 +231,14 @@ class Handler(BaseHTTPRequestHandler):
                 img = bytes(row["image"])
                 ctype = "image/png" if img[:4] == b"\x89PNG" else "image/webp" if img[8:12] == b"WEBP" else "image/jpeg"
                 return self.send(200, img, ctype, {"Cache-Control": "max-age=300"})
+            m = re.fullmatch(r"/actor/(\d+)\.jpg", path)
+            if m and method == "GET":
+                row = con.execute("SELECT image FROM actor_photos WHERE id=?", (int(m[1]),)).fetchone()
+                if not row:
+                    raise ApiError(404, "Brak zdjęcia")
+                img = bytes(row["image"])
+                ctype = "image/png" if img[:4] == b"\x89PNG" else "image/webp" if img[8:12] == b"WEBP" else "image/jpeg"
+                return self.send(200, img, ctype, {"Cache-Control": "max-age=3600"})
             if path.startswith("/api/admin"):
                 return self.admin_api(method, path, q, con)
             if path.startswith("/api/"):
@@ -506,6 +514,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json({"added": len(added), "skipped": len(skipped), "parsed": len(items),
                                   "added_items": added, "skipped_items": skipped},
                                  409 if items and not added and skipped and "text" not in d else 200)
+        m = re.fullmatch(r"/api/admin/actors(?:/(\d+))?", path)
+        if m:
+            return self.actor_photo_api(method, int(m[1]) if m[1] else None, con)
         m = re.fullmatch(r"/api/admin/movies/(\d+)/(poster|cast|quotes)", path)
         if m:
             return self.movie_data_api(method, int(m[1]), m[2], con)
@@ -626,13 +637,16 @@ class Handler(BaseHTTPRequestHandler):
 
 
     # --- edytory trybów (faza 4)
-    def start_web_job(self, kind, rows, source, n, fill_pl):
+    def start_web_job(self, kind, rows, source, n, fill_pl, photos_only=False):
         global scrape_progress, tmdb_thread
         import scraper
         import webscrape
         scrape_progress = scraper.Progress(self.lang)
-        tmdb_thread = threading.Thread(target=webscrape.run, args=(rows, scrape_progress, kind, source, n, fill_pl),
-                                       daemon=True)
+        tmdb_thread = threading.Thread(
+            target=webscrape.run,
+            kwargs={"rows": rows, "progress": scrape_progress, "kind": kind, "source": source,
+                    "n": n, "fill_pl": fill_pl, "photos_only": photos_only},
+            daemon=True)
         tmdb_thread.start()
 
     def mode_editor_api(self, method, sub, pid, con):
@@ -648,15 +662,28 @@ class Handler(BaseHTTPRequestHandler):
             if job_busy():
                 raise ApiError(409, "Scraper już działa")
             rows = movie_rows(con, pid, d.get("movie_ids"))
+            photos_only = bool(d.get("photos_only"))
+            if photos_only:
+                kind = "cast"
             if not d.get("redo") and not d.get("movie_ids"):
                 if kind == "poster":
                     have = {r[0] for r in con.execute("SELECT movie_id FROM posters")}
                     rows = [r for r in rows if r["id"] not in have]
+                elif photos_only:
+                    need = []
+                    for r in rows:
+                        try:
+                            cs = json.loads(r.get("cast_json") or "[]")
+                        except ValueError:
+                            cs = []
+                        if cs and any(not c.get("photo_id") for c in cs):
+                            need.append(r)
+                    rows = need
                 else:
                     have = {r[0] for r in con.execute("SELECT id FROM movies WHERE cast_json NOT IN ('', '[]')")}
                     rows = [r for r in rows if r["id"] not in have]
             n = max(3, min(15, int(d.get("n") or webscrape.DEFAULT_N)))
-            self.start_web_job(kind, rows, source, n, bool(d.get("fill_pl")))
+            self.start_web_job(kind, rows, source, n, bool(d.get("fill_pl")), photos_only=photos_only)
             return self.json({"ok": True, "count": len(rows)})
         if sub == "quotes" and method == "GET":
             rows = con.execute("SELECT id, title, year, pl_title FROM movies WHERE pack_id=? ORDER BY title COLLATE NOCASE",
@@ -727,6 +754,51 @@ class Handler(BaseHTTPRequestHandler):
                            (pid, q["prompt_pl"], q["prompt_en"], json.dumps(q["answers"], ensure_ascii=False),
                             time.time())).lastrowid
 
+    def actor_photo_api(self, method, aid, con):
+        import base64
+        import webscrape
+        if method == "GET" and aid:
+            row = con.execute("SELECT id, key, name, source, source_id, url, updated, length(image) AS bytes "
+                              "FROM actor_photos WHERE id=?", (aid,)).fetchone()
+            if not row:
+                raise ApiError(404, "Brak zdjęcia")
+            return self.json(dict(row))
+        if method == "POST" or (method == "PUT" and aid):
+            d = self.body()
+            name = str(d.get("name") or "").strip()[:80]
+            if d.get("data"):
+                raw = str(d["data"])
+                data = base64.b64decode(raw.split(",", 1)[1] if raw.startswith("data:") else raw)
+                src, url = "upload", ""
+            else:
+                url = str(d.get("url") or "").strip()
+                try:
+                    data = webscrape.fetch_image(url)
+                except Exception:
+                    raise ApiError(400, "Nie udało się pobrać")
+                src = "url"
+            if not webscrape.is_image(data):
+                raise ApiError(400, "To nie jest obraz (JPEG, PNG albo WebP)")
+            key = db.actor_photo_key(src, "", name) or (f"upload:{aid}" if aid else f"upload:{int(time.time()*1000)}")
+            with con:
+                if aid:
+                    row = con.execute("SELECT id FROM actor_photos WHERE id=?", (aid,)).fetchone()
+                    if not row:
+                        raise ApiError(404, "Brak zdjęcia")
+                    data = db.shrink_headshot(data)
+                    con.execute("UPDATE actor_photos SET image=?, url=COALESCE(NULLIF(?, ''), url), "
+                                "source=?, name=COALESCE(NULLIF(?, ''), name), updated=? WHERE id=?",
+                                (data, url, src, name, time.time(), aid))
+                    pid = aid
+                else:
+                    pid = db.save_actor_photo(con, key=key, name=name, source=src, image=data, url=url)
+            return self.json({"ok": True, "id": pid})
+        if method == "DELETE" and aid:
+            with con:
+                con.execute("DELETE FROM actor_photos WHERE id=?", (aid,))
+            return self.json({"ok": True})
+        raise ApiError(404, "Nie ma takiego adresu")
+
     def movie_data_api(self, method, mid, what, con):
         import base64
         import webscrape
@@ -777,6 +849,13 @@ class Handler(BaseHTTPRequestHandler):
                     raise ApiError(400, "Nieznane źródło")
                 log = []
                 n = max(3, min(15, int(d.get("n") or webscrape.DEFAULT_N)))
+                if d.get("photos_only"):
+                    try:
+                        with con:
+                            st = webscrape.fill_photos(con, dict(mv) | row, src, n, log.append)
+                    except Exception as e:  # noqa: BLE001
+                        return self.json({"ok": False, "error": str(e), "log": log}, 502)
+                    return self.json({"ok": True, "photos": st, "log": log})
                 try:
                     data, meta, used = webscrape.fetch_one("cast", src, row, n, log=log.append)
                 except Exception as e:  # noqa: BLE001
@@ -787,9 +866,14 @@ class Handler(BaseHTTPRequestHandler):
                 cast = []
                 for c in (d.get("cast") or [])[:20]:
                     name = str(c.get("name") or "").strip()[:80]
-                    if name:
-                        cast.append({"name": name, "character": str(c.get("character") or "").strip()[:80],
-                                     **({"billing": int(c["billing"])} if str(c.get("billing") or "").isdigit() else {})})
+                    if not name:
+                        continue
+                    rec = {"name": name, "character": str(c.get("character") or "").strip()[:80]}
+                    if str(c.get("billing") or "").isdigit():
+                        rec["billing"] = int(c["billing"])
+                    if str(c.get("photo_id") or "").isdigit():
+                        rec["photo_id"] = int(c["photo_id"])
+                    cast.append(rec)
                 with con:
                     con.execute("UPDATE movies SET cast_json=?, cast_source=CASE WHEN ?='' THEN '' ELSE "
                                 "COALESCE(NULLIF(cast_source,''),'manual') END WHERE id=?",
@@ -835,7 +919,7 @@ def job_busy():
 
 
 def movie_rows(con, pack_id=None, ids=None):
-    sql = "SELECT id, title, year, pl_title, imdb_id, filmweb_id, tmdb_id FROM movies WHERE "
+    sql = "SELECT id, title, year, pl_title, imdb_id, filmweb_id, tmdb_id, cast_json, cast_source FROM movies WHERE "
     if ids:
         rows = con.execute(sql + f"id IN ({','.join('?' * len(ids))}) ORDER BY id", [int(i) for i in ids])
     else:

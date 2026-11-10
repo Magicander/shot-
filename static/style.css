@@ -256,8 +256,10 @@ footer{padding:30px 0 50px;text-align:center;color:var(--muted);font-size:14px}
 .stage.textstage{aspect-ratio:auto;min-height:300px;background:var(--card);color:var(--ink);padding:64px 26px 26px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;border:2px solid var(--line)}
 .stage.textstage .lvl{background:var(--orange);color:#fff}
 .castlist{list-style:none;counter-reset:c;margin:0;padding:0;display:grid;gap:8px;width:100%;max-width:460px}
-.castlist li{counter-increment:c;border-radius:16px;padding:10px 16px;font-family:var(--display);font-weight:700;font-size:22px;text-align:left;display:flex;gap:12px;align-items:center}
+.castlist li{counter-increment:c;border-radius:16px;padding:8px 14px;font-family:var(--display);font-weight:700;font-size:22px;text-align:left;display:flex;gap:12px;align-items:center}
 .castlist li::before{content:counter(c);display:inline-grid;place-items:center;width:30px;height:30px;border-radius:50%;background:var(--ink);color:var(--paper);font-size:15px;flex:none}
+.castlist .ahot,.castlist .anoimg{width:52px;height:64px;border-radius:10px;object-fit:cover;flex:none;background:var(--line)}
+.castlist .anoimg{box-shadow:inset 0 0 0 2px var(--line)}
 .castlist li.in{background:var(--bone);animation:fadein .4s}
 .castlist li.hid{background:transparent;border:2px dashed var(--line);color:var(--muted)}
 .castlist.done{margin:14px auto 4px}
@@ -298,7 +300,8 @@ footer{padding:30px 0 50px;text-align:center;color:var(--muted);font-size:14px}
 .wait-box{background:var(--card);color:var(--ink);border:2px solid var(--line)}
 @media (max-width:560px){
   .stage.textstage{padding:58px 14px 18px;min-height:240px}
-  .castlist li{font-size:18px;padding:8px 12px}
+  .castlist li{font-size:18px;padding:6px 10px}
+  .castlist .ahot,.castlist .anoimg{width:44px;height:54px;border-radius:8px}
   .orderlist img,.orderlist .noimg{width:58px}
   .orderlist li{gap:8px;padding:6px 8px}
   .modes{grid-template-columns:1fr}
