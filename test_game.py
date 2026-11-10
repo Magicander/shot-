@@ -233,24 +233,16 @@ def main():
             check(low.get("low"), "licytacja: oferta musi być wyższa")
             b.req("POST", f"/api/rooms/{code}/guess", {**B, "pass": True})
             st_ = a.req("GET", f"/api/rooms/{code}?pid={A['pid']}&token={A['token']}")
-            check(t["bidder"] == A["pid"] and t["bid"] == 2 and st_["sub"] == "type" and st_["duration"] == 30, "licytację wygrywa Ala, 30 s na odpowiedź")
-            # klasyczna licytacja = tytuły filmów; z własnymi pytaniami = odpowiedzi z listy
-            q = t.get("q") or {}
-            answers = q.get("answers") or []
-            if answers:
-                a1 = answers[0]["text"] if isinstance(answers[0], dict) else str(answers[0])
-                a2 = answers[1]["text"] if len(answers) > 1 else a1 + " X"
-                r1 = a.req("POST", f"/api/rooms/{code}/guess", {**A, "text": a1})
-                dup = a.req("POST", f"/api/rooms/{code}/guess", {**A, "text": a1})
-                check(r1.get("correct") and dup.get("duplicate"), "licytacja: tytuł zaliczony, powtórka odrzucona")
-                a.req("POST", f"/api/rooms/{code}/guess", {**A, "text": a2})
-            else:
-                first = ok_movies[0]
-                r1 = a.req("POST", f"/api/rooms/{code}/guess", {**A, "text": first["title"]})
-                dup = a.req("POST", f"/api/rooms/{code}/guess", {**A, "text": first["title"]})
-                check(r1.get("correct") and dup.get("duplicate"), "licytacja: tytuł zaliczony, powtórka odrzucona")
-                other = next(m for m in movies if m["id"] != first["id"])
-                a.req("POST", f"/api/rooms/{code}/guess", {**A, "text": other["title"]})
+            check(t["bidder"] == A["pid"] and t["bid"] == 2 and st_["sub"] == "wait_timer" and st_.get("duration") is None, "licytację wygrywa Ala, timer jeszcze stoi")
+            check(not a.req("POST", f"/api/rooms/{code}/guess", {**A, "start_timer": True}).get("ok"), "licytujący nie puszcza timera")
+            b.req("POST", f"/api/rooms/{code}/guess", {**B, "start_timer": True})
+            st2 = a.req("GET", f"/api/rooms/{code}?pid={A['pid']}&token={A['token']}")
+            check(st2["sub"] == "timed" and st2.get("duration") == 30, "Bob puszcza timer (30 s)")
+            t["type_end"] = __import__("time").time() - 0.1
+            room.tick()
+            check(t.get("sub") == "verdict", "po czasie jest werdykt")
+            check(not a.req("POST", f"/api/rooms/{code}/guess", {**A, "verdict": True}).get("ok"), "licytujący nie ocenia siebie")
+            b.req("POST", f"/api/rooms/{code}/guess", {**B, "verdict": True})
         if room.phase == "round":
             a.req("POST", f"/api/rooms/{code}/next", A)
         sr = a.req("GET", f"/api/rooms/{code}?pid={A['pid']}&token={A['token']}")

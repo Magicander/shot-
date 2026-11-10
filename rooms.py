@@ -18,7 +18,7 @@ TOP_N = 5                   # domyślna długość topki
 TOP_N_MIN, TOP_N_MAX = 3, 8
 TOP_OWN = 45                # sekundy na własną topkę
 TOP_GUESS = 45              # sekundy na odgadywanie cudzej
-MOST_TIME = 90              # sekundy na rundę Mostu
+MOST_TIME = 90              # dawny limit rundy Mostu (Filmrun nie używa zegara)
 
 MODES = ["kadry", "zoom", "licytacja", "rok", "kolejnosc", "plakat", "aktorzy", "top"]
 DURATION = {"kadry": 3 * STAGE_SECONDS, "zoom": 30, "plakat": 30, "top": TOP_OWN, "rok": 25, "kolejnosc": 40}
@@ -330,6 +330,8 @@ def availability(pack, movies, has_key, cfg=None):
 class Room:
     def __init__(self, code, pack, movies, rounds, avail, kind="pack"):
         self.code, self.pack, self.movies, self.avail = code, pack, movies, avail
+        if kind in ("filmrun", "bridge"):
+            kind = "most"
         self.kind = kind
         self.modes = ["most"] if kind == "most" else [k for k in MODES if avail.get(k, {}).get("ok")]
         self.rounds = max(1, min(int(rounds or 10), MAX_ROUNDS))
@@ -416,13 +418,14 @@ class Room:
         if mode == "top":
             return c["top_own"], c["top_guess"]
         if mode == "most":
-            return s or c["most_time"], None
+            return None, None
         dur = s or DURATION.get(mode, 30)
         return dur, (round(dur / 3, 2) if mode == "kadry" else None)
 
     def is_voice(self, mode):
-        c = self.cfg
-        return mode in VOICE_MODES and c["mode_answer"].get(mode, c["answer"]) == "voice"
+        # Odpowiedzi na głos przy zgadywaniu tytułów zostały usunięte.
+        # Licytacja ma osobne sędziowanie (timer od przeciwnika + werdykt).
+        return False
 
     # --- przebieg
     def start(self):
@@ -475,9 +478,9 @@ class Room:
             return {"mode": mode, "items": items, "sub": "own", "own": {}, "guess": {}, "targets": {}}
         if mode == "most":
             import most
-            pair = most.pick_pair(db.connect(), ms, lang="pl")
+            pair = most.pick_filmrun_pair(db.connect(), ms, lang="pl")
             return {"mode": mode, "start": pair["start"], "goal": pair["goal"],
-                    "witness": pair.get("witness"), "paths": {}, "done_at": {}}
+                    "started": {}, "stopped": {}, "winner": None}
         if mode == "rok":
             m = self.pick([x for x in ms if x["year"]], used)
             return {"mode": mode, "movie": m}
@@ -501,7 +504,8 @@ class Room:
         return self.task["mode"] if self.task else None
 
     def duration(self):
-        return self.task["dur"]
+        d = self.task.get("dur") if self.task else None
+        return d if d is not None else 0
 
     def mult(self):
         return self.cfg["final_x"] if self.plan and self.round == len(self.plan) - 1 else 1
@@ -522,11 +526,9 @@ class Room:
             t.update(sub="own", own={}, guess={}, targets={})
             t["dur"] = t.get("own_dur") or self.cfg["top_own"]
         elif t["mode"] == "most":
-            t.setdefault("paths", {})
-            t.setdefault("done_at", {})
-            for pid in pl:
-                if pid not in t["paths"]:
-                    t["paths"][pid] = [dict(t["start"])]
+            t.setdefault("started", {})
+            t.setdefault("stopped", {})
+            t["winner"] = None
         elif t["voice"]:
             t.update(claims=[], peek=[])
         self.version += 1
@@ -638,12 +640,11 @@ class Room:
             if t["mode"] == "licytacja":
                 if t["bidder"] is None:
                     self.lic_tick(now)
-                elif now >= t["type_end"]:
-                    self.end_round()
-                elif not t["voice"] and len(t["found"]) >= t["bid"]:
-                    self.end_round()
-                elif t["voice"] and t["done_at"] and now >= t["done_at"] + LIC_DONE_DELAY:
-                    self.end_round()
+                elif t.get("sub") == "verdict":
+                    if self._lic_verdict_ready():
+                        self.end_round()
+                elif t.get("timer_started") and t.get("type_end") and now >= t["type_end"]:
+                    self._lic_to_verdict()
             elif t["voice"]:
                 for c in t["claims"]:
                     if c["st"] == "wait":
@@ -665,7 +666,7 @@ class Room:
                 elif el >= self.duration() or (act and all(p["id"] in t["guess"] for p in act)):
                     self.end_round()
             elif t["mode"] == "most":
-                if el >= self.duration() or (act and act and all(p["id"] in t.get("done_at", {}) for p in act)):
+                if t.get("winner"):
                     self.end_round()
             elif el >= self.duration() or (act and all(p["ans"] is not None or p["got"] for p in act)):
                 self.end_round()
@@ -713,8 +714,9 @@ class Room:
         if not b:
             t["bidder"] = ""
             return self.end_round()
-        t.update(bidder=b, type_end=time.time() + t["dur"])
+        t.update(bidder=b, type_end=None, timer_started=False, sub="wait_timer", verdicts={}, success=None)
         self.event("bidwin", self.players[b]["name"], t["bid"])
+        self.version += 1
 
     def end_round(self):
         t = self.task
@@ -731,7 +733,8 @@ class Room:
                 if p["ans"]:
                     pts[pid] = 250 * sum(1 for a, b in zip(p["ans"], right) if a == b) * x
         elif t["mode"] == "licytacja" and t["bidder"]:
-            t["success"] = len(t["found"]) >= t["bid"]
+            if t.get("success") is None:
+                t["success"] = False
             for pid in self.players:
                 if t["success"]:
                     pts[pid] = 200 * t["bid"] * x if pid == t["bidder"] else 0
@@ -744,18 +747,9 @@ class Room:
                 guess, truth = t["guess"].get(pid), t["own"].get(target)
                 pts[pid] = (top_score(guess, truth) * x) if guess and truth else 0
         elif t["mode"] == "most":
-            import most
-            finished = []
-            for pid, at in (t.get("done_at") or {}).items():
-                path = t.get("paths", {}).get(pid) or []
-                if path and path[-1].get("kind") == "person" and int(path[-1]["id"]) == int(t["goal"]["id"]):
-                    finished.append((at, pid, most.path_movies(path)))
-            finished.sort()
-            first_pid = finished[0][1] if finished else None
+            w = t.get("winner")
             for pid in self.players:
-                path = t.get("paths", {}).get(pid) or []
-                reached = bool(path and path[-1].get("kind") == "person" and int(path[-1]["id"]) == int(t["goal"]["id"]))
-                pts[pid] = most.most_score(most.path_movies(path), reached, first=(pid == first_pid)) * x
+                pts[pid] = (1000 * x) if pid == w else 0
         for pid, p in self.players.items():
             if t["mode"] not in TITLE_MODES:
                 p["score"] += pts[pid]
@@ -799,66 +793,90 @@ class Room:
         if not t["targets"]:
             self.end_round()
 
-    def most_answer(self, p, d):
-        import most
+    def lic_others(self):
+        """Gracze inni niż zwycięzca licytacji (online, do startu timera i werdyktu)."""
+        b = self.task.get("bidder")
+        return [pid for pid in self.online_ids() if pid != b]
+
+    def _lic_to_verdict(self):
         t = self.task
-        if p["id"] in t.get("done_at", {}):
-            return {"ok": False}
-        path = t.setdefault("paths", {}).setdefault(p["id"], [dict(t["start"])])
-        if d.get("undo"):
-            if len(path) > 1:
-                path.pop()
-                self.version += 1
-            return {"ok": True, "path": path}
-        step = d.get("person") or d.get("movie") or d.get("step")
-        if not step:
-            return {"ok": False}
-        kind = "person" if (d.get("person") or (isinstance(step, dict) and step.get("kind") == "person")) else "movie"
-        if isinstance(step, dict):
-            nxt = dict(step)
-            nxt["kind"] = nxt.get("kind") or kind
-        else:
-            nxt = {"kind": kind, "id": int(step)}
-        cur = path[-1]
-        # lokalny fallback: sprawdź graf obsady, gdy brak TMDB
-        key = db.tmdb_key()
-        ok = False
-        if key:
-            try:
-                con = db.connect()
-                most.ensure_cache_table(con)
-                ok = most.is_adjacent(con, key, cur, nxt)
-                if ok and ("name" not in nxt and "title" not in nxt):
-                    if nxt["kind"] == "person":
-                        nxt = most.person_detail(con, key, nxt["id"])
-                    else:
-                        # dociągnij krótki widok z listy sąsiadów
-                        for m in most.adjacent(con, key, cur):
-                            if m["kind"] == nxt["kind"] and int(m["id"]) == int(nxt["id"]):
-                                nxt = m
-                                break
-            except Exception as e:
-                print("most step tmdb:", e)
-                ok = False
-        if not ok:
-            # lokalny graf
-            g = most.local_graph(self.movies)
-            a = (cur["kind"], int(cur["id"]))
-            b = (nxt["kind"], int(nxt["id"]))
-            ok = b in (g.get(a) or [])
-            if ok:
-                meta = (g.get("_meta") or {}).get(b) or {}
-                nxt = {**{"kind": b[0], "id": b[1]}, **meta}
-        if not ok:
-            return {"ok": False, "illegal": True}
-        path.append(nxt)
-        reached = nxt["kind"] == "person" and int(nxt["id"]) == int(t["goal"]["id"])
-        if reached:
-            t.setdefault("done_at", {})[p["id"]] = time.time()
-            self.event("guess", p["name"])
+        if t.get("sub") == "verdict":
+            return
+        t["sub"] = "verdict"
+        t["verdicts"] = t.get("verdicts") or {}
         self.version += 1
-        self.tick()
-        return {"ok": True, "reached": reached, "path": path}
+
+    def _lic_verdict_ready(self):
+        t = self.task
+        others = self.lic_others()
+        voters = others or ([t["bidder"]] if t.get("bidder") in self.players else [])
+        votes = t.get("verdicts") or {}
+        return bool(voters) and all(v in votes for v in voters)
+
+    def lic_start_timer(self, p):
+        t = self.task
+        if not t or t["mode"] != "licytacja" or not t.get("bidder") or t.get("timer_started"):
+            return {"ok": False}
+        if t.get("sub") not in (None, "wait_timer", "type"):
+            return {"ok": False}
+        others = self.lic_others()
+        if others and p["id"] == t["bidder"]:
+            return {"ok": False, "not_opponent": True}
+        if others and p["id"] not in others:
+            return {"ok": False}
+        t["timer_started"] = True
+        t["sub"] = "timed"
+        t["type_end"] = time.time() + (t.get("dur") or self.cfg["lic_answer"])
+        t["timer_by"] = p["id"]
+        self.version += 1
+        return {"ok": True}
+
+    def lic_verdict(self, p, yes):
+        t = self.task
+        if not t or t.get("sub") != "verdict":
+            return {"ok": False}
+        others = self.lic_others()
+        if not others and self.solo() and p["id"] == t.get("bidder"):
+            others = [t["bidder"]]
+        if p["id"] not in others:
+            return {"ok": False}
+        t.setdefault("verdicts", {})[p["id"]] = bool(yes)
+        if self._lic_verdict_ready():
+            votes = [t["verdicts"][v] for v in others if v in t["verdicts"]]
+            t["success"] = (sum(1 for x in votes if x) * 2) > len(votes)
+            self.end_round()
+        else:
+            self.version += 1
+        return {"ok": True}
+
+    def most_start(self, p):
+        t = self.task
+        if not t or t.get("winner") or p["id"] in t.get("stopped", {}):
+            return {"ok": False}
+        t.setdefault("started", {})[p["id"]] = time.time()
+        self.version += 1
+        link = (t.get("start") or {}).get("link") or {}
+        return {"ok": True, "link": link}
+
+    def most_stop(self, p):
+        t = self.task
+        if t.get("winner"):
+            return {"ok": False, "late": True}
+        if p["id"] not in (t.get("started") or {}):
+            return {"ok": False, "too_soon": True}
+        t.setdefault("stopped", {})[p["id"]] = time.time()
+        t["winner"] = p["id"]
+        self.event("guess", p["name"], 1000)
+        self.version += 1
+        self.end_round()
+        return {"ok": True, "winner": True}
+
+    def most_answer(self, p, d):
+        if d.get("start") or d.get("go"):
+            return self.most_start(p)
+        if d.get("stop"):
+            return self.most_stop(p)
+        return {"ok": False}
 
     # --- odpowiedzi
     def answer(self, p, d, lang):
@@ -924,6 +942,12 @@ class Room:
             return {"ok": True}
         if mode == "licytacja":
             ans = t["q"]["answers"]
+            if t["bidder"] is not None:
+                if d.get("start_timer"):
+                    return self.lic_start_timer(p)
+                if "verdict" in d or d.get("success") is not None:
+                    return self.lic_verdict(p, d.get("verdict", d.get("success")))
+                return {"ok": False}
             if t["bidder"] is None:
                 self.tick()
                 if t["bidder"] is not None or self.phase != "round":
@@ -1071,10 +1095,18 @@ class Room:
                            top_n=len(t["items"]),
                            score_hint="n-d")
             elif mode == "most":
-                path = (me and t.get("paths", {}).get(me["id"])) or [t["start"]]
-                cur = path[-1]
-                out.update(start=t["start"], goal=t["goal"], path=path, current=cur,
-                           finished=bool(me and me["id"] in t.get("done_at", {})))
+                started = bool(me and me["id"] in (t.get("started") or {}))
+                out.update(start=t["start"], goal=t["goal"],
+                           started=started,
+                           can_start=bool(me and not started and not t.get("winner")),
+                           can_stop=bool(me and started and not t.get("winner")),
+                           winner=t.get("winner"),
+                           winner_name=self.pname(t["winner"]) if t.get("winner") else None,
+                           returned=[self.pname(pid) for pid in (t.get("stopped") or {}) if pid in self.players],
+                           started_names=[self.pname(pid) for pid in (t.get("started") or {}) if pid in self.players],
+                           link=(t.get("start") or {}).get("link") or {})
+                out["duration"] = None
+                out["left"] = None
             elif mode == "rok":
                 out.update(movie=self.mview(t["movie"], lang, year=False), img=self.thumb(t["movie"]),
                            mine=me and me["ans"])
@@ -1112,17 +1144,22 @@ class Room:
                                duration=t["step"], left=round(t["turn_end"] - now, 1),
                                elapsed=round(t["step"] - (t["turn_end"] - now), 2))
                 else:
-                    cc = self.can_count(me)
-                    lj = None if self.cfg["judge"] == "vote" else self.lic_judge()
-                    out.update(sub="type", bidder=t["bidder"], bidder_name=self.pname(t["bidder"]) or "?",
-                               duration=t["dur"], left=round(t["type_end"] - now, 1),
-                               elapsed=round(t["dur"] - (t["type_end"] - now), 2),
-                               found=[self.fview(f, lang) for f in t["found"]], count=len(t["found"]),
-                               misses=t.get("misses", 0), can_count=cc, counter_name=self.pname(lj),
-                               closing=round(t["done_at"] + LIC_DONE_DELAY - now, 1) if t["done_at"] else None,
-                               answers=[{"i": k, "title": a["text"], "pl_title": a.get("pl") or "",
-                                         "found": any(f["i"] == k for f in t["found"])} for k, a in enumerate(ans)]
-                               if cc else None)
+                    others = self.lic_others()
+                    sub = t.get("sub") or ("wait_timer" if not t.get("timer_started") else "timed")
+                    can_timer = bool(me and not t.get("timer_started") and (me["id"] in others or (not others and me["id"] == t["bidder"])))
+                    can_verdict = bool(me and sub == "verdict" and (me["id"] in others or (not others and me["id"] == t["bidder"])))
+                    left = None
+                    if t.get("timer_started") and t.get("type_end") and sub == "timed":
+                        left = round(t["type_end"] - now, 1)
+                    out.update(sub=sub, bidder=t["bidder"], bidder_name=self.pname(t["bidder"]) or "?",
+                               duration=t["dur"] if t.get("timer_started") else None,
+                               left=left,
+                               elapsed=round((t["dur"] or 0) - (left or 0), 2) if t.get("timer_started") and left is not None else 0,
+                               can_start_timer=can_timer, can_verdict=can_verdict,
+                               my_verdict=(t.get("verdicts") or {}).get(me["id"]) if me else None,
+                               verdicts=[{"id": pid, "name": self.pname(pid), "vote": (t.get("verdicts") or {}).get(pid)}
+                                         for pid in (others or [])],
+                               timer_by=self.pname(t.get("timer_by")))
             return out
         # reveal
         out["left"] = round(REVEAL_SECONDS - el, 1)
@@ -1174,22 +1211,20 @@ class Room:
                     "points": (me["history"][-1] if me["history"] else 0),
                 }
         if mode == "most":
-            import most
-            ans.update(start=t["start"], goal=t["goal"])
-            rows = []
-            for p in players:
-                path = t.get("paths", {}).get(p["id"]) or []
-                reached = bool(path and path[-1].get("kind") == "person" and int(path[-1]["id"]) == int(t["goal"]["id"]))
-                rows.append({"id": p["id"], "name": p["name"], "path": path,
-                             "movies": most.path_movies(path), "reached": reached,
-                             "points": p["history"][-1] if p["history"] else 0})
-            ans["paths"] = rows
+            ans.update(start=t["start"], goal=t["goal"],
+                       winner=t.get("winner"), winner_name=self.pname(t["winner"]) if t.get("winner") else None)
+            ans["results"] = [{"id": p["id"], "name": p["name"],
+                               "started": p["id"] in (t.get("started") or {}),
+                               "stopped": p["id"] in (t.get("stopped") or {}),
+                               "won": p["id"] == t.get("winner"),
+                               "points": p["history"][-1] if p["history"] else 0} for p in players]
         if mode == "licytacja":
             got = {f["i"] for f in t["found"]}
+            answers = [self.fview({"text": a["text"], "pl": a.get("pl") or ""}, lang) for a in t["q"]["answers"]]
             ans.update(bidder_name=self.pname(t["bidder"] or ""), bid=t["bid"],
                        success=t.get("success", False), total=len(t["q"]["answers"]), prompt=self.prompt(t["q"], lang),
-                       missed=[self.fview({"text": a["text"], "pl": a.get("pl") or ""}, lang) for k, a in
-                               enumerate(t["q"]["answers"]) if k not in got][:40],
+                       answers=answers,
+                       missed=[x for k, x in enumerate(answers) if k not in got][:40],
                        bids=[{"name": self.pname(pid) or "?", "bid": b} for pid, b in t["bids"] if b],
                        found=[self.fview(f, lang) for f in t["found"] if f["i"] is not None], count=len(t["found"]))
         out["answer"] = ans

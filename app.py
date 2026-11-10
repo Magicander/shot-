@@ -109,7 +109,7 @@ EN_ERRORS = {
     "Klucz TMDB nie działa": "This TMDB key does not work",
     "Wybierz przynajmniej jeden pakiet": "Pick at least one pack",
     "Nie udało się dobrać pary aktorów": "Could not pick an actor pair",
-    "Most wymaga klucza TMDB albo bogatszej obsady w pakietach": "Bridge needs a TMDB key or a richer local cast graph",
+    "Filmrun wymaga klucza TMDB albo aktorów ze zdjęciem i profilem Filmweb/IMDb": "Filmrun needs a TMDB key, or local actors who already have a photo and a Filmweb/IMDb profile",
     "Za mało filmów w wybranych pakietach": "Not enough movies in the selected packs",
 }
 
@@ -315,8 +315,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.json(sorted(out, key=str.lower))
         if method == "POST" and path == "/api/rooms":
             d = self.body()
-            kind = d.get("kind") or ("most" if d.get("pack_id") == "most" else
+            kind = d.get("kind") or ("most" if d.get("pack_id") in ("most", "filmrun") else
                                      "custom" if d.get("pack_id") == "custom" else "pack")
+            if kind in ("filmrun", "bridge"):
+                kind = "most"
             with rooms_lock:
                 code = new_code()
                 if kind == "most":
@@ -329,7 +331,7 @@ class Handler(BaseHTTPRequestHandler):
                                 continue
                             seen.add(key)
                             movies.append(mv)
-                    pack = {"id": "most", "slug": "most", "name": "Most", "name_en": "Bridge",
+                    pack = {"id": "most", "slug": "filmrun", "name": "Filmrun", "name_en": "Filmrun",
                             "color": "#F26B1D", "questions": [], "modes_off": ""}
                     avail = {"most": {"ok": True, "have": 1, "need": 1, "reason": None}}
                     r = rooms[code] = Room(code, pack, movies, int(d.get("rounds") or 3), avail, kind="most")
@@ -393,7 +395,7 @@ class Handler(BaseHTTPRequestHandler):
                     try:
                         r.start()
                     except LookupError as e:
-                        msg = "Most wymaga klucza TMDB albo bogatszej obsady w pakietach" if str(e) == "most_no_tmdb" \
+                        msg = "Filmrun wymaga klucza TMDB albo aktorów ze zdjęciem i profilem Filmweb/IMDb" if str(e) == "most_no_tmdb" \
                             else "Nie udało się dobrać pary aktorów"
                         raise ApiError(400, msg)
                 elif action == "next" and r.phase in ("round", "reveal"):
@@ -554,7 +556,17 @@ class Handler(BaseHTTPRequestHandler):
                     p.easy_frame_id easy, p.medium_frame_id medium, p.hard_frame_id hard, p.zoom_frame_id zoom
                     FROM movies m LEFT JOIN picks p ON p.movie_id=m.id WHERE m.pack_id=? ORDER BY m.id""",
                                    (pid,)).fetchall()
-                return self.json([dict(r) for r in rows])
+                out = []
+                for r in rows:
+                    d = dict(r)
+                    try:
+                        cast = json.loads(d.get("cast_json") or "[]")
+                    except Exception:
+                        cast = []
+                    if cast:
+                        d["cast_json"] = json.dumps(db.enrich_cast_photos(con, cast), ensure_ascii=False)
+                    out.append(d)
+                return self.json(out)
             if sub == "movies" and method == "POST":
                 d = self.body()
                 if "text" in d:

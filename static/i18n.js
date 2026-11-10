@@ -167,10 +167,14 @@ function langSwitch() {
     `<button type="button" class="${l === window.LANG ? "on" : ""}" onclick="setLang('${l}')" aria-pressed="${l === window.LANG}">${l.toUpperCase()}</button>`).join("")}</span>`;
 }
 function applyI18n(root = document) {
-  root.querySelectorAll("[data-t]").forEach(el => { const k = el.innerHTML.trim(); el.innerHTML = T(k); });
-  root.querySelectorAll("[data-tp]").forEach(el => { el.placeholder = T(el.placeholder); });
-  root.querySelectorAll("[data-ta]").forEach(el => { el.setAttribute("aria-label", T(el.getAttribute("aria-label"))); });
-  root.querySelectorAll("[data-langsw]").forEach(el => { el.innerHTML = langSwitch(); });
+  root.querySelectorAll("[data-t]").forEach(el => { const k = el.innerHTML.trim(); el.innerHTML = T(k);   "wszystkie zdjęcia zapisane": "all photos saved",
+});
+  root.querySelectorAll("[data-tp]").forEach(el => { el.placeholder = T(el.placeholder);   "wszystkie zdjęcia zapisane": "all photos saved",
+});
+  root.querySelectorAll("[data-ta]").forEach(el => { el.setAttribute("aria-label", T(el.getAttribute("aria-label")));   "wszystkie zdjęcia zapisane": "all photos saved",
+});
+  root.querySelectorAll("[data-langsw]").forEach(el => { el.innerHTML = langSwitch();   "wszystkie zdjęcia zapisane": "all photos saved",
+});
 }
 document.addEventListener("DOMContentLoaded", () => applyI18n());
 
@@ -298,6 +302,7 @@ Object.assign(EN, {
   "Za mało filmów z obsadą ({have}/{need}). Admin: edytor trybów, aktorzy.": "Not enough films with cast ({have}/{need}). Admin: mode editor, actors.",
   "Za mało cytatów ({have}/{need}). Admin dopisuje je w edytorze trybów.": "Not enough quotes ({have}/{need}). The admin adds them in the mode editor.",
   "Ile filmów z tego pakietu wymienisz?": "How many films from this pack can you name?",
+  "wszystkie zdjęcia zapisane": "all photos saved",
 });
 
 /* faza 6: ustawienia gry, mówione odpowiedzi, licytacja w turach */
@@ -418,4 +423,64 @@ Object.assign(EN, {
   "wybierz kadr": "pick a frame",
   "wgraj": "upload",
   "Cytat nie jest już trybem gry — zastąpiła go gra Top. Dane cytatów zostają w bazie, możesz je dalej edytować.": "Quote is no longer a game mode — Top replaced it. Quote data stays in the database; you can still edit it.",
+
+  "Wikipedia run, ale o filmach": "Wikipedia run, but for movies",
+  "Dwóch aktorów, Start, potem Filmweb albo IMDb, Stop wygrywa rundę.": "Two actors, Start, then Filmweb or IMDb; Stop wins the round.",
+  "Specjalna gra poza pakietami": "A special game outside the packs",
+  "bez limitu czasu": "no time limit",
+  "gra": "game",
+  "osobno": "standalone",
+  "Ile rund zagracie. W każdej nowa para aktorów.": "How many rounds you will play. Each round gets a new pair of actors.",
+  "Dostajecie dwóch znanych aktorów i ich zdjęcia. Start otwiera profil pierwszego (Filmweb po polsku, IMDb po angielsku).": "You get two well-known actors and their photos. Start opens the first actor's profile (Filmweb in Polish, IMDb in English).",
+  "Bez limitu czasu szukacie drugiego aktora na tamtej stronie, chodząc po filmach i obsadzie.": "With no time limit you look for the second actor on that site, walking through films and casts.",
+  "Ruchy na Filmwebie i IMDb są poza naszą stroną — nie śledzimy, którą drogą poszliście. Wygrywa ten, kto pierwszy wróci i wciśnie Stop.": "Moves on Filmweb and IMDb happen off our site — we do not track your path. The first person to come back and press Stop wins.",
+  "Zwycięzca rundy dostaje 1000 pkt (razy mnożnik finału, jeśli jest). Potem kolejna runda z nową parą, aż do ustawionej liczby rund.": "The round winner gets 1000 pts (times the final multiplier, if any). Then another round with a new pair, until you reach the set number of rounds.",
+  "Chwyć kafelek i przeciągnij. Za każdy film: {n} pkt za dokładne miejsce, o 1 mniej za każde miejsce pomyłki.": "Grab a tile and drag it. For each movie: {n} pts for the exact place, 1 less for every place off.",
+  "start": "start",
+  "cel": "goal",
+  "Stop": "Stop",
+  "Start": "Start",
+  "Rundę wygrywa {name}.": "{name} wins the round.",
+  "Kliknij Start, żeby otworzyć profil pierwszego aktora.": "Tap Start to open the first actor's profile.",
+  "Wyszło: {list}": "Left: {list}",
+  "Wrócili: {list}": "Returned: {list}",
+  "Na {src} szukacie drugiego aktora, chodząc po filmach i obsadzie. Ruchy tam są poza naszą stroną. Wygrywa ten, kto pierwszy wróci i wciśnie Stop.": "On {src} you look for the second actor by walking films and casts. Those moves are off our site. The first to come back and press Stop wins.",
+  "Runda zakończona": "Round over",
+  "{name} wcisnął Stop jako pierwszy.": "{name} pressed Stop first.",
+  "Znalazłeś drugiego aktora? Wróć i wciśnij Stop.": "Found the second actor? Come back and press Stop.",
+  "Runda w toku": "Round in progress",
+  "Czekamy, aż ktoś wróci i wciśnie Stop.": "Waiting for someone to come back and press Stop.",
+  "Rundę wygrywa {name} — pierwszy wcisnął Stop (1000 pkt).": "{name} wins the round — first to press Stop (1000 pts).",
+  "Nikt nie wcisnął Stop.": "Nobody pressed Stop.",
+  "Gracze licytują po kolei. Timer puszcza przeciwnik, a po czasie pozostali oceniają, czy zadanie zostało zaliczone. Czas odpowiedzi: {n} s.": "Players bid in turns. The opponent starts the timer, and when it ends the others decide whether the task was completed. Answer time: {n} s.",
+  "Timer nie startuje sam. Puszcza go drugi gracz (albo pozostali, gdy gra więcej osób).": "The timer does not start on its own. The other player starts it (or the remaining players, when more people are playing).",
+  "Puść timer ({n} s)": "Start the timer ({n} s)",
+  "Czekasz na timer": "Waiting for the timer",
+  "Timer puszcza przeciwnik.": "The opponent starts the timer.",
+  "Czas minął. Pozostali gracze decydują, czy {name} zaliczył zadanie (wymienił {n} odpowiedzi).": "Time is up. The other players decide whether {name} completed the task (listed {n} answers).",
+  "nie zaliczył": "did not make it",
+  "zaliczył": "made it",
+  "Czekamy na ocenę": "Waiting for the verdict",
+  "Twój głos: tak": "Your vote: yes",
+  "Twój głos: nie": "Your vote: no",
+  "Gdy wszyscy ocenią, runda się kończy.": "When everyone has voted, the round ends.",
+  "Wymieniaj odpowiedzi na głos. Masz {n} s.": "List the answers out loud. You have {n} s.",
+  "{name} wymienia odpowiedzi. Masz {n} s na słuchanie, potem ocenisz, czy zaliczył.": "{name} is listing answers. You have {n} s to listen, then you will judge whether they made it.",
+  "Po czasie ocenią pozostali.": "The others will judge when time is up.",
+  "Słuchaj odpowiedzi": "Listen to the answers",
+  "Po sygnale ocenisz, czy zadanie zostało zaliczone.": "When the timer ends you will decide whether the task was completed.",
+  "deklaracja": "bid",
+  "deklaracja: {n}": "bid: {n}",
+  "{name} zaliczył zadanie": "{name} completed the task",
+  "{name} nie zaliczył zadania": "{name} did not complete the task",
+  "Po timerze pozostali gracze zdecydowali, czy licytujący wymienił tyle odpowiedzi. Sukces: 200 pkt × deklaracja dla licytującego. Porażka: 100 pkt × deklaracja dla pozostałych.": "After the timer the other players decided whether the bidder listed that many answers. Success: 200 pts × the bid for the bidder. Failure: 100 pts × the bid for the others.",
+  "Lista poprawnych odpowiedzi:": "List of valid answers:",
+  "tak": "yes",
+  "nie": "no",
+  "czeka": "waiting",
+  "brak zdjęcia": "no photo",
+  "dociągnij zdjęcia": "fetch photos again",
+  "zdjęcie nie zapisane": "photo not saved",
+  "placeholder Filmweb": "Filmweb placeholder",
+  "wszystkie zdjęcia zapisane": "all photos saved",
 });

@@ -83,7 +83,7 @@ def ext_links(person, lang="pl"):
     name = (person or {}).get("name") or ""
     if lang == "pl":
         if fw:
-            return {"label": "Filmweb", "url": f"https://www.filmweb.pl/person/{int(fw)}"}
+            return {"label": "Filmweb", "url": f"https://www.filmweb.pl/person/x-{int(fw)}"}
         q = urllib.parse.quote(name)
         return {"label": "Filmweb", "url": f"https://www.filmweb.pl/search#/{q}"}
     if imdb:
@@ -324,8 +324,171 @@ def pick_pair_tmdb(con, key, seed_ids=None, lang="pl", rng=None):
     return None
 
 
+
+def _store_person_photo(con, person, image=None, url=""):
+    """Zapisuje zdjęcie do actor_photos, tylko gdy obrazek jest prawdziwy. Zwraca /actor/id.jpg albo None."""
+    import webscrape
+    img = image
+    if not img and url:
+        img = webscrape.fetch_actor_image(url)
+    if not img or not webscrape.is_real_headshot(img):
+        return None
+    try:
+        pid = db.save_actor_photo(
+            con, key=db.actor_photo_key(person.get("source") or "tmdb", person.get("source_id") or person.get("id"),
+                                        person.get("name")),
+            name=person.get("name") or "", source=person.get("source") or "",
+            source_id=str(person.get("source_id") or person.get("id") or ""),
+            image=img, url=url or "")
+    except Exception:
+        return None
+    return f"/actor/{int(pid)}.jpg" if pid else None
+
+
+def filmweb_lookup(name, con=None):
+    """Filmweb id + ewentualny URL zdjęcia. Wynik cache'owany w tmdb_cache."""
+    import webscrape
+    key = "fw-person:" + db.norm_title(name)
+    if con:
+        hit = cache_get(con, key)
+        if hit is not None:
+            return hit or None
+    try:
+        info = webscrape.filmweb_person(name)
+    except Exception:
+        info = None
+    if con:
+        cache_put(con, key, info or {})
+    return info or None
+
+
+def famous_from_tmdb(con, key, lang="pl", rng=None):
+    rng = rng or random
+    pages = list(range(1, 4))
+    rng.shuffle(pages)
+    people = []
+    seen = set()
+    for page in pages[:2]:
+        try:
+            data = cached_tmdb(con, key, "/person/popular", {"page": page})
+        except Exception:
+            continue
+        for p in data.get("results") or []:
+            if not p.get("id") or not p.get("profile_path") or not p.get("name"):
+                continue
+            if (p.get("popularity") or 0) < 12:
+                continue
+            if p["id"] in seen:
+                continue
+            seen.add(p["id"])
+            people.append(p)
+    rng.shuffle(people)
+    out = []
+    for p in people[:24]:
+        try:
+            det = person_detail(con, key, p["id"], lang)
+        except Exception:
+            continue
+        if not det.get("imdb_id") or not str(det["imdb_id"]).startswith("nm"):
+            continue
+        fw = None
+        if lang == "pl":
+            fw = filmweb_lookup(det["name"], con)
+            if not fw or not fw.get("filmweb_id"):
+                continue
+            det["filmweb_id"] = fw["filmweb_id"]
+        photo = det.get("photo")
+        # ściągnij do naszej bazy, żeby serwować /actor/
+        local = _store_person_photo(con, {"name": det["name"], "source": "tmdb", "source_id": det["id"]}, url=photo)
+        if not local:
+            continue
+        det["photo"] = local
+        det["link"] = ext_links(det, lang)
+        # wymagamy prawdziwego profilu, nie wyszukiwarki
+        if "search" in (det["link"].get("url") or "") or "find/?" in (det["link"].get("url") or ""):
+            continue
+        out.append(det)
+        if len(out) >= 12:
+            break
+    return out
+
+
+def famous_from_local(con, movies, lang="pl"):
+    """Aktorzy z naszej obsady, którzy mają prawdziwe zdjęcie i działający link profilu."""
+    import webscrape
+    out, seen = [], set()
+    for m in movies or []:
+        for c in m.get("cast") or []:
+            if not isinstance(c, dict):
+                continue
+            name = (c.get("name") or "").strip()
+            pid = c.get("photo_id")
+            if not name or not pid:
+                continue
+            row = con.execute("SELECT id, image, source, source_id, url FROM actor_photos WHERE id=?", (int(pid),)).fetchone()
+            if not row or not webscrape.is_real_headshot(row["image"]):
+                continue
+            src, sid = (row["source"] or ""), str(row["source_id"] or "")
+            person = {"kind": "person", "id": int(pid), "name": name, "photo": f"/actor/{int(pid)}.jpg",
+                      "imdb_id": sid if sid.startswith("nm") else "", "filmweb_id": None, "source": src, "source_id": sid}
+            if src == "imdb" and sid.startswith("nm"):
+                person["imdb_id"] = sid
+            if src == "filmweb" and sid.isdigit():
+                person["filmweb_id"] = int(sid)
+            if lang == "pl" and not person["filmweb_id"]:
+                fw = filmweb_lookup(name, con)
+                if fw and fw.get("filmweb_id"):
+                    person["filmweb_id"] = fw["filmweb_id"]
+            if lang == "en" and not person["imdb_id"]:
+                continue
+            if lang == "pl" and not person["filmweb_id"]:
+                continue
+            person["link"] = ext_links(person, lang)
+            if "search" in (person["link"].get("url") or "") or "find/?" in (person["link"].get("url") or ""):
+                continue
+            key = db.norm_title(name)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(person)
+    return out
+
+
+def pick_filmrun_pair(con, movies, lang="pl", rng=None):
+    """Dobiera dwóch znanych aktorów ze zdjęciem i prawdziwym linkiem do profilu (nie wyszukiwarką)."""
+    rng = rng or random
+    ensure_cache_table(con)
+    key = db.tmdb_key()
+    cands = []
+    if key:
+        try:
+            cands = famous_from_tmdb(con, key, lang, rng)
+        except Exception as e:
+            print("Filmrun TMDB pick failed:", e)
+    if len(cands) < 2:
+        local = famous_from_local(con, movies, lang)
+        have = {db.norm_title(p["name"]) for p in cands}
+        for p in local:
+            if db.norm_title(p["name"]) not in have:
+                cands.append(p)
+    cands = [p for p in cands if p.get("photo") and p.get("link") and "search" not in p["link"]["url"]]
+    if len(cands) < 2:
+        if not key:
+            raise LookupError("most_no_tmdb")
+        raise LookupError("most_no_pair")
+    rng.shuffle(cands)
+    start, goal = cands[0], cands[1]
+    start["link"] = ext_links(start, lang)
+    goal["link"] = ext_links(goal, lang)
+    return {"start": start, "goal": goal}
+
+
 def pick_pair(con, movies, lang="pl", rng=None):
-    """Najpierw TMDB, potem lokalny graf obsady. Zwraca dict albo rzuca LookupError."""
+    """Filmrun: dwóch znanych aktorów ze zdjęciem i prawdziwym linkiem. Fallback: stary graf (nieużywany w grze)."""
+    try:
+        return pick_filmrun_pair(con, movies, lang=lang, rng=rng)
+    except LookupError:
+        pass
     key = db.tmdb_key()
     seed = []
     for m in movies or []:

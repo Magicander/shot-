@@ -238,6 +238,7 @@ export function bestAnswer(guess, answers, idxs) {
 // --------------------------------------------------------------------- pokój
 // pack = {pack:{...,questions}, movies:[...], avail:{...}} z eksportu (deploy_cloudflare.py)
 export function newRoom(code, data, rounds, kind = "pack") {
+  if (kind === "filmrun" || kind === "bridge") kind = "most";
   const avail = data.avail || {};
   return {
     code, pack: data.pack, avail, kind,
@@ -336,22 +337,26 @@ export class Game {
     const s = c.mode_time[mode] || c.time;
     if (mode === "aktorzy") { const dur = s || ACTOR_SECONDS * t.cast.length; return [dur, r2(dur / t.cast.length)]; }
     if (mode === "top") return [c.top_own, c.top_guess];
-    if (mode === "most") return [s || c.most_time, null];
+    if (mode === "most") return [null, null];
     const dur = s || DURATION[mode] || 30;
     return [dur, mode === "kadry" ? r2(dur / 3) : null];
   }
 
   isVoice(mode) {
-    const c = this.cfg;
-    return VOICE_MODES.has(mode) && (c.mode_answer[mode] || c.answer) === "voice";
+    // Odpowiedzi na głos przy zgadywaniu tytułów zostały usunięte.
+    // Licytacja ma osobne sędziowanie (timer od przeciwnika + werdykt).
+    return false;
   }
 
   start(opts = {}) {
     const r = this.r;
     if (r.kind !== "most" && !r.modes.length) throw new GameError(400, "no modes");
     if (r.kind === "most") {
+      if (opts.pairs) r.mostPairs = opts.pairs.slice();
       if (opts.pair) r.mostPair = opts.pair;
-      if (!r.mostPair) throw new GameError(400, "Most wymaga klucza TMDB albo bogatszej obsady w pakietach");
+      if (opts.pair && !(r.mostPairs && r.mostPairs.length)) r.mostPairs = [opts.pair];
+      if (!(r.mostPairs && r.mostPairs.length) && !r.mostPair)
+        throw new GameError(400, "Filmrun wymaga klucza TMDB albo aktorów ze zdjęciem i profilem Filmweb/IMDb");
     }
     const used = new Set(); r.plan = [];
     const modes = r.kind === "most" ? Array.from({ length: r.rounds }, () => "most") : this.planModes();
@@ -400,9 +405,9 @@ export class Game {
       return { mode, items: sample(ms, n), sub: "own", own: {}, guess: {}, targets: {} };
     }
     if (mode === "most") {
-      const pair = this.r.mostPair;
+      const pair = (this.r.mostPairs && this.r.mostPairs.length) ? this.r.mostPairs.shift() : this.r.mostPair;
       if (!pair) return null;
-      return { mode, start: pair.start, goal: pair.goal, witness: pair.witness, paths: {}, done_at: {} };
+      return { mode, start: pair.start, goal: pair.goal, started: {}, stopped: {}, winner: null };
     }
     if (mode === "rok") return { mode, movie: this.pick(ms.filter(x => x.year), used) };
     if (mode === "kolejnosc") {
@@ -422,7 +427,7 @@ export class Game {
   }
 
   get mode() { return this.r.task ? this.r.task.mode : null; }
-  duration() { return this.r.task.dur; }
+  duration() { const d = this.r.task && this.r.task.dur; return d == null ? 0 : d; }
   mult() { const r = this.r; return r.plan.length && r.round === r.plan.length - 1 ? this.cfg.final_x : 1; }
 
   beginRound() {
@@ -441,9 +446,9 @@ export class Game {
       Object.assign(t, { sub: "own", own: t.own || {}, guess: {}, targets: {} });
       t.dur = t.own_dur || this.cfg.top_own;
     } else if (t.mode === "most") {
-      t.paths = t.paths || {};
-      t.done_at = t.done_at || {};
-      for (const pid of pl) if (!t.paths[pid]) t.paths[pid] = [{ ...t.start }];
+      t.started = t.started || {};
+      t.stopped = t.stopped || {};
+      t.winner = null;
     } else if (t.voice) Object.assign(t, { claims: [], peek: [] });
     r.version++;
   }
@@ -529,9 +534,8 @@ export class Game {
       const el = n - r.t0, t = r.task, act = this.active();
       if (t.mode === "licytacja") {
         if (t.bidder === null) this.licTick(n);
-        else if (n >= t.type_end) this.endRound();
-        else if (!t.voice && t.found.length >= t.bid) this.endRound();
-        else if (t.voice && t.done_at && n >= t.done_at + LIC_DONE_DELAY) this.endRound();
+        else if (t.sub === "verdict") { if (this._licVerdictReady()) this.endRound(); }
+        else if (t.timer_started && t.type_end && n >= t.type_end) this._licToVerdict();
       } else if (t.voice) {
         for (const c of t.claims) if (c.st === "wait") this.resolve(c);
         if (r.phase !== "round") return;
@@ -544,7 +548,7 @@ export class Game {
           if (el >= this.duration() || (act.length && act.every(p => p.id in t.own))) this.topToGuess();
         } else if (el >= this.duration() || (act.length && act.every(p => p.id in t.guess))) this.endRound();
       } else if (t.mode === "most") {
-        if (el >= this.duration() || (act.length && act.every(p => p.id in (t.done_at || {})))) this.endRound();
+        if (t.winner) this.endRound();
       } else if (el >= this.duration() || (act.length && act.every(p => p.ans !== null || p.got))) this.endRound();
     } else if (r.phase === "reveal" && n - r.t0 >= REVEAL_SECONDS + (["kolejnosc", "licytacja", "top", "most"].includes(this.mode) ? 6 : 0)) {
       this.next();
@@ -560,7 +564,7 @@ export class Game {
     const marks = [];
     if (t.mode === "licytacja") {
       if (t.bidder === null) marks.push(t.turn_end);
-      else { marks.push(t.type_end); if (t.done_at) marks.push(t.done_at + LIC_DONE_DELAY); }
+      else if (t.timer_started && t.type_end && t.sub !== "verdict") marks.push(t.type_end);
     } else {
       const dur = this.duration();
       marks.push(r.t0 + dur);
@@ -599,8 +603,9 @@ export class Game {
     const r = this.r, t = r.task;
     const b = r.players[t.leader] ? t.leader : null;
     if (!b) { t.bidder = ""; return this.endRound(); }
-    t.bidder = b; t.type_end = now() + t.dur;
+    t.bidder = b; t.type_end = null; t.timer_started = false; t.sub = "wait_timer"; t.verdicts = {}; t.success = null;
     this.event("bidwin", this.pname(b), t.bid);
+    r.version++;
   }
 
   endRound() {
@@ -617,7 +622,7 @@ export class Game {
       for (const [pid, p] of Object.entries(r.players)) if (p.ans && p.ans.length)
         pts[pid] = 250 * p.ans.filter((a, i) => a === right[i]).length * x;
     } else if (t.mode === "licytacja" && t.bidder) {
-      t.success = t.found.length >= t.bid;
+      if (t.success == null) t.success = false;
       for (const pid of Object.keys(r.players)) {
         if (t.success) pts[pid] = pid === t.bidder ? 200 * t.bid * x : 0;
         else pts[pid] = pid === t.bidder ? 0 : 100 * t.bid * x;
@@ -629,23 +634,8 @@ export class Game {
         pts[pid] = (guess && truth) ? topScore(guess, truth) * x : 0;
       }
     } else if (t.mode === "most") {
-      const finished = [];
-      for (const [pid, at] of Object.entries(t.done_at || {})) {
-        const path = (t.paths || {})[pid] || [];
-        const last = path[path.length - 1];
-        if (last && last.kind === "person" && Number(last.id) === Number(t.goal.id))
-          finished.push([at, pid, path.filter(n => n.kind === "movie").length]);
-      }
-      finished.sort((a, b) => a[0] - b[0]);
-      const firstPid = finished.length ? finished[0][1] : null;
-      const mostScore = (n, ok, first) => ok ? Math.max(100, (8 - n) * 200) + (first ? 100 : 0) : 0;
-      const pathMovies = pth => (pth || []).filter(x => x.kind === "movie").length;
-      for (const pid of Object.keys(r.players)) {
-        const path = (t.paths || {})[pid] || [];
-        const last = path[path.length - 1];
-        const reached = !!(last && last.kind === "person" && Number(last.id) === Number(t.goal.id));
-        pts[pid] = mostScore(pathMovies(path), reached, pid === firstPid) * x;
-      }
+      const w = t.winner;
+      for (const pid of Object.keys(r.players)) pts[pid] = pid === w ? 1000 * x : 0;
     }
     for (const [pid, p] of Object.entries(r.players)) {
       if (!TITLE_MODES.has(t.mode)) { p.score += pts[pid]; p.got = pts[pid] ? { points: pts[pid] } : null; }
@@ -696,6 +686,75 @@ export class Game {
     r.t0 = now();
     r.version++;
     if (!Object.keys(t.targets).length) this.endRound();
+  }
+
+
+  licOthers() {
+    const b = this.r.task.bidder;
+    return this.onlineIds().filter(pid => pid !== b);
+  }
+  _licToVerdict() {
+    const t = this.r.task;
+    if (t.sub === "verdict") return;
+    t.sub = "verdict";
+    t.verdicts = t.verdicts || {};
+    this.r.version++;
+  }
+  _licVerdictReady() {
+    const t = this.r.task;
+    const others = this.licOthers();
+    const voters = others.length ? others : (t.bidder && this.r.players[t.bidder] ? [t.bidder] : []);
+    const votes = t.verdicts || {};
+    return voters.length > 0 && voters.every(v => v in votes);
+  }
+  licStartTimer(p) {
+    const t = this.r.task;
+    if (!t || t.mode !== "licytacja" || !t.bidder || t.timer_started) return { ok: false };
+    if (t.sub && !["wait_timer", "type"].includes(t.sub)) return { ok: false };
+    const others = this.licOthers();
+    if (others.length && p.id === t.bidder) return { ok: false, not_opponent: true };
+    if (others.length && !others.includes(p.id)) return { ok: false };
+    t.timer_started = true;
+    t.sub = "timed";
+    t.type_end = now() + (t.dur || this.cfg.lic_answer);
+    t.timer_by = p.id;
+    this.r.version++;
+    return { ok: true };
+  }
+  licVerdict(p, yes) {
+    const t = this.r.task;
+    if (!t || t.sub !== "verdict") return { ok: false };
+    let others = this.licOthers();
+    if (!others.length && this.solo() && p.id === t.bidder) others = [t.bidder];
+    if (!others.includes(p.id)) return { ok: false };
+    t.verdicts = t.verdicts || {};
+    t.verdicts[p.id] = !!yes;
+    if (this._licVerdictReady()) {
+      const votes = others.map(v => t.verdicts[v]);
+      t.success = votes.filter(Boolean).length * 2 > votes.length;
+      this.endRound();
+    } else this.r.version++;
+    return { ok: true };
+  }
+  mostStart(p) {
+    const t = this.r.task;
+    if (!t || t.winner || (t.stopped || {})[p.id]) return { ok: false };
+    t.started = t.started || {};
+    t.started[p.id] = now();
+    this.r.version++;
+    return { ok: true, link: (t.start && t.start.link) || {} };
+  }
+  mostStop(p) {
+    const t = this.r.task;
+    if (t.winner) return { ok: false, late: true };
+    if (!((t.started || {})[p.id])) return { ok: false, too_soon: true };
+    t.stopped = t.stopped || {};
+    t.stopped[p.id] = now();
+    t.winner = p.id;
+    this.event("guess", p.name, 1000);
+    this.r.version++;
+    this.endRound();
+    return { ok: true, winner: true };
   }
 
   mostStepLocal(p, d) {
@@ -783,6 +842,11 @@ export class Game {
     }
     if (mode === "licytacja") {
       const ans = t.q.answers;
+      if (t.bidder !== null) {
+        if (d.start_timer) return this.licStartTimer(p);
+        if ("verdict" in d || d.success != null) return this.licVerdict(p, d.verdict != null ? d.verdict : d.success);
+        return { ok: false };
+      }
       if (t.bidder === null) {
         this.tick();
         if (t.bidder !== null || r.phase !== "round") return { ok: false };
@@ -835,20 +899,9 @@ export class Game {
       return { ok: true };
     }
     if (mode === "most") {
-      const prep = this.mostStepLocal(p, d);
-      if (prep.ok !== "check") return prep;
-      const graph = this._localGraph || null;
-      let ok = false, nxt = prep.nxt;
-      if (graph) {
-        const a = prep.path[prep.path.length - 1];
-        const list = graph[`${a.kind}:${a.id}`] || [];
-        ok = list.some(n => n[0] === nxt.kind && Number(n[1]) === Number(nxt.id));
-        if (ok) {
-          const meta = (graph._meta && (graph._meta[`${nxt.kind}:${nxt.id}`] || graph._meta[[nxt.kind, Number(nxt.id)]])) || {};
-          nxt = { ...nxt, ...meta };
-        }
-      }
-      return this.applyMostStep(p, prep.path, nxt, ok);
+      if (d.start || d.go) return this.mostStart(p);
+      if (d.stop) return this.mostStop(p);
+      return { ok: false };
     }
     return { ok: false };
   }
@@ -912,9 +965,19 @@ export class Game {
           target: target ? { id: target, name: this.pname(target) } : null,
           top_n: t.items.length, score_hint: "n-d" });
       } else if (mode === "most") {
-        const path = (me && (t.paths || {})[me.id]) || [t.start];
-        Object.assign(out, { start: t.start, goal: t.goal, path, current: path[path.length - 1],
-          finished: !!(me && (t.done_at || {})[me.id]) });
+        const started = !!(me && (t.started || {})[me.id]);
+        Object.assign(out, {
+          start: t.start, goal: t.goal, started,
+          can_start: !!(me && !started && !t.winner),
+          can_stop: !!(me && started && !t.winner),
+          winner: t.winner || null,
+          winner_name: t.winner ? this.pname(t.winner) : null,
+          returned: Object.keys(t.stopped || {}).map(pid => this.pname(pid)).filter(Boolean),
+          started_names: Object.keys(t.started || {}).map(pid => this.pname(pid)).filter(Boolean),
+          link: (t.start && t.start.link) || {},
+        });
+        out.duration = null;
+        out.left = null;
       } else if (mode === "rok") {
         Object.assign(out, { movie: Game.mview(t.movie, lang, false), img: Game.thumb(t.movie), mine: me ? me.ans : null });
       } else if (mode === "kolejnosc") {
@@ -950,15 +1013,21 @@ export class Game {
             duration: t.step, left: r1(t.turn_end - n), elapsed: r2(t.step - (t.turn_end - n)),
           });
         } else {
-          const cc = this.canCount(me);
-          const lj = this.cfg.judge === "vote" ? null : this.licJudge();
+          const others = this.licOthers();
+          const sub = t.sub || (t.timer_started ? "timed" : "wait_timer");
+          const canTimer = !!(me && !t.timer_started && (others.includes(me.id) || (!others.length && me.id === t.bidder)));
+          const canVerdict = !!(me && sub === "verdict" && (others.includes(me.id) || (!others.length && me.id === t.bidder)));
+          let left = null;
+          if (t.timer_started && t.type_end && sub === "timed") left = r1(t.type_end - n);
           Object.assign(out, {
-            sub: "type", bidder: t.bidder, bidder_name: this.pname(t.bidder) || "?",
-            duration: t.dur, left: r1(t.type_end - n), elapsed: r2(t.dur - (t.type_end - n)),
-            found: t.found.map(f => Game.fview(f, lang)), count: t.found.length,
-            misses: t.misses || 0, can_count: cc, counter_name: this.pname(lj),
-            closing: t.done_at ? r1(t.done_at + LIC_DONE_DELAY - n) : null,
-            answers: cc ? ans.map((a, k) => ({ i: k, title: a.text, pl_title: a.pl || "", found: t.found.some(f => f.i === k) })) : null,
+            sub, bidder: t.bidder, bidder_name: this.pname(t.bidder) || "?",
+            duration: t.timer_started ? t.dur : null,
+            left,
+            elapsed: (t.timer_started && left != null) ? r2((t.dur || 0) - (left || 0)) : 0,
+            can_start_timer: canTimer, can_verdict: canVerdict,
+            my_verdict: me && (t.verdicts || {})[me.id],
+            verdicts: others.map(pid => ({ id: pid, name: this.pname(pid), vote: (t.verdicts || {})[pid] })),
+            timer_by: this.pname(t.timer_by),
           });
         }
       }
@@ -993,18 +1062,22 @@ export class Game {
     }
     if (mode === "most") {
       ans.start = t.start; ans.goal = t.goal;
-      ans.paths = players.map(p => {
-        const path = (t.paths || {})[p.id] || [];
-        const last = path[path.length - 1];
-        const reached = !!(last && last.kind === "person" && Number(last.id) === Number(t.goal.id));
-        return { id: p.id, name: p.name, path, movies: path.filter(n => n.kind === "movie").length, reached, points: p.history.length ? p.history[p.history.length - 1] : 0 };
-      });
+      ans.winner = t.winner || null;
+      ans.winner_name = t.winner ? this.pname(t.winner) : null;
+      ans.results = players.map(p => ({
+        id: p.id, name: p.name,
+        started: !!(t.started || {})[p.id],
+        stopped: !!(t.stopped || {})[p.id],
+        won: p.id === t.winner,
+        points: p.history.length ? p.history[p.history.length - 1] : 0,
+      }));
     }
     if (mode === "licytacja") {
       const got = new Set(t.found.map(f => f.i));
       Object.assign(ans, {
         bidder_name: this.pname(t.bidder || ""), bid: t.bid, success: t.success || false,
         total: t.q.answers.length, prompt: Game.prompt(t.q, lang),
+        answers: t.q.answers.map(a => Game.fview({ text: a.text, pl: a.pl || "" }, lang)),
         missed: t.q.answers.map((a, k) => [a, k]).filter(([, k]) => !got.has(k)).map(([a]) => Game.fview({ text: a.text, pl: a.pl || "" }, lang)).slice(0, 40),
         bids: t.bids.filter(([, b]) => b).map(([pid, b]) => ({ name: this.pname(pid) || "?", bid: b })),
         found: t.found.filter(f => f.i !== null).map(f => Game.fview(f, lang)), count: t.found.length,

@@ -52,10 +52,52 @@ def is_image(data):
     return data[:3] == b"\xff\xd8\xff" or data[:8] == b"\x89PNG\r\n\x1a\n" or data[:4] == b"RIFF" and data[8:12] == b"WEBP"
 
 
+
+PLACEHOLDER_URL = re.compile(
+    r"nophoto|noname|placeholder|empty|default.?avatar|/front/assets/|/assets/images/t\.gif"
+    r"|transparent\.gif|blank\.gif|no[_-]?pic|missing", re.I)
+
+
+def is_placeholder_url(url):
+    """True, gdy URL to pustka albo typowy placeholder (np. Filmweb t.gif), nie prawdziwe zdjęcie."""
+    if not url or url in ("p", "#") or str(url).startswith("data:"):
+        return True
+    return bool(PLACEHOLDER_URL.search(url))
+
+
+def is_real_headshot(data):
+    """Czy bajty to prawdziwy obrazek portretu, nie placeholder i nie ułomek."""
+    if not data or len(data) < 800 or not is_image(data):
+        return False
+    try:
+        from io import BytesIO
+        from PIL import Image
+        im = Image.open(BytesIO(data))
+        w, h = im.size
+        if w < 40 or h < 40:
+            return False
+    except Exception:
+        pass
+    return True
+
+
+def _image_headers(url):
+    extra = {}
+    if "fwcdn.pl" in url or "filmweb.pl" in url:
+        extra["Referer"] = "https://www.filmweb.pl/"
+    elif "media-amazon.com" in url or "imdb.com" in url or "amazon.com" in url:
+        extra["Referer"] = "https://www.imdb.com/"
+    elif "image.tmdb.org" in url:
+        extra["Referer"] = "https://www.themoviedb.org/"
+    return extra
+
+
 def fetch_image(url):
     if not re.match(r"^https?://", url or ""):
         raise ValueError("bad url")
-    data, ctype = http(url, accept="image/avif,image/webp,image/*,*/*;q=0.8", raw=True)
+    if is_placeholder_url(url):
+        raise ValueError("placeholder")
+    data, ctype = http(url, accept="image/avif,image/webp,image/*,*/*;q=0.8", raw=True, extra=_image_headers(url))
     if not is_image(data):
         raise ValueError("not an image (" + (ctype or "?") + ")")
     return data
@@ -146,6 +188,31 @@ FW = "https://www.filmweb.pl"
 
 def fw_json(path):
     return json.loads(http(FW + path, accept="application/json", extra={"x-locale": "pl"}))
+
+
+def filmweb_person(name):
+    """Szuka osoby na Filmwebie po imieniu. Zwraca {filmweb_id, name, photo_url} albo None."""
+    q = (name or "").strip()
+    if not q:
+        return None
+    try:
+        res = fw_json("/api/v1/live/search?query=" + urllib.parse.quote(q))
+    except Exception:
+        return None
+    want = db.norm_title(q)
+    for h in res.get("searchHits") or []:
+        if h.get("type") != "person" or not h.get("id"):
+            continue
+        try:
+            info = fw_json(f"/api/v1/person/{int(h['id'])}/info")
+        except Exception:
+            continue
+        if db.norm_title(info.get("name") or "") != want:
+            continue
+        path = (info.get("poster") or {}).get("path") or ""
+        url = _abs_fw_photo("https://fwcdn.pl/ppo" + path) if path else ""
+        return {"filmweb_id": int(info.get("id") or h["id"]), "name": info.get("name") or q, "photo_url": url}
+    return None
 
 
 def filmweb_find(title, year, pl="", known=None):
@@ -242,9 +309,11 @@ def _abs_fw_photo(src):
         src = "https://fwcdn.pl" + src if "fwcdn" in src or src.startswith("/pp") else FW + src
     if not re.match(r"^https?://", src):
         return ""
-    if re.search(r"nophoto|noname|placeholder|empty|default.?avatar", src, re.I):
+    if is_placeholder_url(src):
         return ""
-    # mały wariant rozmiaru ($ albo cyfra w ścieżce fwcdn)
+    # prawdziwe zdjęcia osób są w /ppo/ albo /pp/
+    if "fwcdn.pl" in src and not re.search(r"/pp[o]?/", src):
+        return ""
     src = src.replace("$", "2")
     return src
 
@@ -343,47 +412,85 @@ def tmdb_person_photo(name):
     return {"photo_url": tmdb.IMG_FACE + hit["profile_path"], "source": "tmdb", "source_id": str(hit.get("id") or "")}
 
 
-def fetch_actor_image(url):
+def fetch_actor_image(url, reason=None):
+    """Pobiera zdjęcie. Zwraca bajty albo None. reason (lista) dostaje krótki powód porażki."""
+    def why(msg):
+        if reason is not None:
+            reason.append(msg)
+        return None
     url = small_photo_url(url)
-    if not re.match(r"^https?://", url or ""):
-        return None
+    if is_placeholder_url(url) or not re.match(r"^https?://", url or ""):
+        return why("placeholder" if url else "brak adresu")
     try:
-        return fetch_image(url)
-    except Exception:
-        return None
+        data = fetch_image(url)
+    except Blocked as e:
+        return why(f"blokada ({e})")
+    except Exception as e:
+        return why(str(e) or "pobieranie nieudane")
+    if not is_real_headshot(data):
+        return why("to nie jest prawdziwe zdjęcie")
+    return data
+
+
+def _photo_row_ok(con, pid):
+    if not pid:
+        return False
+    row = con.execute("SELECT image FROM actor_photos WHERE id=?", (int(pid),)).fetchone()
+    return bool(row and is_real_headshot(row["image"]))
 
 
 def attach_photo(con, actor, source, log=None):
-    """Pobiera i zapisuje zdjęcie (z URL przy obsadzie albo z TMDB po imieniu). Zwraca photo_id albo None."""
-    if actor.get("photo_id"):
-        return actor["photo_id"]
+    """Pobiera i zapisuje zdjęcie (z URL przy obsadzie albo z TMDB po imieniu). Zwraca photo_id albo None.
+    photo_id jest ustawiane tylko gdy w bazie leży prawdziwy obrazek (nie placeholder)."""
+    name = (actor.get("name") or "").strip()
+    existing = actor.get("photo_id")
+    if existing and _photo_row_ok(con, existing):
+        return int(existing)
     url = actor.get("photo_url") or ""
     src = source or ""
     sid = actor.get("source_id") or ""
-    key = db.actor_photo_key(src, sid, actor.get("name"))
-    name_key = db.actor_photo_key("", "", actor.get("name") or "")
+    key = db.actor_photo_key(src, sid, name)
+    name_key = db.actor_photo_key("", "", name)
     for k in (key, name_key):
         if not k:
             continue
-        row = con.execute("SELECT id FROM actor_photos WHERE key=?", (k,)).fetchone()
-        if row:
+        row = con.execute("SELECT id, image FROM actor_photos WHERE key=?", (k,)).fetchone()
+        if row and is_real_headshot(row["image"]):
             return row["id"]
-    img = fetch_actor_image(url) if url else None
+    reasons = []
+    img = fetch_actor_image(url, reasons) if url and not is_placeholder_url(url) else None
+    if not img and (not url or is_placeholder_url(url)):
+        reasons.append("brak fotki u źródła")
     if not img:
-        fb = tmdb_person_photo(actor.get("name") or "")
+        fb = tmdb_person_photo(name)
         if fb:
-            img = fetch_actor_image(fb["photo_url"])
+            why = []
+            img = fetch_actor_image(fb["photo_url"], why)
             if img:
                 url, src, sid = fb["photo_url"], fb["source"], fb["source_id"]
+                reasons = []
+            else:
+                reasons.append("TMDB: " + (why[-1] if why else "nie pobrano"))
+        elif not db.tmdb_key():
+            reasons.append("brak klucza TMDB (nie było zapasu)")
+        else:
+            reasons.append("TMDB nie ma zdjęcia tej osoby")
     if not img:
+        if log:
+            log(f"    photo {name or '?'}: {'; '.join(reasons) or 'nie zapisano'}")
         return None
     try:
-        return db.save_actor_photo(
-            con, key=db.actor_photo_key(src, sid, actor.get("name")),
-            name=actor.get("name") or "", source=src, source_id=sid, image=img, url=url or "")
+        pid = db.save_actor_photo(
+            con, key=db.actor_photo_key(src, sid, name),
+            name=name, source=src, source_id=sid, image=img, url=url or "")
+        if pid and _photo_row_ok(con, pid):
+            return pid
+        if log:
+            log(f"    photo {name}: zapisano, ale obrazek jest niepoprawny — nie ustawiam photo_id")
+        return None
     except Exception as e:
         if log:
-            log(f"    photo {actor.get('name')}: {e}")
+            log(f"    photo {name}: {e}")
         return None
 
 
@@ -442,9 +549,12 @@ def fill_photos(con, movie, source="auto", n=DEFAULT_N, log=None):
     changed = False
     ok = miss = 0
     for c in rows:
-        if c.get("photo_id"):
+        if c.get("photo_id") and _photo_row_ok(con, c.get("photo_id")):
             ok += 1
             continue
+        if c.get("photo_id") and not _photo_row_ok(con, c.get("photo_id")):
+            c.pop("photo_id", None)
+            changed = True
         hit = lookup.get(db.norm_title(c.get("name") or ""))
         probe = dict(hit or {"name": c.get("name")})
         if not probe.get("name"):

@@ -103,12 +103,13 @@ export class Room extends DurableObject {
 
   async create(code, packId, rounds, modes, name, settings = null, opts = {}) {
     if (this.room) return { error: "exists" };
-    const kind = (opts && opts.kind) || (packId === "most" ? "most" : packId === "custom" ? "custom" : "pack");
+    let kind = (opts && opts.kind) || (packId === "most" || packId === "filmrun" ? "most" : packId === "custom" ? "custom" : "pack");
+    if (kind === "filmrun" || kind === "bridge") kind = "most";
     let data;
     if (kind === "most") {
       const movies = await this.loadAllMovies();
       data = {
-        pack: { id: "most", slug: "most", name: "Most", name_en: "Bridge", color: "#F26B1D", questions: [], modes_off: "" },
+        pack: { id: "most", slug: "filmrun", name: "Filmrun", name_en: "Filmrun", color: "#F26B1D", questions: [], modes_off: "" },
         movies,
         avail: { most: { ok: true, have: 1, need: 1, reason: null } },
       };
@@ -204,13 +205,18 @@ export class Room extends DurableObject {
         else if (m.a === "start" && ["lobby", "final"].includes(r.phase)) {
           if (r.kind === "most") {
             try {
-              const pair = await pickPair(this.movies, this.env.TMDB_API_KEY, a.lang);
+              const { pickFilmrunPair } = await import("./most.js");
+              const pick = pickFilmrunPair || pickPair;
+              const pairs = [];
+              for (let i = 0; i < r.rounds; i++) {
+                pairs.push(await pick(this.movies, this.env.TMDB_API_KEY, a.lang));
+              }
               this.localGraph = localGraph(this.movies);
               g._localGraph = this.localGraph;
-              g.start({ pair });
+              g.start({ pairs, pair: pairs[0] });
             } catch (e) {
               const msg = (e.key === "most_no_tmdb" || e.message === "most_no_tmdb")
-                ? "Most wymaga klucza TMDB albo bogatszej obsady w pakietach"
+                ? "Filmrun wymaga klucza TMDB albo aktorów ze zdjęciem i profilem Filmweb/IMDb"
                 : "Nie udało się dobrać pary aktorów";
               throw new GameError(400, msg);
             }
@@ -261,26 +267,7 @@ export class Room extends DurableObject {
   }
 
   async mostGuess(g, p, b, lang) {
-    const prep = g.mostStepLocal(p, b);
-    if (prep.ok !== "check") return prep;
-    g._localGraph = g._localGraph || localGraph(this.movies);
-    let ok = false, nxt = prep.nxt;
-    const key = this.env.TMDB_API_KEY;
-    if (key) {
-      ok = await tmdbIsAdjacent(key, prep.path[prep.path.length - 1], nxt, lang);
-      if (ok && !nxt.name && !nxt.title) {
-        try {
-          const neigh = await tmdbAdjacent(key, prep.path[prep.path.length - 1], lang);
-          const hit = neigh.find(n => n.kind === nxt.kind && Number(n.id) === Number(nxt.id));
-          if (hit) nxt = hit;
-        } catch {}
-      }
-    }
-    if (!ok) {
-      ok = isAdjacentLocal(g._localGraph, prep.path[prep.path.length - 1], nxt);
-      if (ok) nxt = enrichLocal(g._localGraph, nxt);
-    }
-    return g.applyMostStep(p, prep.path, nxt, ok);
+    return g.answer(p, b, lang);
   }
 }
 

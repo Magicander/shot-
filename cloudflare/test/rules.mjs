@@ -24,6 +24,7 @@ function adv(g, s, off = []) {
   g.tick();
 }
 const st = (g, p) => g.state(p, "pl");
+let A, B, C, t;
 
 console.log("ustawienia");
 const DEF = { time: 0, mode_time: {}, order: "mix", per_mode: false, mode_rounds: {}, answer: "type", mode_answer: {}, judge: "rotate", lic_answer: 30, lic_bid: 10, hints: true, final_x: 1, top_n: 5, top_own: 45, top_guess: 45, most_time: 90 };
@@ -48,65 +49,22 @@ check(s.duration === 45 && s.settings.time === 20, "stan pokazuje czas rundy i u
 let [g2] = room(1, {}, ["kadry"]); g2.start();
 check(g2.r.plan[0].dur === 45 && g2.r.plan[0].step === 15, "bez nadpisania: domyślne 3x15 s");
 
-console.log("na głos: sędzia rotuje");
-let A, B, C;
-[g, [A, B, C]] = room(3, { answer: "voice", judge: "rotate" }, ["zoom"]);
-g.start();
-s = st(g, A);
-check(s.voice && s.judge === A.id && s.solution.title, "runda 1: sędzia A widzi odpowiedź");
-check(st(g, B).solution === null && st(g, B).can_claim, "gracz nie widzi odpowiedzi, może zgłosić");
-check(!g.answer(A, { claim: true }, "pl").ok, "sędzia nie zgłasza się");
-adv(g, 3);
-check(g.answer(B, { claim: true }, "pl").ok, "B: Mam!");
-adv(g, 2);
-check(g.answer(C, { claim: true }, "pl").ok, "C: Mam! (druga w kolejce)");
-check(eq(st(g, A).claims.map(c => c.name), ["B", "C"]), "kolejność zgłoszeń");
-check(!g.answer(C, { judge: B.id, verdict: true }, "pl").ok, "C nie może oceniać");
-check(g.answer(A, { judge: B.id, verdict: true }, "pl").state === "ok", "A: poprawna");
-check(B.got.points === Math.trunc(1000 * (1 - .7 * 3 / 30)) + 100, "punkty za czas zgłoszenia + bonus");
-g.answer(A, { judge: C.id, verdict: false }, "pl");
-check(C.wrong === 1 && st(g, C).can_claim, "błędna -> można zgłosić ponownie");
-g.answer(C, { claim: true }, "pl"); g.answer(A, { judge: C.id, verdict: true }, "pl");
-check(g.r.phase === "reveal", "wszyscy zgadujący trafili -> koniec rundy");
-g.next();
-check(st(g, A).judge === B.id, "runda 2: sędzia B");
-adv(g, 1, ["B"]); adv(g, 25, ["B"]);
-check(st(g, A).judge === A.id, "rozłączony sędzia -> gospodarz");
-g.next(); g.next();
-check(st(g, A).judge === C.id, "runda 3: sędzia C");
-adv(g, 2);
-g.answer(A, { claim: true }, "pl");
-adv(g, 30);
-check(g.r.phase === "round", "po czasie zgłoszenie czeka na sędziego");
-check(g.nextWake() > T, "alarm DO ustawiony na koniec czasu sędziego");
-adv(g, JUDGE_GRACE);
-check(g.r.phase === "reveal" && !A.got, "timeout sędziego: zgłoszenie przepada");
-
-console.log("na głos: gospodarz sędziuje");
-[g, [A, B]] = room(2, { answer: "voice", judge: "host" }, ["kadry"]);
-g.start(); g.next(); g.next();
-check(st(g, B).judge === A.id, "sędzią zawsze gospodarz");
-
-console.log("na głos: głosowanie");
-[g, [A, B, C]] = room(3, { answer: "voice", judge: "vote" }, ["plakat"]);
-g.start();
-s = st(g, A);
-check(s.judge === null && s.can_claim && s.can_peek && s.solution === null, "wszyscy grają, odpowiedź ukryta");
-g.answer(A, { claim: true }, "pl");
-g.answer(B, { judge: A.id, verdict: true }, "pl");
-check(!A.got, "1 z 2 głosów to jeszcze nie większość");
-g.answer(C, { judge: A.id, verdict: true }, "pl");
-check(A.got && st(g, A).solution, "większość: poprawna, trafiony widzi odpowiedź");
-g.answer(B, { claim: true }, "pl");
-g.answer(A, { judge: B.id, verdict: false }, "pl");
-check(B.wrong === 1 && !g.pending(B.id), "połowa na nie = większości na tak już nie będzie: błędna");
-g.answer(C, { peek: true }, "pl");
-check(st(g, C).solution && !st(g, C).can_claim, "podgląd odpowiedzi = koniec zgadywania");
+console.log("zgadywanie tytułów: bez sędziego, gra sprawdza wpis");
+{
+  const [gg, [AA, BB]] = room(2, { answer: "voice", judge: "rotate" }, ["zoom"]);
+  gg.start();
+  s = st(gg, AA);
+  check(!s.voice && !gg.isVoice("zoom") && !gg.isVoice("kadry"), "tryby tytułów nie są na głos");
+  check(!s.can_claim, "brak zgłoszeń Mam!");
+  check(!gg.answer(AA, { claim: true }, "pl").correct && !AA.got, "zgłoszenie głosowe nie zalicza tytułu");
+  const typed = gg.answer(AA, { text: "Movie " + gg.r.task.movie.id }, "pl");
+  check(typed.correct && AA.got.points > 0, "wpisany tytuł jest sprawdzany przez grę");
+}
 
 console.log("licytacja po kolei");
 [g, [A, B, C]] = room(3, { lic_bid: 10, lic_answer: 30 }, ["licytacja"]);
 g.start();
-let t = g.r.task;
+t = g.r.task;
 t.order = [B.id, C.id, A.id];
 s = st(g, A);
 check(s.sub === "bid" && s.turn === B.id && s.starter === "B", "losowy gracz zaczyna i jest pokazany");
@@ -122,11 +80,20 @@ check(t.passed.includes(A.id) && st(g, A).turn === B.id, "timeout A = pas");
 g.answer(B, { pass: true }, "pl");
 check(t.bidder === C.id && t.bid === 3, "zostaje jeden: wygrywa C z 3");
 s = st(g, C);
-check(s.sub === "type" && s.duration === 30 && s.left >= 29 && s.left <= 30, "zwycięzca ma 30 s");
-for (const x of ["Answer 0", "Answer 0", "Answer 1"]) g.answer(C, { text: x }, "pl");
-check(t.found.length === 2, "wpisywanie: automatyczne sprawdzanie, powtórka odrzucona");
+check(s.sub === "wait_timer" && !s.timer_started && s.duration == null, "timer nie startuje sam");
+check(!g.answer(C, { start_timer: true }, "pl").ok, "licytujący nie puszcza timera");
+check(st(g, A).can_start_timer && st(g, B).can_start_timer, "przeciwnicy mogą puścić timer");
+check(g.answer(A, { start_timer: true }, "pl").ok, "A puszcza timer");
+s = st(g, C);
+check(s.sub === "timed" && s.duration === 30 && s.left >= 29 && s.left <= 30, "po puszczeniu jest 30 s");
+check(!g.answer(B, { start_timer: true }, "pl").ok, "drugi raz nie startuje");
 adv(g, 31);
-check(g.r.phase === "reveal" && !t.success && A.history.at(-1) === 300, "czas minął: pozostali dostają 100 x deklaracja");
+check(g.r.phase === "round" && g.r.task.sub === "verdict", "po czasie werdykt, runda jeszcze trwa");
+check(st(g, A).can_verdict && st(g, B).can_verdict && !st(g, C).can_verdict, "oceniają pozostali, nie licytujący");
+g.answer(A, { verdict: false }, "pl");
+check(g.r.phase === "round", "jeden głos jeszcze nie kończy");
+g.answer(B, { verdict: false }, "pl");
+check(g.r.phase === "reveal" && !t.success && A.history.at(-1) === 300, "werdykt nie: pozostali dostają 100 x deklaracja");
 
 [g, [A, B]] = room(2, {}, ["licytacja"]); g.start();
 let cur = g.r.task.order[0];
@@ -137,21 +104,17 @@ g.answer(g.r.players[g.r.task.order[0]], { pass: true }, "pl");
 g.answer(g.r.players[g.r.task.order[1]], { pass: true }, "pl");
 check(g.r.phase === "reveal" && g.r.task.bidder === "", "wszyscy spasowali: brak licytującego");
 
-console.log("licytacja na głos");
-[g, [A, B, C]] = room(3, { answer: "voice", judge: "rotate" }, ["licytacja"]);
+console.log("licytacja: werdykt sukcesu");
+[g, [A, B, C]] = room(3, { lic_bid: 10, lic_answer: 10 }, ["licytacja"]);
 g.start(); t = g.r.task;
 t.order = [A.id, B.id, C.id];
+t.turn = 0;
 g.answer(A, { bid: 2 }, "pl"); g.answer(B, { pass: true }, "pl"); g.answer(C, { pass: true }, "pl");
-check(t.bidder === A.id, "A licytuje");
-s = st(g, B);
-check(s.can_count && s.counter_name === "B" && s.answers, "sędzia rundy (nie licytujący) liczy, widzi listę");
-check(!st(g, C).can_count && !g.answer(A, { count: 1 }, "pl").ok, "inni nie liczą");
-g.answer(B, { count: 1 }, "pl"); g.answer(B, { count: 1 }, "pl"); g.answer(B, { count: -1 }, "pl");
-check(t.found.length === 1, "+1 / cofnij");
-g.answer(B, { mark: 4 }, "pl");
-check(t.found.length === 2 && g.r.phase === "round" && st(g, B).closing, "osiągnięto deklarację: chwila na cofnięcie");
-adv(g, LIC_DONE_DELAY + .1);
-check(g.r.phase === "reveal" && t.success && A.history.at(-1) === 400, "sukces: 200 x deklaracja");
+check(t.bidder === A.id && st(g, A).sub === "wait_timer", "A licytuje, czeka na timer");
+g.answer(B, { start_timer: true }, "pl");
+adv(g, 11);
+g.answer(B, { verdict: true }, "pl"); g.answer(C, { verdict: true }, "pl");
+check(g.r.phase === "reveal" && t.success && A.history.at(-1) === 400, "werdykt tak: 200 x deklaracja");
 
 console.log("mnożnik finału");
 [g, [A]] = room(1, { final_x: 2, order: "fixed" }, ["zoom"]);
@@ -226,5 +189,36 @@ g.answer(A, { order: ids.slice().reverse() }, "pl");
 g.answer(B, { order: ids }, "pl");
 check(g.r.phase === "reveal", "Top: po zgadywaniu odsłona");
 check(A.history.at(-1) === 25 && B.history.at(-1) === 25, "Top: oboje zgadli dokładnie, 25 pkt");
+
+
+console.log("Filmrun: lobby bez czasu, Start/Stop");
+{
+  const r = newRoom("FR01", { pack: { id: "most", name: "Filmrun", name_en: "Filmrun", slug: "filmrun", color: "#F26B1D", questions: [], modes_off: "" }, avail: { most: { ok: true, have: 1, need: 1, reason: null } } }, 2, "filmrun");
+  check(r.kind === "most", "kind filmrun aliasuje most");
+  const g = new Game(r, clone(FX.movies));
+  const A = g.addPlayer("A"), B = g.addPlayer("B");
+  const pair = {
+    start: { name: "Ada", photo: "/actor/1.jpg", link: { label: "Filmweb", url: "https://www.filmweb.pl/person/x-1" } },
+    goal: { name: "Ben", photo: "/actor/2.jpg", link: { label: "Filmweb", url: "https://www.filmweb.pl/person/x-2" } },
+  };
+  r.plan = [0, 1].map(() => ({ mode: "most", start: pair.start, goal: pair.goal, started: {}, stopped: {}, winner: null, dur: null, step: null }));
+  r.round = 0;
+  g.beginRound();
+  let s = g.state(A, "pl");
+  check(s.duration == null && s.left == null, "Filmrun: brak limitu czasu");
+  check(s.can_start && !s.can_stop && s.start.name === "Ada", "przed Startem można tylko wystartować");
+  check(!g.answer(A, { stop: true }, "pl").ok, "Stop przed Startem odrzucony");
+  const stt = g.answer(A, { start: true }, "pl");
+  check(stt.ok && (stt.link || {}).url.includes("filmweb.pl/person/x-1"), "Start zwraca link profilu");
+  check(g.state(A, "pl").can_stop && !g.state(B, "pl").can_stop, "tylko ten, kto wystartował, może Stop");
+  check(!g.answer(B, { stop: true }, "pl").ok, "B bez Startu nie wygrywa");
+  check(g.answer(A, { stop: true }, "pl").ok && g.r.task.winner === A.id, "pierwszy Stop po Starcie wygrywa");
+  check(g.r.phase === "reveal" && A.history.at(-1) === 1000 && B.history.at(-1) === 0, "zwycięzca rundy: 1000 pkt");
+}
+{
+  const js = readFileSync(new URL("../../static/game.js", import.meta.url), "utf8");
+  check(js.includes("qmark") && js.includes("isCustom"), "karta Custom ma znak zapytania, nie kolaż kadrów");
+  check(js.includes("titleHints") && js.includes("titleMatches"), "podpowiedzi tytułów jak we Framed");
+}
 
 console.log(`\nOK: ${OK} sprawdzeń`);

@@ -517,3 +517,74 @@ footer{padding:30px 0 50px;text-align:center;color:var(--muted);font-size:14px}
   .mostgrid{grid-template-columns:1fr 1fr}
   .mostcard{padding:16px}
 }
+
+
+/* Custom: duży znak zapytania zamiast kolażu kadrów */
+.custom-card .qcollage, .packet.custom-card .collage.qcollage{
+  display:flex;align-items:center;justify-content:center;position:relative;
+}
+.qmark{
+  font-family:var(--display);font-size:clamp(110px,22vw,160px);line-height:.8;
+  color:var(--orange);letter-spacing:-.06em;text-shadow:6px 8px 0 rgba(27,23,18,.08);
+  user-select:none;
+}
+
+/* Filmrun na stronie głównej — karta jak pakiet */
+.filmrun-pack .filmrun-card{background:var(--card)}
+.filmrun-sub{margin:0 0 8px;font-weight:700;color:var(--muted);letter-spacing:-.02em}
+.filmrun-card .filmrun-sub{font-size:14px;max-width:90%}
+.fr-art{display:flex;align-items:center;justify-content:center;gap:10px;min-height:140px}
+.fr-bust{
+  width:42%;aspect-ratio:3/4;border-radius:18px;background:linear-gradient(180deg,#2a241c,#1B1712);
+  border:4px solid var(--card);box-shadow:var(--shadow);display:flex;align-items:center;justify-content:center;
+  transform:rotate(-4deg);
+}
+.fr-bust.goal{transform:rotate(5deg)}
+.fr-bust span{font-family:var(--display);font-size:64px;color:var(--orange);line-height:1}
+.fr-to{font-size:28px;font-weight:700;color:var(--orange)}
+.fr-rules{margin:0 0 18px;padding-left:1.2em;font-weight:600;line-height:1.45;max-width:40em}
+.fr-rules li{margin:0 0 8px}
+.filmrun-setup .filmrun-sub{font-size:18px;color:var(--orange);font-family:var(--display)}
+.filmrun-stage{padding:18px 18px 8px}
+.fr-pair{display:flex;align-items:stretch;justify-content:center;gap:16px;flex-wrap:wrap;margin:12px 0 18px}
+.fr-card{
+  flex:1 1 200px;max-width:280px;background:var(--paper);border-radius:22px;padding:16px 16px 18px;
+  box-shadow:var(--shadow);display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center;
+}
+.fr-card img, .fr-card .noimg{
+  width:160px;height:200px;object-fit:cover;border-radius:16px;background:linear-gradient(180deg,#2a241c,#1B1712);
+  display:flex;align-items:center;justify-content:center;font-family:var(--display);font-size:72px;color:var(--orange);
+}
+.fr-card b{font-size:22px;line-height:1.15;letter-spacing:-.03em}
+.fr-lab{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.fr-note{max-width:36em;margin:0 auto 12px;font-weight:600}
+.fr-status{font-weight:700;margin:8px 0 0}
+.fr-status.win{color:var(--orange-d)}
+
+/* Top: większe kafelki, bez zdjęć, płynne przeciąganie */
+.toplist.bigtop, .orderlist.bigtop{gap:10px}
+.toplist.bigtop li, .orderlist.bigtop li{
+  min-height:64px;padding:14px 16px;border-radius:16px;font-size:18px;gap:12px;
+  touch-action:none;user-select:none;-webkit-user-select:none;
+}
+.toplist.bigtop .tpos, .orderlist.bigtop .tpos{font-size:28px;width:36px}
+.toplist.bigtop .ot{font-weight:700;letter-spacing:-.02em}
+.toplist li.dragging, .bigtop li.dragging{
+  opacity:.95;transform:scale(1.03);box-shadow:0 10px 28px rgba(27,23,18,.18);z-index:5;background:var(--paper);
+}
+
+/* Licytacja: luźniejszy układ */
+.auction.loose{padding:22px 20px 16px}
+.auction.loose .qprompt{margin:10px 0 18px;font-size:clamp(26px,4vw,40px);line-height:1.15}
+.loose-bid{margin:8px 0 22px;display:flex;flex-direction:column;align-items:flex-start;gap:4px}
+.loose-bid .bigbid{font-size:64px;line-height:1}
+.verdict-row{display:flex;gap:12px;flex-wrap:wrap}
+.verdict-row .pill{flex:1;min-height:56px}
+.auction.loose .notice30.big{margin:8px 0 18px;font-size:18px;line-height:1.35}
+@media (max-width:560px){
+  .fr-card img, .fr-card .noimg{width:120px;height:150px}
+  .fr-card b{font-size:18px}
+  .toplist.bigtop li{min-height:58px;font-size:16px}
+  .qmark{font-size:120px}
+  .loose-bid .bigbid{font-size:52px}
+}

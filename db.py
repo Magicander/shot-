@@ -441,10 +441,54 @@ def shrink_headshot(data, max_edge=256, quality=80):
             return out
     except Exception:
         pass
-    if len(data) <= 150_000:
+    if len(data) <= 400_000:
         return data
-    raise ValueError("photo too large")
+    raise ValueError("photo too large (zainstaluj Pillow, żeby je zmniejszyć)")
 
+
+
+def photo_row_ok(con, photo_id):
+    """Czy photo_id wskazuje na prawdziwy zapisany obrazek (nie placeholder)."""
+    if not photo_id:
+        return False
+    try:
+        row = con.execute("SELECT image FROM actor_photos WHERE id=?", (int(photo_id),)).fetchone()
+    except Exception:
+        return False
+    if not row:
+        return False
+    try:
+        import webscrape
+        return webscrape.is_real_headshot(row["image"])
+    except Exception:
+        return bool(row["image"] and len(row["image"]) >= 800)
+
+def enrich_cast_photos(con, cast):
+    """Dodaje photo_ok i photo_reason do listy obsady, bez ustawiania fałszywego photo_id."""
+    out = []
+    for c in cast or []:
+        if not isinstance(c, dict):
+            out.append(c)
+            continue
+        rec = dict(c)
+        pid = rec.get("photo_id")
+        url = rec.get("photo_url") or rec.get("url") or ""
+        if pid and photo_row_ok(con, pid):
+            rec["photo_ok"] = True
+            rec["photo_reason"] = ""
+        else:
+            rec["photo_ok"] = False
+            if pid:
+                rec["photo_reason"] = "zdjęcie nie zapisane"
+                rec.pop("photo_id", None)
+            elif url and ("t.gif" in url or "front/assets" in url):
+                rec["photo_reason"] = "placeholder Filmweb"
+            elif not url:
+                rec["photo_reason"] = "brak zdjęcia"
+            else:
+                rec["photo_reason"] = "nie udało się pobrać"
+        out.append(rec)
+    return out
 
 def save_actor_photo(con, *, key, name, source="", source_id="", image=None, url=""):
     """Zapisuje zdjęcie aktora z deduplikacją po kluczu źródła albo znormalizowanym imieniu. Zwraca id."""
@@ -452,7 +496,12 @@ def save_actor_photo(con, *, key, name, source="", source_id="", image=None, url
     key = (key or actor_photo_key(source, source_id, name) or "").strip()
     if not key or not image:
         raise ValueError("actor photo key/image required")
+    import webscrape
+    if not webscrape.is_real_headshot(image):
+        raise ValueError("not a real headshot")
     image = shrink_headshot(image)
+    if not webscrape.is_real_headshot(image):
+        raise ValueError("not a real headshot")
     now = time.time()
     name_key = actor_photo_key("", "", name) if name else ""
     row = con.execute("SELECT id, key FROM actor_photos WHERE key=?", (key,)).fetchone()

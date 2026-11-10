@@ -45,12 +45,16 @@ async function loadPacks() {
   packs.forEach((p, i) => {
     const rounds = {n: 10};
     const w = document.createElement("div"); w.className = "packet-wrap";
-    const imgs = p.thumbs.length >= 2 ? p.thumbs.map(id => `<img class="ph" src="/frame/${id}.jpg" alt="" loading="lazy">`).join("") : FLOWER;
+    const isCustom = p.custom || p.id === "custom";
+    const imgs = isCustom
+      ? `<span class="qmark" aria-hidden="true">?</span>`
+      : (p.thumbs.length >= 2 ? p.thumbs.map(id => `<img class="ph" src="/frame/${id}.jpg" alt="" loading="lazy">`).join("") : FLOWER);
+    if (isCustom) w.classList.add("custom-pack");
     w.innerHTML = `
-      <div class="packet" style="--c:${p.color};--tilt:${[-1.5,1.2,-.6,1.6][i % 4]}deg">
+      <div class="packet${isCustom ? " custom-card" : ""}" style="--c:${isCustom ? "#F26B1D" : p.color};--tilt:${isCustom ? 0 : [-1.5,1.2,-.6,1.6][i % 4]}deg">
         <div class="kit"><span>${T("quiz<br>filmowy")}</span><b>${BRAND}*</b></div>
         <h3>${esc(packName(p))}</h3>
-        <div class="collage">${imgs}</div>
+        <div class="collage${isCustom ? " qcollage" : ""}">${imgs}</div>
         <div class="stamp">${p.playable}<small>${T("gotowe")}</small></div>
         <div class="foot"><span>${esc(packDesc(p))}</span></div>
       </div>
@@ -78,7 +82,7 @@ async function loadPacks() {
     };
     box.append(w);
   });
-  renderMostEntry(box.parentElement || box);
+  renderMostEntry(box);
 }
 
 function openCustom(packs, nrounds) {
@@ -104,27 +108,41 @@ function openCustom(packs, nrounds) {
   };
 }
 
-function renderMostEntry(after) {
-  const host = after && after.parentElement;
-  const wrap = document.createElement("div");
-  wrap.className = "most-entry";
-  wrap.innerHTML = `<div class="section-head" id="most">
-      <h2><span>${T("Most")}</span><span class="ast">*</span></h2>
-      <p class="muted" style="max-width:420px;margin:0">${T("Specjalna gra poza pakietami. Dostajecie dwóch aktorów i po filmografii szukacie drogi od jednego do drugiego. Im krótsza ścieżka, tym więcej punktów. Kto dojdzie pierwszy, dostaje premię.")}</p>
-    </div>
-    <div class="mostcard">
-      <div class="mostcard-body">
-        <h3>${T("Most")}</h3>
-        <p>${T("Wszyscy dostają tę samą parę. Ruchy robicie tutaj, na kadr* — nie na IMDb ani Filmwebie (tam jest tylko pomocniczy link do profilu).")}</p>
+function renderMostEntry(box) {
+  const w = document.createElement("div");
+  w.className = "packet-wrap filmrun-pack";
+  const rounds = {n: 3};
+  w.innerHTML = `
+    <div class="packet filmrun-card" style="--c:#F26B1D;--tilt:-1deg" id="most">
+      <div class="kit"><span>${T("quiz<br>filmowy")}</span><b>${BRAND}*</b></div>
+      <h3>Filmrun</h3>
+      <p class="filmrun-sub">${T("Wikipedia run, ale o filmach")}</p>
+      <div class="collage fr-art" aria-hidden="true">
+        <div class="fr-bust"><span>?</span></div>
+        <span class="fr-to">→</span>
+        <div class="fr-bust goal"><span>?</span></div>
       </div>
-      <button type="button" class="pill orange" id="mostgo">${T("graj w Most")}</button>
+      <div class="stamp">${T("gra")}<small>${T("osobno")}</small></div>
+      <div class="foot"><span>${T("Dwóch aktorów, Start, potem Filmweb albo IMDb, Stop wygrywa rundę.")}</span></div>
+    </div>
+    <p class="pack-modes">${T("Specjalna gra poza pakietami")}</p>
+    <div class="pack-pills">
+      <span class="chip-pill">${T("bez limitu czasu")}</span>
+      <div class="stepper" role="group" aria-label="${T("Liczba rund")}">
+        <button type="button" class="minus" aria-label="${T("mniej rund")}">-</button>
+        <span class="n">${plRounds(rounds.n)}</span>
+        <button type="button" class="plus" aria-label="${T("więcej rund")}">+</button>
+        <button type="button" class="go" id="mostgo">${T("graj")}</button>
+      </div>
     </div>`;
-  const target = document.querySelector("#jak") || after;
-  if (target && target.parentNode) target.parentNode.insertBefore(wrap, target);
-  else if (after) after.after(wrap);
-  const go = wrap.querySelector("#mostgo");
-  if (go) go.onclick = () => askName(T("Most"), T("Jak cię nazywać?"), async name => {
-    const d = await api("/api/rooms", {kind:"most", pack_id:"most", rounds:3, name});
+  (box && box.id === "packs" ? box : document.querySelector("#packs") || box).append(w);
+  const nEl = w.querySelector(".n");
+  const upd = d => { rounds.n = Math.max(1, Math.min(30, rounds.n + d)); nEl.textContent = plRounds(rounds.n); };
+  upd(0);
+  w.querySelector(".minus").onclick = () => upd(-1);
+  w.querySelector(".plus").onclick = () => upd(1);
+  w.querySelector("#mostgo").onclick = () => askName(T("Filmrun"), T("{rounds}. Jak cię nazywać?", {rounds: plRounds(rounds.n)}), async name => {
+    const d = await api("/api/rooms", {kind:"filmrun", pack_id:"most", rounds:rounds.n, name});
     setCreds(d.code, d); location.href = "/r/" + d.code;
   });
 }
@@ -236,13 +254,13 @@ function playerList(players, opts = {}) {
 const MODE_INFO = {
   kadry: ["Kadry", "Trzy kadry z filmu, od najtrudniejszego. Im szybciej zgadniesz, tym więcej punktów."],
   zoom: ["Zoom", "Mocne zbliżenie fragmentu kadru, które powoli się oddala. Zgadnij tytuł jak najwcześniej."],
-  licytacja: ["Licytacja", "Pytanie z listą odpowiedzi. Każdy deklaruje, ile poda. Najwyższa oferta wpisuje odpowiedzi na czas. Uda się: 200 pkt za każdą zadeklarowaną. Nie uda się: pozostali dostają po 100 pkt za każdą."],
+  licytacja: ["Licytacja", "Pytanie z listą odpowiedzi. Gracze licytują po kolei. Zwycięzca wymienia odpowiedzi, a timer puszcza przeciwnik. Gdy czas minie, pozostali decydują (tak/nie), czy zaliczył zadanie. Sukces: 200 pkt za każdą zadeklarowaną dla licytującego. Porażka: pozostali dostają po 100 pkt za każdą."],
   rok: ["Który rok", "Podaj rok premiery. Dokładny rok to 1000 pkt, każdy rok różnicy zabiera około 30 procent, ponad 8 lat to zero."],
   kolejnosc: ["Ułóż po kolei", "Ułóż 4 filmy od najstarszego do najnowszego. 250 pkt za każde dobre miejsce."],
   plakat: ["Plakat", "Plakat odsłania się stopniowo. Im wcześniej zgadniesz, tym więcej punktów."],
   aktorzy: ["Aktorzy", "Obsada pojawia się po kolei, od najmniej znanych nazwisk. Mniej nazwisk na ekranie to więcej punktów."],
-  top: ["Top", "Najpierw układacie własną topkę tych samych filmów, od najlepszego do najgorszego. Potem odtwarzacie topkę wylosowanego gracza. Za każdy film: pełne punkty za dokładne miejsce, o 1 mniej za każde miejsce pomyłki."],
-  most: ["Most", "Idziecie po filmografii od jednego aktora do drugiego. Im krótsza droga, tym więcej punktów. Kto dojdzie pierwszy, dostaje premię."],
+  top: ["Top", "Najpierw układacie własną topkę tych samych filmów, od najlepszego do najgorszego (przeciągnij kafelki). Potem odtwarzacie topkę wylosowanego gracza. Za każdy film: pełne punkty za dokładne miejsce, o 1 mniej za każde miejsce pomyłki."],
+  most: ["Filmrun", "Dostajecie dwóch znanych aktorów. Start otwiera profil pierwszego (Filmweb po polsku, IMDb po angielsku). Na tamtej stronie szukacie drugiego aktora, chodząc po filmach i obsadzie. Kto pierwszy wróci i wciśnie Stop, wygrywa rundę. Ruchy na Filmwebie/IMDb są poza naszą stroną — nie śledzimy ścieżki."],
 };
 const modeName = k => T((MODE_INFO[k] && MODE_INFO[k][0]) || k);
 function modeHint(k, a) {
@@ -348,25 +366,18 @@ function settingsPanel() {
     grp(T("czas na rundę"), c.time ? T("Każdy tryb dostaje {n} s. Kadry dzielą czas na 3 etapy.", {n: c.time}) : T("Każdy tryb ma swój czas, np. Kadry 3 x 15 s, Zoom 30 s."),
       seg("time", timeOpts, [0, 15, 20, 30, 45, 60].includes(c.time) ? c.time : -1, dis) +
       `<label class="range"><input type="range" id="trange" min="10" max="120" step="5" value="${c.time || 30}" ${d} aria-label="${T("czas na rundę")}"><span id="tval">${c.time ? sec(c.time) : T("domyślny")}</span></label>`),
-    grp(T("odpowiedzi"), c.answer === "voice" ? T("Gracz klika Mam!, mówi tytuł na głos, a sędzia ocenia. Liczy się kolejność zgłoszeń.") : T("Gracze wpisują tytuły, gra sprawdza je sama. Literówki wybaczamy."),
-      seg("answer", [["type", T("Wpisywanie")], ["voice", T("Na głos")]], c.answer, dis)),
-    voiceUsed(c) ? grp(T("kto ocenia"), judgeDesc, seg("judge", [["rotate", T("kolejny gracz")], ["host", T("gospodarz")], ["vote", T("głosowanie")]], c.judge, dis)) : "",
-    S.modes.includes("licytacja") ? grp(T("licytacja"), T("Gracze po kolei podbijają albo pasują. Zwycięzca ma {n} s na odpowiedź.", {n: c.lic_answer}),
+    S.modes.includes("licytacja") ? grp(T("licytacja"), T("Gracze licytują po kolei. Timer puszcza przeciwnik, a po czasie pozostali oceniają, czy zadanie zostało zaliczone. Czas odpowiedzi: {n} s.", {n: c.lic_answer}),
       `<div class="sub2"><span>${T("czas na odpowiedź")}</span>${seg("lic_answer", [20, 30, 45, 60].map(n => [n, sec(n)]), c.lic_answer, dis)}</div>
        <div class="sub2"><span>${T("czas na turę")}</span>${seg("lic_bid", [5, 10, 15, 20].map(n => [n, sec(n)]), c.lic_bid, dis)}</div>`) : "",
     S.modes.includes("top") ? grp(T("Top"), T("Za każdy film: {n} pkt za dokładne miejsce, o 1 mniej za każde miejsce pomyłki (minimum 0). Przy {n} filmach maksimum to {m}.", {n: c.top_n || 5, m: (c.top_n || 5) * (c.top_n || 5)}),
       `<div class="sub2"><span>${T("liczba filmów")}</span>${seg("top_n", [3,4,5,6,7,8].map(n => [n, String(n)]), c.top_n || 5, dis)}</div>
        <div class="sub2"><span>${T("czas na własną topkę")}</span>${seg("top_own", [30,45,60,90].map(n => [n, sec(n)]), c.top_own || 45, dis)}</div>
        <div class="sub2"><span>${T("czas na zgadywanie")}</span>${seg("top_guess", [30,45,60,90].map(n => [n, sec(n)]), c.top_guess || 45, dis)}</div>`) : "",
-    S.kind === "most" ? grp(T("czas na rundę"), T("Macie {n} s, żeby dojść od startu do celu.", {n: c.most_time || 90}),
-      seg("most_time", [45,60,90,120].map(n => [n, sec(n)]), c.most_time || 90, dis)) : "",
   ].join("");
   const sel = (attr, k, opts, val) => `<select class="input sel" data-${attr}="${k}" ${d}>${opts.map(([v, l]) => `<option value="${v}" ${String(v) === String(val) ? "selected" : ""}>${l}</option>`).join("")}</select>`;
   const adv = [
     grp(T("czas dla trybu"), T("Nadpisuje czas ogólny tylko dla wybranego trybu."),
       `<div class="mgrid">${titleModes.map(k => `<label><span>${modeName(k)}</span>${sel("mt", k, [[0, k === "aktorzy" ? T("ogólny (6 s na aktora)") : T("ogólny ({n} s)", {n: c.time || DEF_TIME[k]})], ...[15, 20, 30, 45, 60, 90].map(n => [n, sec(n)])], c.mode_time[k] || 0)}</label>`).join("") || `<span class="muted">-</span>`}</div>`),
-    voiceModes.length ? grp(T("odpowiedzi w trybie"), T("Np. Kadry na głos, a reszta wpisywana."),
-      `<div class="mgrid">${voiceModes.map(k => `<label><span>${modeName(k)}</span>${sel("ma", k, [["", T("jak ogólnie")], ["type", T("Wpisywanie")], ["voice", T("Na głos")]], c.mode_answer[k] || "")}</label>`).join("")}</div>`) : "",
     grp(T("rundy na tryb"), T("Zamiast ogólnej liczby rund: ile rund każdego trybu."),
       `<label class="toggle"><input type="checkbox" id="permode" ${c.per_mode ? "checked" : ""} ${d}><span>${T("ustaw osobno")}</span></label>
        ${c.per_mode ? `<div class="mgrid">${S.modes.map(k => `<label><span>${modeName(k)}</span>${sel("mr", k, Array.from({length: 10}, (_, i) => [i + 1, String(i + 1)]), c.mode_rounds[k] || 1)}</label>`).join("")}</div>` : ""}`),
@@ -375,10 +386,18 @@ function settingsPanel() {
     grp(T("finał"), T("Punkty w ostatniej rundzie są mnożone."), seg("final_x", [[1, "x1"], [2, "x2"], [3, "x3"]], c.final_x, dis)),
   ].join("");
   if (S.kind === "most") {
-    return `<div class="panel setup" id="setup">
-      <div class="setup-head"><h3 style="font-size:30px">${T("Most")}</h3>${host ? "" : `<span class="tag">${T("ustawia gospodarz")}</span>`}</div>
-      <p class="muted" style="margin:0 0 14px">${T("Wszyscy dostają tę samą parę aktorów. Chodzicie po filmach i obsadzie w tej grze, aż ktoś dojdzie do celu.")}</p>
-      <div class="sgrid">${basic}</div>
+    const roundsOnly = grp(T("rundy"), T("Ile rund zagracie. W każdej nowa para aktorów."),
+      `<div class="stepper small" role="group" aria-label="${T("Liczba rund")}"><button type="button" id="rminus" ${d} aria-label="${T("mniej rund")}">-</button><span class="n">${plRounds(S.rounds)}</span><button type="button" id="rplus" ${d} aria-label="${T("więcej rund")}">+</button></div>`);
+    return `<div class="panel setup filmrun-setup" id="setup">
+      <div class="setup-head"><h3 style="font-size:30px">Filmrun</h3>${host ? "" : `<span class="tag">${T("ustawia gospodarz")}</span>`}</div>
+      <p class="filmrun-sub">${T("Wikipedia run, ale o filmach")}</p>
+      <ol class="fr-rules">
+        <li>${T("Dostajecie dwóch znanych aktorów i ich zdjęcia. Start otwiera profil pierwszego (Filmweb po polsku, IMDb po angielsku).")}</li>
+        <li>${T("Bez limitu czasu szukacie drugiego aktora na tamtej stronie, chodząc po filmach i obsadzie.")}</li>
+        <li>${T("Ruchy na Filmwebie i IMDb są poza naszą stroną — nie śledzimy, którą drogą poszliście. Wygrywa ten, kto pierwszy wróci i wciśnie Stop.")}</li>
+        <li>${T("Zwycięzca rundy dostaje 1000 pkt (razy mnożnik finału, jeśli jest). Potem kolejna runda z nową parą, aż do ustawionej liczby rund.")}</li>
+      </ol>
+      <div class="sgrid">${roundsOnly}</div>
     </div>`;
   }
   return `<div class="panel setup" id="setup">
@@ -427,8 +446,8 @@ function renderLobby(v) {
   sp.querySelectorAll("[data-mt]").forEach(x => x.onchange = () => patch({mode_time: {...S.settings.mode_time, [x.dataset.mt]: +x.value}}));
   sp.querySelectorAll("[data-ma]").forEach(x => x.onchange = () => { const ma = {...S.settings.mode_answer}; if (x.value) ma[x.dataset.ma] = x.value; else delete ma[x.dataset.ma]; patch({mode_answer: ma}); });
   sp.querySelectorAll("[data-mr]").forEach(x => x.onchange = () => patch({mode_rounds: {...S.settings.mode_rounds, [x.dataset.mr]: +x.value}}));
-  $("#permode").onchange = e => patch({per_mode: e.target.checked});
-  $("#hints").onchange = e => patch({hints: e.target.checked});
+  if ($("#permode")) $("#permode").onchange = e => patch({per_mode: e.target.checked});
+  if ($("#hints")) $("#hints").onchange = e => patch({hints: e.target.checked});
   sp.querySelectorAll("[data-mv]").forEach(b => b.onclick = e => {
     e.preventDefault();
     const ms = S.modes.slice(), i = ms.indexOf(b.dataset.mv), j = i + +b.dataset.d;
@@ -523,12 +542,10 @@ function renderRound(v, keepInput) {
       ? T("ułóż topkę tak, jak {name}", {name: (S.target && S.target.name) || "?"})
       : T("twoja topka · od najlepszego do najgorszego");
     stage = `<div class="stage textstage orderstage topstage"><span class="lvl">${esc(label)}</span><span class="clock" id="clock"></span>
-      <p class="muted small-note">${T("Przeciągnij film albo użyj strzałek. Za każdy film: {n} pkt za dokładne miejsce, o 1 mniej za każde miejsce pomyłki.", {n: S.top_n || S.items.length})}</p>
-      <ol class="orderlist toplist" id="toplist">${ids.map((id, i) => `<li draggable="false" data-i="${i}" data-id="${id}">
+      <p class="muted small-note">${T("Chwyć kafelek i przeciągnij. Za każdy film: {n} pkt za dokładne miejsce, o 1 mniej za każde miejsce pomyłki.", {n: S.top_n || S.items.length})}</p>
+      <ol class="orderlist toplist bigtop" id="toplist">${ids.map((id, i) => `<li draggable="false" data-i="${i}" data-id="${id}">
         <span class="tpos">${i + 1}</span>
-        ${byId[id] && byId[id].img ? `<img src="${byId[id].img}" alt="">` : `<span class="noimg"></span>`}
         <span class="ot">${byId[id] ? showTitle(byId[id]) : ""}</span>
-        ${S.mine ? "" : `<span class="ob"><button type="button" class="pill small" data-up="${i}" ${i ? "" : "disabled"} aria-label="${T("wyżej")}">&uarr;</button><button type="button" class="pill small" data-dn="${i}" ${i < ids.length - 1 ? "" : "disabled"} aria-label="${T("niżej")}">&darr;</button></span>`}
       </li>`).join("")}</ol>
       <div class="olabels"><span>${T("najlepszy")}</span><span>${T("najgorszy")}</span></div></div>${bar()}`;
     input = S.mine ? waitBox(S.sub === "guess" ? T("Zgadnięcie wysłane") : T("Topka wysłana, czekamy na resztę"))
@@ -561,7 +578,7 @@ function renderRound(v, keepInput) {
     $("#yf").onsubmit = async e => { e.preventDefault(); const n = parseInt(y.value, 10); if (!(n >= 1880 && n <= 2100)) return toast(T("Podaj rok, np. 1984")); await guessAct({year:n}); };
   }
   if ((mode === "kolejnosc" || mode === "top") && !S.mine) {
-    v.querySelectorAll("[data-up],[data-dn]").forEach(b => b.onclick = () => {
+    if (mode === "kolejnosc") v.querySelectorAll("[data-up],[data-dn]").forEach(b => b.onclick = () => {
       const i = +(b.dataset.up ?? b.dataset.dn), j = b.dataset.up !== undefined ? i - 1 : i + 1;
       [ORDER.ids[i], ORDER.ids[j]] = [ORDER.ids[j], ORDER.ids[i]]; lastKey = ""; render();
     });
@@ -580,8 +597,9 @@ function renderRound(v, keepInput) {
     $("#bsend").onclick = () => guessAct({bid: BID.n});
     $("#bpass").onclick = () => guessAct({pass: true});
   }
-  if ($("#cplus")) { $("#cplus").onclick = () => guessAct({count: 1}); $("#cminus").onclick = () => guessAct({count: -1}); }
-  v.querySelectorAll("[data-mark]").forEach(b => b.onclick = () => guessAct({mark: +b.dataset.mark}));
+  if ($("#ltimer")) $("#ltimer").onclick = () => guessAct({start_timer: true});
+  if ($("#vyes")) $("#vyes").onclick = () => guessAct({verdict: true});
+  if ($("#vno")) $("#vno").onclick = () => guessAct({verdict: false});
 }
 function wireCommon() {
   if ($("#skip")) $("#skip").onclick = () => act("next");
@@ -615,23 +633,36 @@ function renderAuction(m) {
       : `<div class="turnbox wait-turn"><span>${T("Teraz licytuje")}</span><b>${esc(S.turn_name || "")}</b><span class="tclock" id="bigclock"></span></div>`;
     return [stage, dock];
   }
-  const mine = S.bidder === S.me, voice = S.voice;
-  const named = S.found.filter(f => f.title);
-  const answers = S.answers ? `<ul class="alist">${S.answers.map(a => `<li><button type="button" class="${a.found ? "on" : ""}" data-mark="${a.i}">${showTitle(a)}</button></li>`).join("")}</ul>` : "";
-  const stage = `<div class="stage textstage auction"><span class="lvl">${T("licytacja · {name} odpowiada", {name: esc(S.bidder_name)})}</span><span class="clock" id="clock"></span>
+  const mine = S.bidder === S.me;
+  const sub = S.sub || "wait_timer";
+  const stageHead = `<div class="stage textstage auction loose"><span class="lvl">${T("licytacja · {name} odpowiada", {name: esc(S.bidder_name)})}</span>${sub === "timed" ? `<span class="clock" id="clock"></span>` : ""}
     <h2 class="ytitle qprompt">${esc(S.prompt)}</h2>
-    <p class="notice30 big">${mine ? T("Masz tylko {n} s na odpowiedź", {n: secs}) : T("{name} ma tylko {n} s na odpowiedź", {name: esc(S.bidder_name), n: secs})}</p>
+    <div class="curbid loose-bid"><span class="muted">${T("deklaracja")}</span><b class="bigbid">${S.bid}</b></div>`;
+  if (sub === "wait_timer") {
+    const stage = `${stageHead}
+      <p class="notice30 big">${T("Timer nie startuje sam. Puszcza go drugi gracz (albo pozostali, gdy gra więcej osób).")}</p>
+      ${hist}</div>`;
+    const dock = S.can_start_timer
+      ? `<button type="button" class="pill orange big" id="ltimer">${T("Puść timer ({n} s)", {n: secs})}</button>`
+      : waitBox(mine ? T("Czekasz na timer") : T("Czekamy"), T("Timer puszcza przeciwnik."));
+    return [stage, dock];
+  }
+  if (sub === "verdict") {
+    const votes = (S.verdicts || []).map(v => `<li class="${v.vote === true ? "ok" : v.vote === false ? "miss" : ""}">${esc(v.name)}: ${v.vote === true ? T("tak") : v.vote === false ? T("nie") : T("czeka")}</li>`).join("");
+    const stage = `${stageHead}
+      <p class="notice30 big">${T("Czas minął. Pozostali gracze decydują, czy {name} zaliczył zadanie (wymienił {n} odpowiedzi).", {name: esc(S.bidder_name), n: S.bid})}</p>
+      <ul class="results">${votes}</ul>${hist}</div>`;
+    const dock = S.can_verdict && S.my_verdict === undefined
+      ? `<div class="verdict-row"><button type="button" class="pill ghost big" id="vno">${T("nie zaliczył")}</button><button type="button" class="pill orange big" id="vyes">${T("zaliczył")}</button></div>`
+      : waitBox(S.my_verdict === undefined ? T("Czekamy na ocenę") : (S.my_verdict ? T("Twój głos: tak") : T("Twój głos: nie")), T("Gdy wszyscy ocenią, runda się kończy."));
+    return [stage, dock];
+  }
+  const stage = `${stageHead}
+    <p class="notice30 big">${mine ? T("Wymieniaj odpowiedzi na głos. Masz {n} s.", {n: secs}) : T("{name} wymienia odpowiedzi. Masz {n} s na słuchanie, potem ocenisz, czy zaliczył.", {name: esc(S.bidder_name), n: secs})}</p>
     <div class="bigclock" id="bigclock"></div>
-    <div class="aprog"><div class="prog"><i style="width:${Math.min(100, S.count / Math.max(1, S.bid) * 100)}%"></i></div>
-      <p class="progressn"><b>${S.count}</b> / ${S.bid}${S.misses ? ` <small class="muted">${T("pudła: {n}", {n: S.misses})}</small>` : ""}</p></div>
-    ${named.length ? `<ul class="found">${named.map(f => `<li>${showTitle(f)}</li>`).join("")}</ul>` : ""}
-    ${S.closing !== null && S.closing !== undefined ? `<p class="notice30">${T("Zadeklarowana liczba osiągnięta. Za chwilę koniec (można jeszcze cofnąć).")}</p>` : ""}
-    ${S.can_count ? answers : ""}${hist}</div>`;
-  let dock;
-  if (!voice) dock = mine ? guessForm(T("Twoja odpowiedź...")) : `<div class="feedback">${T("Patrzymy, czy da radę...")}</div>`;
-  else if (S.can_count) dock = `<p class="muted small-note">${mine ? T("Mów odpowiedzi i licz je sam.") : T("{name} mówi odpowiedzi. Ty liczysz poprawne.", {name: esc(S.bidder_name)})}</p>
-      <div class="bidbtns"><button type="button" class="pill ghost big" id="cminus" ${S.count ? "" : "disabled"}>${T("cofnij")}</button><button type="button" class="pill orange big" id="cplus">${T("+1 poprawna")}</button></div>`;
-  else dock = mine ? waitBox(T("Mów odpowiedzi na głos!"), T("Liczy: {name}", {name: esc(S.counter_name || T("pozostali"))})) : `<div class="feedback">${T("Liczy: {name}", {name: esc(S.counter_name || T("pozostali"))})}</div>`;
+    ${hist}</div>`;
+  const dock = mine ? waitBox(T("Mów odpowiedzi na głos!"), T("Po czasie ocenią pozostali."))
+    : waitBox(T("Słuchaj odpowiedzi"), T("Po sygnale ocenisz, czy zadanie zostało zaliczone."));
   return [stage, dock];
 }
 
@@ -652,6 +683,16 @@ function updateClock(force) {
       const f = Math.max(0, Math.min(1, (el - i * S.stage_seconds) / S.stage_seconds));
       bar.style.width = (f * 100) + "%";
     });
+    return;
+  }
+  if (S.mode === "most" || (S.mode === "licytacja" && S.sub !== "bid" && S.sub !== "timed")) {
+    if (c) c.textContent = "";
+    if (hc) hc.textContent = "";
+    return;
+  }
+  if (S.duration == null && !(S.mode === "licytacja" && S.sub === "timed")) {
+    if (c) c.textContent = "";
+    if (hc) hc.textContent = "";
     return;
   }
   const dur = S.duration || 30, f = Math.max(0, Math.min(1, el / dur));
@@ -704,6 +745,26 @@ if (window.visualViewport) {
 
 function fold(s) { return String(s || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/ł/g, "l").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
 
+function titleMatches(title, q) {
+  const query = fold(q);
+  if (!query) return false;
+  const f = fold(title);
+  const bare = f.replace(/^(the|a|an|le|la|el|il|der|die|das)\s+/, "");
+  if (f.startsWith(query) || bare.startsWith(query)) return true;
+  const words = f.split(" ").filter(Boolean);
+  const qw = query.split(" ").filter(Boolean);
+  if (qw.length === 1 && words.some(w => w.startsWith(qw[0]))) return true;
+  if (qw.length > 1) {
+    for (let i = 0; i <= words.length - qw.length; i++) {
+      if (qw.every((w, k) => (words[i + k] || "").startsWith(w))) return true;
+    }
+  }
+  return false;
+}
+function titleHints(pool, q, limit) {
+  return (pool || []).filter(t => titleMatches(t, q)).slice(0, limit || 8);
+}
+
 function setupGuess(prev, focus, auction) {
   const g = $("#g"), ac = $("#ac"), fb = $("#fb");
   let sel = -1, items = [];
@@ -711,8 +772,8 @@ function setupGuess(prev, focus, auction) {
   if (focus && matchMedia("(pointer:fine)").matches) g.focus();
   const show = () => {
     const q = fold(g.value);
-    items = q.length < 1 || auction || (S.settings && S.settings.hints === false) ? [] : titles.filter(t => fold(t).split(" ").some(w => w.startsWith(q.split(" ")[0])) && fold(t).includes(q.split(" ").slice(1).join(" "))
-      || fold(t).startsWith(q) || fold(t).replace(/^the /, "").startsWith(q)).slice(0, 6);
+    const off = auction || (S.settings && S.settings.hints === false);
+    items = (!q || off) ? [] : titleHints(titles, g.value, 8);
     sel = -1;
     ac.innerHTML = items.map((t, i) => `<li data-i="${i}">${esc(t)}</li>`).join("");
     ac.classList.toggle("hidden", !items.length);
@@ -742,33 +803,49 @@ function setupGuess(prev, focus, auction) {
 
 function wireTopDrag() {
   const list = $("#toplist");
-  if (!list) return;
-  let from = null;
-  list.querySelectorAll("li").forEach(li => {
-    li.addEventListener("pointerdown", e => {
-      if (e.target.closest("button")) return;
-      from = +li.dataset.i;
-      li.classList.add("dragging");
-      li.setPointerCapture(e.pointerId);
+  if (!list || list.dataset.wired) return;
+  list.dataset.wired = "1";
+  let drag = null;
+  const sync = () => {
+    ORDER.ids = [...list.children].map(el => +el.dataset.id);
+    [...list.children].forEach((el, i) => {
+      el.dataset.i = String(i);
+      const pos = el.querySelector(".tpos");
+      if (pos) pos.textContent = String(i + 1);
     });
-    li.addEventListener("pointermove", e => {
-      if (from == null) return;
-      const over = document.elementFromPoint(e.clientX, e.clientY)?.closest("#toplist li");
-      if (!over || over === li) return;
-      const to = +over.dataset.i;
-      if (to === from) return;
-      const ids = ORDER.ids.slice();
-      const [item] = ids.splice(from, 1);
-      ids.splice(to, 0, item);
-      ORDER.ids = ids; from = to; lastKey = ""; render();
-    });
-    li.addEventListener("pointerup", () => { from = null; });
-    li.addEventListener("pointercancel", () => { from = null; });
+  };
+  list.addEventListener("pointerdown", e => {
+    const li = e.target.closest("#toplist li");
+    if (!li || S.mine) return;
+    e.preventDefault();
+    drag = {li, y: e.clientY};
+    li.classList.add("dragging");
+    try { li.setPointerCapture(e.pointerId); } catch {}
   });
+  list.addEventListener("pointermove", e => {
+    if (!drag) return;
+    e.preventDefault();
+    const over = document.elementFromPoint(e.clientX, e.clientY)?.closest("#toplist li");
+    if (!over || over === drag.li) return;
+    const kids = [...list.children];
+    const from = kids.indexOf(drag.li), to = kids.indexOf(over);
+    if (from < 0 || to < 0 || from === to) return;
+    if (from < to) list.insertBefore(drag.li, over.nextSibling);
+    else list.insertBefore(drag.li, over);
+    sync();
+  }, {passive: false});
+  const end = () => {
+    if (!drag) return;
+    drag.li.classList.remove("dragging");
+    drag = null;
+    sync();
+  };
+  list.addEventListener("pointerup", end);
+  list.addEventListener("pointercancel", end);
 }
 
 function renderTopReveal(a) {
-  const row = (arr, cls="") => `<ol class="orderlist done ${cls}">${(arr || []).map((i, n) => `<li><span class="tpos">${n + 1}</span>${i.img ? `<img src="${i.img}" alt="">` : `<span class="noimg"></span>`}<span class="ot">${showTitle(i)}</span></li>`).join("")}</ol>`;
+  const row = (arr, cls="") => `<ol class="orderlist done bigtop ${cls}">${(arr || []).map((i, n) => `<li><span class="tpos">${n + 1}</span><span class="ot">${showTitle(i)}</span></li>`).join("")}</ol>`;
   const mine = a.mine ? `<div class="toprev-me">
       <h3>${T("twoja topka")}</h3>${row(a.mine.own)}
       ${a.mine.target ? `<h3>${T("zgadywałeś topkę gracza {name}", {name: esc(a.mine.target)})}</h3>
@@ -793,26 +870,43 @@ function mostNode(n) {
   return `<div class="mostnode movie">${img}<span>${esc(n.title || "")}${n.year ? ` <small>${n.year}</small>` : ""}</span></div>`;
 }
 
+function personCard(n, label) {
+  if (!n) return "";
+  const img = n.photo ? `<img src="${n.photo}" alt="">` : `<span class="noimg">?</span>`;
+  return `<div class="fr-card"><span class="fr-lab">${esc(label || "")}</span>${img}<b>${esc(n.name || "")}</b></div>`;
+}
+
 function renderMost() {
-  const path = S.path || [S.start];
-  const cur = S.current || path[path.length - 1];
-  const link = (S.start && S.start.link) ? S.start.link : null;
-  const trail = `<ol class="mostpath">${path.map(n => `<li>${mostNode(n)}</li>`).join("")}</ol>`;
-  const goal = `<div class="mostpair">${mostNode(S.start)}<span class="mostarrow" aria-hidden="true">→</span>${mostNode(S.goal)}</div>`;
-  const stage = `<div class="stage textstage moststage"><span class="lvl">${T("Most")}</span><span class="clock" id="clock"></span>
-    ${goal}
-    ${link ? `<p class="muted small-note"><a href="${esc(link.url)}" target="_blank" rel="noopener">${T("otwórz profil startowy na {src}", {src: link.label})}</a> · ${T("ruchy zapisujemy tylko tutaj")}</p>` : ""}
-    <h3 class="mosth">${T("twoja ścieżka")}</h3>${trail}
-    <div id="mostopts" class="mostopts"><div class="wait"><span class="spin"></span>${T("Ładuję filmografię...")}</div></div>
-    </div>${bar()}`;
-  const input = S.finished ? waitBox(T("Jesteś na miejscu. Czekamy na resztę."))
-    : `<div class="row mostacts">${path.length > 1 ? `<button type="button" class="pill light" id="mund">${T("cofnij krok")}</button>` : ""}</div>`;
+  const start = S.start || {}, goal = S.goal || {};
+  const running = (S.started_names || []).length;
+  const back = S.returned || [];
+  const status = S.winner_name
+    ? `<p class="fr-status win">${T("Rundę wygrywa {name}.", {name: esc(S.winner_name)})}</p>`
+    : `<p class="fr-status">${running ? T("Wyszło: {list}", {list: (S.started_names || []).map(esc).join(", ")}) : T("Kliknij Start, żeby otworzyć profil pierwszego aktora.")}
+       ${back.length ? " · " + T("Wrócili: {list}", {list: back.map(esc).join(", ")}) : ""}</p>`;
+  const stage = `<div class="stage textstage moststage filmrun-stage"><span class="lvl">Filmrun</span>
+    <div class="fr-pair">${personCard(start, T("start"))}<span class="mostarrow" aria-hidden="true">→</span>${personCard(goal, T("cel"))}</div>
+    <p class="muted fr-note">${T("Na {src} szukacie drugiego aktora, chodząc po filmach i obsadzie. Ruchy tam są poza naszą stroną. Wygrywa ten, kto pierwszy wróci i wciśnie Stop.", {src: (S.link && S.link.label) || (LANG === "pl" ? "Filmwebie" : "IMDb")})}</p>
+    ${status}
+    </div>`;
+  let input;
+  if (S.winner) input = waitBox(T("Runda zakończona"), T("{name} wcisnął Stop jako pierwszy.", {name: esc(S.winner_name || "")}));
+  else if (S.can_stop) input = `<button type="button" class="pill orange big" id="frstop">${T("Stop")}</button><p class="muted small-note">${T("Znalazłeś drugiego aktora? Wróć i wciśnij Stop.")}</p>`;
+  else if (S.can_start) input = `<button type="button" class="pill orange big" id="frstart">${T("Start")}</button>`;
+  else input = waitBox(T("Runda w toku"), T("Czekamy, aż ktoś wróci i wciśnie Stop."));
   return [stage, input];
 }
 
 function wireMost() {
-  if ($("#mund")) $("#mund").onclick = () => guessAct({undo: true});
-  loadMostOptions();
+  if ($("#frstart")) $("#frstart").onclick = async () => {
+    try {
+      const r = await roomCall("guess", {start: true});
+      const url = (r && r.link && r.link.url) || (S.link && S.link.url) || (S.start && S.start.link && S.start.link.url);
+      if (url) window.open(url, "_blank", "noopener");
+      lastKey = ""; if (!WS_MODE) poll();
+    } catch (e) { toast(e.message); }
+  };
+  if ($("#frstop")) $("#frstop").onclick = () => guessAct({stop: true});
 }
 
 async function loadMostOptions() {
@@ -845,14 +939,11 @@ async function loadMostOptions() {
 }
 
 function renderMostReveal(a) {
-  const row = p => `<div class="mostrev ${p.reached ? "ok" : ""}">
-    <h3>${esc(p.name)} <span class="muted">${p.reached ? T("{n} filmów", {n: p.movies}) + " · " + T("+{pts} pkt", {pts: p.points}) : T("nie doszedł")}</span></h3>
-    <ol class="mostpath">${(p.path || []).map(n => `<li>${mostNode(n)}</li>`).join("")}</ol>
-  </div>`;
-  return `<h2>${T("ścieżki")}</h2>
-    <div class="mostpair">${mostNode(a.start)}<span class="mostarrow">→</span>${mostNode(a.goal)}</div>
-    <p class="muted">${T("Im krótsza ścieżka, tym więcej punktów: 200 pkt za każde ogniwo poniżej 8 filmów (minimum 100, jeśli dojdziesz). Kto dojdzie pierwszy, +100.")}</p>
-    ${(a.paths || []).map(row).join("")}`;
+  const rows = a.results || a.paths || [];
+  return `<h2>Filmrun</h2>
+    <div class="fr-pair">${personCard(a.start, T("start"))}<span class="mostarrow">→</span>${personCard(a.goal, T("cel"))}</div>
+    <p class="muted">${a.winner_name ? T("Rundę wygrywa {name} — pierwszy wcisnął Stop (1000 pkt).", {name: esc(a.winner_name)}) : T("Nikt nie wcisnął Stop.")}</p>
+    <ul class="results">${rows.map(p => `<li class="${p.won || p.reached ? "" : "miss"}">${esc(p.name)} ${p.won || p.reached ? "+" + (p.points || 0) : "0"}</li>`).join("")}</ul>`;
 }
 
 function actorEntry(c) {
@@ -886,11 +977,11 @@ function renderReveal(v) {
     <ul class="guesses">${a.guesses.map(g => `<li><b>${esc(g.name)}</b><span>${g.year}</span><span class="d">${g.year === a.year ? T("dokładnie") : T("{d} lat różnicy", {d: Math.abs(g.year - a.year)})}</span><span class="sc">+${g.points}</span></li>`).join("") || `<li class="miss">${T("Nikt nie odpowiedział.")}</li>`}</ul>`;
   else if (mode === "kolejnosc") body = `<h2>${T("dobra kolejność")}</h2><ol class="orderlist done">${a.items.map(i => `<li>${i.img ? `<img src="${i.img}" alt="">` : `<span class="noimg"></span>`}<span class="ot">${showTitle(i)}</span><span class="oy">${i.year}</span></li>`).join("")}</ol>`;
   else if (mode === "licytacja") {
-    body = (a.prompt ? `<p class="muted qprompt-r">${esc(a.prompt)}</p>` : "") + (a.bidder_name ? `<h2>${a.success ? T("{name} dał radę", {name: esc(a.bidder_name)}) : T("{name} nie dał rady", {name: esc(a.bidder_name)})}</h2>
-      <div class="year">${T("{f} z {b} zadeklarowanych", {f: a.count ?? a.found.length, b: a.bid})}</div>
-      <p class="muted">${T("Deklaracje: {list}", {list: a.bids.map(b => esc(b.name) + " " + b.bid).join(", ")})}</p>
-      <ul class="found">${a.found.map(f => `<li>${showTitle(f)}</li>`).join("")}</ul>
-      ${a.missed && a.missed.length ? `<p class="muted" style="margin:10px 0 4px">${T("Inne poprawne odpowiedzi:")}</p><ul class="found missed">${a.missed.map(f => `<li>${showTitle(f)}</li>`).join("")}</ul>` : ""}`
+    body = (a.prompt ? `<p class="muted qprompt-r">${esc(a.prompt)}</p>` : "") + (a.bidder_name ? `<h2>${a.success ? T("{name} zaliczył zadanie", {name: esc(a.bidder_name)}) : T("{name} nie zaliczył zadania", {name: esc(a.bidder_name)})}</h2>
+      <div class="year">${T("deklaracja: {n}", {n: a.bid})}</div>
+      <p class="muted">${T("Po timerze pozostali gracze zdecydowali, czy licytujący wymienił tyle odpowiedzi. Sukces: 200 pkt × deklaracja dla licytującego. Porażka: 100 pkt × deklaracja dla pozostałych.")}</p>
+      <p class="muted">${T("Deklaracje: {list}", {list: (a.bids || []).map(b => esc(b.name) + " " + b.bid).join(", ")})}</p>
+      ${(a.answers || a.missed || a.found || []).length ? `<p class="muted" style="margin:10px 0 4px">${T("Lista poprawnych odpowiedzi:")}</p><ul class="found">${(a.answers || a.missed || a.found).map(f => `<li>${showTitle(f)}</li>`).join("")}</ul>` : ""}`
       : `<h2>${T("nikt nie licytował")}</h2>`);
   }
   v.innerHTML = `<div class="game"><div class="gmain">${hud()}<div class="panel reveal">${head}${body}${roundResults()}</div>

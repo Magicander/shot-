@@ -26,5 +26,5 @@
     { "tag": "v2", "new_sqlite_classes": ["Content"] }
   ]
   // Hasło admina: npx wrangler secret put ADMIN_PASSWORD (lokalnie: plik .dev.vars, poza gitem)
-  // Opcjonalnie klucz TMDB dla gry Most: npx wrangler secret put TMDB_API_KEY
+  // Opcjonalnie klucz TMDB do doboru par w Filmrun: npx wrangler secret put TMDB_API_KEY
 }

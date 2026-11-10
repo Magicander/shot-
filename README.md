@@ -1,6 +1,6 @@
 # kadr* - quiz filmowy dla znajomych
 
-Zgadujcie filmy z wybranego pakietu w kilku trybach: po kadrze, zbliżeniu, plakacie, obsadzie, roku premiery, kolejności, w licytacji i w Topce. Osobno, pod listą pakietów, jest specjalna gra Most: przejście po filmografii od jednego aktora do drugiego. Im szybciej albo bliżej, tym więcej punktów.
+Zgadujcie filmy z wybranego pakietu w kilku trybach: po kadrze, zbliżeniu, plakacie, obsadzie, roku premiery, kolejności, w licytacji i w Topce. Osobno jest specjalna gra Filmrun (Wikipedia run, ale o filmach): dostajecie dwóch aktorów, Start otwiera profil pierwszego, szukacie drugiego na Filmwebie albo IMDb i wracacie, żeby wcisnąć Stop.
 
 ## Start
 
@@ -66,9 +66,11 @@ Nowe kolumny i tabele (polski tytuł, aliasy, obsada, plakaty ze źródłem, cyt
 
 ## Tryby gry
 
-Gospodarz wybiera pakiet (albo **Custom** — zawsze ostatni na liście, nie jest wierszem w tabeli pakietów), a w poczekalni zaznacza tryby i liczbę rund. Przy Custom najpierw zaznacza, które istniejące pakiety złożyć w jedną pulę (np. Marvel + Akcja); filmy, pytania, obsada i kadry to suma wybranych pakietów, bez duplikatów tytułu i roku (zostaje bogatsza wersja). Filmy losowane są z tej puli, rundy przeplatają zaznaczone tryby, punkty sumują się w jednym rankingu.
+Gospodarz wybiera pakiet (albo **Custom** — zawsze ostatni na liście, nie jest wierszem w tabeli pakietów; na karcie jest duży znak zapytania zamiast kolażu kadrów), a w poczekalni zaznacza tryby i liczbę rund. Przy Custom najpierw zaznacza, które istniejące pakiety złożyć w jedną pulę (np. Marvel + Akcja); filmy, pytania, obsada i kadry to suma wybranych pakietów, bez duplikatów tytułu i roku (zostaje bogatsza wersja). Filmy losowane są z tej puli, rundy przeplatają zaznaczone tryby, punkty sumują się w jednym rankingu.
 
-Pod listą pakietów jest osobna gra **Most** (w angielskim: **Bridge**). To nie jest tryb wewnątrz pakietu. Wszyscy w pokoju dostają tę samą parę aktorów i w naszym interfejsie chodzą: profil aktora (filmografia) → film (obsada) → kolejny aktor, aż ktoś dojdzie do celu. Ścieżka jest zawsze widoczna. Po rundzie wszyscy widzą, kto którą drogą szedł. Punktacja: im krótsza ścieżka, tym więcej punktów — 200 pkt za każde ogniwo poniżej 8 filmów (minimum 100, jeśli dojdziesz); kto dojdzie pierwszy, +100. Para jest dobierana tak, żeby istniała ścieżka (zwykle 3–4 filmy, nie ten sam film). Filmografię bierzemy z TMDB (klucz opcjonalnie w `config.local.json` albo, na Cloudflare, `npx wrangler secret put TMDB_API_KEY`). Bez klucza gra używa lokalnego grafu z już pobranej obsady pakietów i nie udaje pełnej bazy; gdy i tego nie starczy, start kończy się jasnym komunikatem. Link „otwórz profil na Filmweb” (PL) albo IMDb (EN) jest tylko pomocą — strona nie śledzi kliknięć na tych serwisach i nie otwiera ich w ramce.
+Pod listą pakietów, jako karta w tym samym stylu co kadr*/shot*, jest osobna gra **Filmrun** (podtytuł: „Wikipedia run, ale o filmach” / EN: „Wikipedia run, but for movies”). To nie jest zwykły pakiet. W lobby ustawiasz tylko liczbę rund i czytasz zasady — nie ma wyboru czasu ani sposobu odpowiedzi. W rundzie gracze dostają dwóch znanych aktorów ze zdjęciami. **Start** otwiera profil pierwszego (Filmweb po polsku, IMDb po angielsku). Bez limitu czasu szukacie drugiego aktora na tamtej zewnętrznej stronie, chodząc po filmach i obsadzie. Kto pierwszy wróci na kadr*/shot* i wciśnie **Stop**, wygrywa rundę (1000 pkt, razy mnożnik finału jeśli jest). Potem nowa para, aż do ustawionej liczby rund.
+
+Przeglądarka nie pozwala stronie śledzić kliknięć na imdb.com ani filmweb.pl (same-origin, bez iframe). Nie ma rozszerzenia i nie ma podglądu ścieżki z IMDb/Filmwebu — ruchy tam są poza naszą stroną, a wygrywa ten, kto pierwszy wróci i wciśnie Stop. Pary dobieramy spośród znanych aktorów z prawdziwym linkiem do profilu (nie wyszukiwarką, jeśli jest ID) i zapisanym zdjęciem. Przy kluczu TMDB (`config.local.json` albo, na Cloudflare, `npx wrangler secret put TMDB_API_KEY`) bierzemy popularnych ludzi z `imdb_id` i, po polsku, ID Filmwebu. Bez klucza nie losujemy par bez zdjęcia i bez działającego linku — start kończy się jasnym komunikatem, jeśli w lokalnej obsadzie nie ma dość takich osób.
 
 | Tryb | Zasady | Wymaga |
 |---|---|---|
@@ -79,7 +81,7 @@ Pod listą pakietów jest osobna gra **Most** (w angielskim: **Bridge**). To nie
 | Ułóż po kolei | 4 filmy od najstarszego do najnowszego, 250 pkt za każde dobre miejsce | 4 różne lata |
 | Plakat | plakat się wyostrza (pikseloza) albo odsłania kafelkami | 3 plakaty (IMDb, Filmweb, TMDB albo ręcznie) |
 | Aktorzy | obsada pojawia się co 6 s, od najmniej znanych nazwisk (ze zdjęciem, jeśli jest); mniej nazwisk = więcej punktów | 3 filmy z obsadą (Filmweb, IMDb, TMDB albo ręcznie) |
-| Top | Wszyscy dostają te same filmy (domyślnie 5, w lobby 3–8). Najpierw każdy układa własną topkę od najlepszego do najgorszego (przeciąganie albo strzałki). Potem każdy zgaduje topkę dokładnie jednego innego gracza (przy 2 osobach — siebie nawzajem; nikt nie zgaduje siebie). Za każdy film: N pkt za dokładne miejsce, o 1 mniej za każde miejsce pomyłki (minimum 0). Przy 5 filmach maksimum to 25. Remis jest dozwolony | tyle filmów w puli, ile wynosi długość topki |
+| Top | Wszyscy dostają te same filmy (domyślnie 5, w lobby 3–8). Najpierw każdy układa własną topkę od najlepszego do najgorszego (przeciągasz kafelki palcem albo myszą, jak na iPhonie; bez zdjęć filmów). Potem każdy zgaduje topkę dokładnie jednego innego gracza (przy 2 osobach — siebie nawzajem; nikt nie zgaduje siebie). Za każdy film: N pkt za dokładne miejsce, o 1 mniej za każde miejsce pomyłki (minimum 0). Przy 5 filmach maksimum to 25. Remis jest dozwolony | tyle filmów w puli, ile wynosi długość topki |
 
 W trybach z tytułem pierwsza poprawna odpowiedź dostaje +100 pkt. Tryb bez wystarczających danych jest wyszarzony z podpowiedzią, czego brakuje.
 Admin może wyłączyć dowolny tryb dla pakietu (edytor trybów albo panel "tryby gry" na stronie pakietu).
@@ -91,19 +93,15 @@ Gospodarz ustawia grę w lobby; pozostali gracze widzą ustawienia tylko do odcz
 Podstawowe:
 - **rundy** – liczba rund (tryby się przeplatają),
 - **czas na rundę** – `domyślny` (każdy tryb swój, np. Kadry 3 x 15 s, Zoom 30 s) albo stały 10–120 s,
-- **odpowiedzi** – `Wpisywanie` (gra sprawdza sama) albo `Na głos` (gracz klika *Mam!*, mówi tytuł, ktoś ocenia),
-- **kto ocenia** (przy odpowiedziach na głos) – `kolejny gracz` (sędzia rotuje co rundę), `gospodarz` albo `głosowanie` (decyduje większość pozostałych),
-- **licytacja** – czas na odpowiedź zwycięzcy (domyślnie 30 s) i czas na jedną turę licytacji (domyślnie 10 s),
-- **Top** – liczba filmów (domyślnie 5, od 3 do 8), czas na własną topkę i czas na zgadywanie (domyślnie po 45 s),
-- **Most** – czas na rundę (domyślnie 90 s).
+- **licytacja** – czas na odpowiedź zwycięzcy po puszczeniu timera (domyślnie 30 s) i czas na jedną turę licytacji (domyślnie 10 s),
+- **Top** – liczba filmów (domyślnie 5, od 3 do 8), czas na własną topkę i czas na zgadywanie (domyślnie po 45 s).
 
-Zaawansowane: czas osobno dla trybu, odpowiedzi osobno dla trybu (np. Kadry na głos, reszta wpisywana), liczba rund każdego trybu, kolejność trybów (losowa albo Twoja), podpowiedzi tytułów (wł./wył.), mnożnik punktów w finale (x1/x2/x3).
+Zaawansowane: czas osobno dla trybu, liczba rund każdego trybu, kolejność trybów (losowa albo Twoja), podpowiedzi tytułów (domyślnie włączone, jak we Framed: od pierwszej litery widać Alien, Aladdin, Alexander…), mnożnik punktów w finale (x1/x2/x3).
 
-### Odpowiedzi na głos
-Sędzia widzi poprawną odpowiedź i duże przyciski `dobrze` / `źle`, a zgłoszenia ocenia po kolei (liczy się kolejność kliknięcia *Mam!*). Sędzia nie zgaduje i nie ocenia sam siebie. Gdy sędzia się rozłączy, ocenia gospodarz. W trybie głosowania można podejrzeć odpowiedź, ale wtedy nie zdobywa się punktów w tej rundzie.
+Przy zgadywaniu tytułów (Kadry, Zoom, Plakat, Aktorzy) nie ma już odpowiedzi na głos, sędziego ani głosowania. Gra sama sprawdza wpisany tytuł. Wyjątkiem jest licytacja, która ma własne ocenianie przez graczy po timerze (opis niżej).
 
 ### Licytacja w turach
-Gra losuje, kto zaczyna. Gracze po kolei podbijają ofertę albo pasują (brak ruchu w czasie tury = pas). Gdy zostaje jedna osoba, wygrywa najwyższa oferta, a zwycięzca ma **tylko 30 s na odpowiedź** (informacja jest w zasadach i na ekranie odpowiedzi z dużym zegarem). Przy odpowiedziach na głos sędzia liczy poprawne przyciskiem `+1` (z `cofnij`) albo zaznacza je na liście.
+Gra losuje, kto zaczyna. Gracze po kolei podbijają ofertę albo pasują (brak ruchu w czasie tury = pas). Gdy zostaje jedna osoba, wygrywa najwyższa oferta. Timer **nie startuje sam** — puszcza go drugi gracz (albo pozostali, gdy gra więcej osób). Zwycięzca wymienia wtedy odpowiedzi na głos. Gdy czas minie, pozostali decydują tak/nie, czy zaliczył zadanie (wymienił tyle odpowiedzi, ile zadeklarował). Sukces: licytujący dostaje 200 pkt za każdą zadeklarowaną odpowiedź. Porażka: każdy z pozostałych dostaje po 100 pkt za każdą. W solo licytujący sam puszcza timer i sam ocenia się po czasie.
 
 ### Wersja mobilna
 Duże przyciski *stwórz grę* / *dołącz* na stronie głównej, przyciski akcji zawsze na dole ekranu, wyniki w wysuwanym panelu, ekran nie skacze przy klawiaturze, a animacje wyłączają się przy ustawieniu „ogranicz ruch”.
@@ -135,7 +133,7 @@ Blokady (403, 429, WAF) są zgłaszane w logu jako "blocked" z powodem. Scraper 
 
 1. Załóż darmowe konto na themoviedb.org i wygeneruj klucz API (v3) albo token (v4).
 2. Panel admina, Ustawienia: wklej klucz. Jest sprawdzany i zapisywany w `config.local.json` (poza gitem i poza eksportem .sql). Można też użyć zmiennej `TMDB_API_KEY`.
-3. TMDB staje się trzecim źródłem w trybie auto i można je wybrać wprost w edytorach. Ten sam klucz zasila filmografię w grze Most. Na Cloudflare ustawiasz go osobno: `npx wrangler secret put TMDB_API_KEY` (nie trafia do gita ani do eksportu).
+3. TMDB staje się trzecim źródłem w trybie auto i można je wybrać wprost w edytorach. Ten sam klucz pomaga dobrać znane pary w Filmrun (popularność + imdb_id, a po polsku profil Filmwebu). Na Cloudflare ustawiasz go osobno: `npx wrangler secret put TMDB_API_KEY` (nie trafia do gita ani do eksportu).
 
 Ta aplikacja korzysta z API TMDB, ale nie jest przez TMDB wspierana ani certyfikowana.
 
@@ -151,7 +149,7 @@ Ta aplikacja korzysta z API TMDB, ale nie jest przez TMDB wspierana ani certyfik
 
 ```
 python3 test_scraper_fallback.py
-python3 test_rules.py           # zasady: punktacja Top i Most, cykl bez self-guess, zoom_frame, dostępność Top
+python3 test_rules.py           # zasady: Top, Filmrun (Start/Stop), licytacja (timer od przeciwnika + werdykt), podpowiedzi, zdjęcia
 python3 test_game.py            # na kopii quiz.db: migracje, wklejanie PL, atrapa TMDB, gra 2 graczy we wszystkich trybach (w tym Top)
 python3 test_editors.py         # na kopii quiz.db: scraper IMDb/Filmweb na atrapie, edytory (w tym kadr Zoom), Custom na liście pakietów, licytacja z pytaniem
 node cloudflare/test/rules.mjs  # ten sam zestaw zasad dla portu na Workers
@@ -212,7 +210,7 @@ Po zalogowaniu hasłem `ADMIN_PASSWORD` (sekret wranglera):
 - obsada: edycja, kolejność i zdjęcia (link/plik); scraper obsady tylko lokalnie
 - metadane filmu (np. rok)
 
-Scraper, nowe pakiety i ustawienia TMDB w chmurze są ukryte / zwracają 405 z krótką notką. Klucz TMDB do gry Most w chmurze to sekret `TMDB_API_KEY`, nie pole w panelu.
+Scraper, nowe pakiety i ustawienia TMDB w chmurze są ukryte / zwracają 405 z krótką notką. Klucz TMDB do doboru par w Filmrun w chmurze to sekret `TMDB_API_KEY`, nie pole w panelu.
 
 ### Jak przechowywane są edycje (Content DO)
 

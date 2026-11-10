@@ -24,7 +24,7 @@ export function extLinks(person, lang = "pl") {
   const fw = person && person.filmweb_id;
   const name = (person && person.name) || "";
   if (lang === "pl") {
-    if (fw) return { label: "Filmweb", url: `https://www.filmweb.pl/person/${Number(fw)}` };
+    if (fw) return { label: "Filmweb", url: `https://www.filmweb.pl/person/x-${Number(fw)}` };
     return { label: "Filmweb", url: `https://www.filmweb.pl/search#/${encodeURIComponent(name)}` };
   }
   if (imdb) return { label: "IMDb", url: `https://www.imdb.com/name/${imdb}/` };
@@ -323,7 +323,132 @@ export function seedIdsFromMovies(movies) {
   return [...new Set(ids)];
 }
 
+function linkIsSearch(person) {
+  const u = (person && person.link && person.link.url) || "";
+  return u.includes("search") || u.includes("find/?");
+}
+
+function famousFromLocal(movies, lang = "pl") {
+  const out = [], seen = new Set();
+  for (const m of movies || []) {
+    for (const c of m.cast || []) {
+      if (!c || typeof c !== "object") continue;
+      const name = (c.name || "").trim();
+      const photo = c.photo || (c.photo_id ? `/actor/${c.photo_id}.jpg` : null);
+      if (!name || !photo) continue;
+      const person = {
+        kind: "person",
+        id: c.photo_id || c.source_id || name,
+        name,
+        photo,
+        imdb_id: (String(c.source_id || "").startsWith("nm") ? c.source_id : (c.imdb_id || "")),
+        filmweb_id: (c.filmweb_id || (String(c.source || "") === "filmweb" && /^\d+$/.test(String(c.source_id || "")) ? Number(c.source_id) : null)),
+      };
+      if (lang === "en" && !person.imdb_id) continue;
+      if (lang === "pl" && !person.filmweb_id) continue;
+      person.link = extLinks(person, lang);
+      if (linkIsSearch(person)) continue;
+      const key = name.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(person);
+    }
+  }
+  return out;
+}
+
+async function tmdbPopularPeople(key, lang = "pl", rng = Math.random) {
+  const pages = [1, 2, 3].sort(() => rng() - 0.5).slice(0, 2);
+  const people = [];
+  const seen = new Set();
+  for (const page of pages) {
+    try {
+      const url = `${TMDB_API}/person/popular?api_key=${encodeURIComponent(key)}&page=${page}`;
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const data = await res.json();
+      for (const p of data.results || []) {
+        if (!p.id || !p.profile_path || !p.name || (p.popularity || 0) < 12) continue;
+        if (seen.has(p.id)) continue;
+        seen.add(p.id);
+        people.push(p);
+      }
+    } catch {}
+  }
+  people.sort(() => rng() - 0.5);
+  const out = [];
+  for (const p of people.slice(0, 24)) {
+    try {
+      const det = await tmdbPersonDetail(key, p.id, lang);
+      if (!det || !det.imdb_id || !String(det.imdb_id).startsWith("nm")) continue;
+      if (!det.photo) continue;
+      if (lang === "pl") {
+        const fw = await filmwebPerson(det.name);
+        if (!fw || !fw.filmweb_id) continue;
+        det.filmweb_id = fw.filmweb_id;
+      }
+      det.link = extLinks(det, lang);
+      if (linkIsSearch(det)) continue;
+      out.push(det);
+      if (out.length >= 12) break;
+    } catch {}
+  }
+  return out;
+}
+
+async function filmwebPerson(name) {
+  const q = (name || "").trim();
+  if (!q) return null;
+  try {
+    const url = "https://www.filmweb.pl/api/v1/live/search?query=" + encodeURIComponent(q);
+    const res = await fetch(url, { headers: { Accept: "application/json", Origin: "https://www.filmweb.pl", Referer: "https://www.filmweb.pl/" } });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const want = q.toLowerCase();
+    for (const h of data.searchHits || []) {
+      if (h.type !== "person" || !h.id) continue;
+      const infoRes = await fetch(`https://www.filmweb.pl/api/v1/person/${h.id}/info`, { headers: { Accept: "application/json", Origin: "https://www.filmweb.pl", Referer: "https://www.filmweb.pl/" } });
+      if (!infoRes.ok) continue;
+      const info = await infoRes.json();
+      if (String(info.name || "").toLowerCase() !== want) continue;
+      return { filmweb_id: Number(info.id || h.id), name: info.name || q };
+    }
+  } catch {}
+  return null;
+}
+
+export async function pickFilmrunPair(movies, key, lang = "pl", rng = Math.random) {
+  let cands = [];
+  if (key) {
+    try { cands = await tmdbPopularPeople(key, lang, rng); }
+    catch (e) { console.log("Filmrun TMDB pick failed:", String(e)); }
+  }
+  if (cands.length < 2) {
+    const have = new Set(cands.map(p => (p.name || "").toLowerCase()));
+    for (const p of famousFromLocal(movies, lang)) {
+      if (!have.has((p.name || "").toLowerCase())) cands.push(p);
+    }
+  }
+  cands = cands.filter(p => p.photo && p.link && !linkIsSearch(p));
+  if (cands.length < 2) {
+    const err = new Error(key ? "most_no_pair" : "most_no_tmdb");
+    err.code = "LookupError";
+    err.key = err.message;
+    throw err;
+  }
+  cands.sort(() => rng() - 0.5);
+  const start = cands[0], goal = cands[1];
+  start.link = extLinks(start, lang);
+  goal.link = extLinks(goal, lang);
+  return { start, goal };
+}
+
 export async function pickPair(movies, key, lang = "pl", rng = Math.random) {
+  try {
+    return await pickFilmrunPair(movies, key, lang, rng);
+  } catch (e) {
+    if (e && (e.key === "most_no_tmdb" || e.key === "most_no_pair")) throw e;
+  }
   let pair = null;
   if (key) {
     try { pair = await pickPairTmdb(key, seedIdsFromMovies(movies), lang, rng); }
@@ -339,6 +464,7 @@ export async function pickPair(movies, key, lang = "pl", rng = Math.random) {
   const [start, goal, witness] = pair;
   start.link = extLinks(start, lang);
   goal.link = extLinks(goal, lang);
+  // Filmrun nie używa świadka — ale zostawiamy kształt {start,goal}
   return { start, goal, witness: pathMovies(witness) };
 }
 

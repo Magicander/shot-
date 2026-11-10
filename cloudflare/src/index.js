@@ -227,7 +227,8 @@ async function gameApi(req, env, path, url) {
   }
   if (req.method === "POST" && path === "/api/rooms") {
     const d = await body(req);
-    const kind = d.kind || (d.pack_id === "most" ? "most" : d.pack_id === "custom" ? "custom" : "pack");
+    let kind = d.kind || (["most","filmrun"].includes(d.pack_id) ? "most" : d.pack_id === "custom" ? "custom" : "pack");
+    if (kind === "filmrun" || kind === "bridge") kind = "most";
     if (kind === "pack") {
       const packId = parseInt(d.pack_id, 10);
       if (!(packId > 0)) throw new ApiError(400, "Zły format danych");
