@@ -255,7 +255,12 @@ check(roomsmod.lic_total({"answers": [{"text": "A"}, {"text": "B"}, {"text": "C"
       "licytacja z listą: pułap to liczba odpowiedzi")
 import filmrun_pool
 pool = filmrun_pool.load_people()
-check(100 <= len(pool) <= 160, f"pula Filmrun ma 100–150 aktorów (jest {len(pool)})")
+check(90 <= len(pool) <= 110, f"pula Filmrun ma ok. 100 household names (jest {len(pool)})")
+names = {p["name"] for p in pool}
+for n in ("Chris Evans", "Samuel L. Jackson", "Michael B. Jordan"):
+    check(n in names, f"pula zawiera {n}")
+for n in ("Joanna Kulig", "Awkwafina", "Kinga Preis"):
+    check(n not in names, f"pula bez średnio znanego nazwiska: {n}")
 pair = filmrun_pool.pick_pair(lang="pl", rng=__import__("random").Random(1))
 check(pair["start"]["name"] != pair["goal"]["name"], "pula: para to dwie różne osoby")
 check(pair["start"]["imdb_id"].startswith("nm") and int(pair["start"]["filmweb_id"]) > 0, "pula: prawdziwe ID IMDb i Filmweb")

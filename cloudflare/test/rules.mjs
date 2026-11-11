@@ -229,7 +229,14 @@ console.log("Filmrun: lobby bez czasu, Start/Stop");
   check(cssn.includes(".stage:not(.textstage)img{"), "kadry: pełny kadr nie psuje zdjęć w Filmrun/textstage");
   check(cssn.includes("flex-wrap:nowrap") && css.includes(".fr-pair{"), "Filmrun: para aktorów w jednym rzędzie na pulpicie");
   const pool = poolPeople();
-  check(pool.length >= 100 && pool.length <= 160, `pula Filmrun ma 100–150 aktorów (jest ${pool.length})`);
+  check(pool.length >= 90 && pool.length <= 110, `pula Filmrun ma ok. 100 household names (jest ${pool.length})`);
+  const names = new Set(pool.map(p => p.name));
+  for (const n of ["Chris Evans", "Samuel L. Jackson", "Michael B. Jordan"]) {
+    check(names.has(n), `pula CF zawiera ${n}`);
+  }
+  for (const n of ["Joanna Kulig", "Awkwafina", "Kinga Preis"]) {
+    check(!names.has(n), `pula CF bez średnio znanego nazwiska: ${n}`);
+  }
   const pair = await pickFilmrunPair([], null, "pl", () => 0.1);
   check(pair.start.name && pair.start.name !== pair.goal.name, "pula CF: para to dwie różne osoby");
   check(String(pair.start.imdb_id).startsWith("nm") && Number(pair.start.filmweb_id) > 0, "pula CF: prawdziwe ID");

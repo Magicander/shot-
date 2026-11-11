@@ -608,3 +608,8 @@ footer{padding:30px 0 50px;text-align:center;color:var(--muted);font-size:14px}
   .qmark{font-size:120px}
   .loose-bid .bigbid{font-size:52px}
 }
+
+/* dolny padding, żeby sticky Start/Stop na telefonie nie zasłaniał opisu */
+@media (max-width:900px){
+  .gmain:has(#frstart), .gmain:has(#frstop){padding-bottom:92px}
+}

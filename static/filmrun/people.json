@@ -1,61 +1,16 @@
 {
-  "source": "Kuratorska lista znanych aktorów filmowych. ID: Wikidata P345 (IMDb) i P5033 (Filmweb), w razie potrzeby potwierdzone API-em Filmwebu. Zdjęcia: Wikimedia Commons albo Filmweb. Poza quiz.db.",
-  "updated": "2026-11-10",
-  "count": 150,
+  "source": "The Numbers, Top 100 Stars in Leading Roles at the Worldwide Box Office (https://www.the-numbers.com/box-office-star-records/worldwide/lifetime-acting/top-grossing-leading-stars), stan na 2026-11-11; przefiltrowane pod kątem prawdziwej rozpoznawalności (odrzucone m.in. mniej znane nazwiska z ensemble MCU i hype box-office'u), uzupełnione household names spoza tej setki oraz kilkoma ogólnopolsko znanymi aktorami. ID: Wikidata P345 (IMDb) i P5033 (Filmweb), w razie potrzeby potwierdzone API-em Filmwebu. Zdjęcia: Wikimedia Commons albo Filmweb. Poza quiz.db.",
+  "updated": "2026-11-11",
+  "count": 105,
   "people": [
     {
-      "name": "Charlie Chaplin",
-      "imdb_id": "nm0000122",
-      "filmweb_id": 47504,
-      "photo": "nm0000122.jpg",
-      "sitelinks": 264,
+      "name": "Zoe Saldaña",
+      "imdb_id": "nm0757855",
+      "filmweb_id": 40559,
+      "photo": "nm0757855.jpg",
+      "sitelinks": 81,
       "photo_source": "filmweb",
       "rank": 1
-    },
-    {
-      "name": "Marilyn Monroe",
-      "imdb_id": "nm0000054",
-      "filmweb_id": 40889,
-      "photo": "nm0000054.jpg",
-      "sitelinks": 243,
-      "photo_source": "filmweb",
-      "rank": 2
-    },
-    {
-      "name": "Bruce Lee",
-      "imdb_id": "nm0000045",
-      "filmweb_id": 42494,
-      "photo": "nm0000045.jpg",
-      "sitelinks": 169,
-      "photo_source": "filmweb",
-      "rank": 3
-    },
-    {
-      "name": "Jackie Chan",
-      "imdb_id": "nm0000329",
-      "filmweb_id": 3108,
-      "photo": "nm0000329.jpg",
-      "sitelinks": 163,
-      "photo_source": "filmweb",
-      "rank": 4
-    },
-    {
-      "name": "Robin Williams",
-      "imdb_id": "nm0000245",
-      "filmweb_id": 223,
-      "photo": "nm0000245.jpg",
-      "sitelinks": 163,
-      "photo_source": "filmweb",
-      "rank": 5
-    },
-    {
-      "name": "Marlon Brando",
-      "imdb_id": "nm0000008",
-      "filmweb_id": 140,
-      "photo": "nm0000008.jpg",
-      "sitelinks": 159,
-      "photo_source": "filmweb",
-      "rank": 6
     },
     {
       "name": "Scarlett Johansson",
@@ -64,43 +19,106 @@
       "photo": "nm0424060.jpg",
       "sitelinks": 157,
       "photo_source": "filmweb",
+      "rank": 2
+    },
+    {
+      "name": "Chris Pratt",
+      "imdb_id": "nm0695435",
+      "filmweb_id": 134764,
+      "photo": "nm0695435.jpg",
+      "sitelinks": 127,
+      "photo_source": "filmweb",
+      "rank": 3
+    },
+    {
+      "name": "Samuel L. Jackson",
+      "imdb_id": "nm0000168",
+      "filmweb_id": 53,
+      "photo": "nm0000168.jpg",
+      "sitelinks": 99,
+      "photo_source": "filmweb",
+      "rank": 4
+    },
+    {
+      "name": "Robert Downey Jr.",
+      "imdb_id": "nm0000375",
+      "filmweb_id": 31,
+      "photo": "nm0000375.jpg",
+      "sitelinks": 114,
+      "photo_source": "filmweb",
+      "rank": 5
+    },
+    {
+      "name": "Tom Holland",
+      "imdb_id": "nm4043618",
+      "filmweb_id": 1619211,
+      "photo": "nm4043618.jpg",
+      "sitelinks": 119,
+      "photo_source": "filmweb",
+      "rank": 6
+    },
+    {
+      "name": "Tom Cruise",
+      "imdb_id": "nm0000129",
+      "filmweb_id": 24,
+      "photo": "nm0000129.jpg",
+      "sitelinks": 128,
+      "photo_source": "filmweb",
       "rank": 7
     },
     {
-      "name": "Arnold Schwarzenegger",
-      "imdb_id": "nm0000216",
-      "filmweb_id": 210,
-      "photo": "nm0000216.jpg",
-      "sitelinks": 155,
+      "name": "Chris Hemsworth",
+      "imdb_id": "nm1165110",
+      "filmweb_id": 196396,
+      "photo": "nm1165110.jpg",
+      "sitelinks": 95,
       "photo_source": "filmweb",
       "rank": 8
     },
     {
-      "name": "Audrey Hepburn",
-      "imdb_id": "nm0000030",
-      "filmweb_id": 186,
-      "photo": "nm0000030.jpg",
-      "sitelinks": 152,
+      "name": "Tom Hanks",
+      "imdb_id": "nm0000158",
+      "filmweb_id": 124,
+      "photo": "nm0000158.jpg",
+      "sitelinks": 137,
       "photo_source": "filmweb",
       "rank": 9
     },
     {
-      "name": "Brigitte Bardot",
-      "imdb_id": "nm0000003",
-      "filmweb_id": 134,
-      "photo": "nm0000003.jpg",
-      "sitelinks": 152,
+      "name": "Vin Diesel",
+      "imdb_id": "nm0004874",
+      "filmweb_id": 4352,
+      "photo": "nm0004874.jpg",
+      "sitelinks": 106,
       "photo_source": "filmweb",
       "rank": 10
     },
     {
-      "name": "Leonardo DiCaprio",
-      "imdb_id": "nm0000138",
-      "filmweb_id": 30,
-      "photo": "nm0000138.jpg",
-      "sitelinks": 150,
+      "name": "Dwayne Johnson",
+      "imdb_id": "nm0425005",
+      "filmweb_id": 40277,
+      "photo": "nm0425005.jpg",
+      "sitelinks": 113,
       "photo_source": "filmweb",
       "rank": 11
+    },
+    {
+      "name": "Chris Evans",
+      "imdb_id": "nm0262635",
+      "filmweb_id": 132277,
+      "photo": "nm0262635.jpg",
+      "sitelinks": 99,
+      "photo_source": "filmweb",
+      "rank": 12
+    },
+    {
+      "name": "Bradley Cooper",
+      "imdb_id": "nm0177896",
+      "filmweb_id": 57074,
+      "photo": "nm0177896.jpg",
+      "sitelinks": 135,
+      "photo_source": "filmweb",
+      "rank": 13
     },
     {
       "name": "Johnny Depp",
@@ -109,32 +127,14 @@
       "photo": "nm0000136.jpg",
       "sitelinks": 149,
       "photo_source": "filmweb",
-      "rank": 12
-    },
-    {
-      "name": "Brad Pitt",
-      "imdb_id": "nm0000093",
-      "filmweb_id": 205,
-      "photo": "nm0000093.jpg",
-      "sitelinks": 147,
-      "photo_source": "filmweb",
-      "rank": 13
-    },
-    {
-      "name": "Elizabeth Taylor",
-      "imdb_id": "nm0000072",
-      "filmweb_id": 42502,
-      "photo": "nm0000072.jpg",
-      "sitelinks": 147,
-      "photo_source": "filmweb",
       "rank": 14
     },
     {
-      "name": "Sean Connery",
-      "imdb_id": "nm0000125",
-      "filmweb_id": 152,
-      "photo": "nm0000125.jpg",
-      "sitelinks": 146,
+      "name": "Mark Ruffalo",
+      "imdb_id": "nm0749263",
+      "filmweb_id": 6650,
+      "photo": "nm0749263.jpg",
+      "sitelinks": 88,
       "photo_source": "filmweb",
       "rank": 15
     },
@@ -148,49 +148,13 @@
       "rank": 16
     },
     {
-      "name": "Robert De Niro",
-      "imdb_id": "nm0000134",
-      "filmweb_id": 123,
-      "photo": "nm0000134.jpg",
-      "sitelinks": 141,
+      "name": "Matt Damon",
+      "imdb_id": "nm0000354",
+      "filmweb_id": 158,
+      "photo": "nm0000354.jpg",
+      "sitelinks": 114,
       "photo_source": "filmweb",
       "rank": 17
-    },
-    {
-      "name": "Alain Delon",
-      "imdb_id": "nm0001128",
-      "filmweb_id": 6336,
-      "photo": "nm0001128.jpg",
-      "sitelinks": 140,
-      "photo_source": "filmweb",
-      "rank": 18
-    },
-    {
-      "name": "Natalie Portman",
-      "imdb_id": "nm0000204",
-      "filmweb_id": 316,
-      "photo": "nm0000204.jpg",
-      "sitelinks": 138,
-      "photo_source": "filmweb",
-      "rank": 19
-    },
-    {
-      "name": "Shah Rukh Khan",
-      "imdb_id": "nm0451321",
-      "filmweb_id": 72570,
-      "photo": "nm0451321.jpg",
-      "sitelinks": 137,
-      "photo_source": "filmweb",
-      "rank": 20
-    },
-    {
-      "name": "Tom Hanks",
-      "imdb_id": "nm0000158",
-      "filmweb_id": 124,
-      "photo": "nm0000158.jpg",
-      "sitelinks": 137,
-      "photo_source": "filmweb",
-      "rank": 21
     },
     {
       "name": "Will Smith",
@@ -199,340 +163,7 @@
       "photo": "nm0000226.jpg",
       "sitelinks": 137,
       "photo_source": "filmweb",
-      "rank": 22
-    },
-    {
-      "name": "Clint Eastwood",
-      "imdb_id": "nm0000142",
-      "filmweb_id": 122,
-      "photo": "nm0000142.jpg",
-      "sitelinks": 136,
-      "photo_source": "filmweb",
-      "rank": 23
-    },
-    {
-      "name": "Al Pacino",
-      "imdb_id": "nm0000199",
-      "filmweb_id": 78,
-      "photo": "nm0000199.jpg",
-      "sitelinks": 135,
-      "photo_source": "filmweb",
-      "rank": 24
-    },
-    {
-      "name": "Bradley Cooper",
-      "imdb_id": "nm0177896",
-      "filmweb_id": 57074,
-      "photo": "nm0177896.jpg",
-      "sitelinks": 135,
-      "photo_source": "filmweb",
-      "rank": 25
-    },
-    {
-      "name": "Cate Blanchett",
-      "imdb_id": "nm0000949",
-      "filmweb_id": 6495,
-      "photo": "nm0000949.jpg",
-      "sitelinks": 134,
-      "photo_source": "filmweb",
-      "rank": 26
-    },
-    {
-      "name": "Kate Winslet",
-      "imdb_id": "nm0000701",
-      "filmweb_id": 119,
-      "photo": "nm0000701.jpg",
-      "sitelinks": 134,
-      "photo_source": "filmweb",
-      "rank": 27
-    },
-    {
-      "name": "Nicole Kidman",
-      "imdb_id": "nm0000173",
-      "filmweb_id": 59,
-      "photo": "nm0000173.jpg",
-      "sitelinks": 134,
-      "photo_source": "filmweb",
-      "rank": 28
-    },
-    {
-      "name": "Sophia Loren",
-      "imdb_id": "nm0000047",
-      "filmweb_id": 53468,
-      "photo": "nm0000047.jpg",
-      "sitelinks": 133,
-      "photo_source": "filmweb",
-      "rank": 29
-    },
-    {
-      "name": "Julia Roberts",
-      "imdb_id": "nm0000210",
-      "filmweb_id": 91,
-      "photo": "nm0000210.jpg",
-      "sitelinks": 132,
-      "photo_source": "filmweb",
-      "rank": 30
-    },
-    {
-      "name": "Katharine Hepburn",
-      "imdb_id": "nm0000031",
-      "filmweb_id": 43455,
-      "photo": "nm0000031.jpg",
-      "sitelinks": 131,
-      "photo_source": "filmweb",
-      "rank": 31
-    },
-    {
-      "name": "Jack Nicholson",
-      "imdb_id": "nm0000197",
-      "filmweb_id": 75,
-      "photo": "nm0000197.jpg",
-      "sitelinks": 130,
-      "photo_source": "filmweb",
-      "rank": 32
-    },
-    {
-      "name": "Morgan Freeman",
-      "imdb_id": "nm0000151",
-      "filmweb_id": 176,
-      "photo": "nm0000151.jpg",
-      "sitelinks": 129,
-      "photo_source": "filmweb",
-      "rank": 33
-    },
-    {
-      "name": "George Clooney",
-      "imdb_id": "nm0000123",
-      "filmweb_id": 150,
-      "photo": "nm0000123.jpg",
-      "sitelinks": 128,
-      "photo_source": "filmweb",
-      "rank": 34
-    },
-    {
-      "name": "Jennifer Aniston",
-      "imdb_id": "nm0000098",
-      "filmweb_id": 6757,
-      "photo": "nm0000098.jpg",
-      "sitelinks": 128,
-      "photo_source": "filmweb",
-      "rank": 35
-    },
-    {
-      "name": "Tom Cruise",
-      "imdb_id": "nm0000129",
-      "filmweb_id": 24,
-      "photo": "nm0000129.jpg",
-      "sitelinks": 128,
-      "photo_source": "filmweb",
-      "rank": 36
-    },
-    {
-      "name": "Chris Pratt",
-      "imdb_id": "nm0695435",
-      "filmweb_id": 134764,
-      "photo": "nm0695435.jpg",
-      "sitelinks": 127,
-      "photo_source": "filmweb",
-      "rank": 37
-    },
-    {
-      "name": "Jim Carrey",
-      "imdb_id": "nm0000120",
-      "filmweb_id": 148,
-      "photo": "nm0000120.jpg",
-      "sitelinks": 127,
-      "photo_source": "filmweb",
-      "rank": 38
-    },
-    {
-      "name": "Amitabh Bachchan",
-      "imdb_id": "nm0000821",
-      "filmweb_id": 105384,
-      "photo": "nm0000821.jpg",
-      "sitelinks": 126,
-      "photo_source": "filmweb",
-      "rank": 39
-    },
-    {
-      "name": "Jeremy Renner",
-      "imdb_id": "nm0719637",
-      "filmweb_id": 68714,
-      "photo": "nm0719637.jpg",
-      "sitelinks": 126,
-      "photo_source": "filmweb",
-      "rank": 40
-    },
-    {
-      "name": "Sylvester Stallone",
-      "imdb_id": "nm0000230",
-      "filmweb_id": 215,
-      "photo": "nm0000230.jpg",
-      "sitelinks": 126,
-      "photo_source": "filmweb",
-      "rank": 41
-    },
-    {
-      "name": "Ingrid Bergman",
-      "imdb_id": "nm0000006",
-      "filmweb_id": 6778,
-      "photo": "nm0000006.jpg",
-      "sitelinks": 125,
-      "photo_source": "filmweb",
-      "rank": 42
-    },
-    {
-      "name": "Keanu Reeves",
-      "imdb_id": "nm0000206",
-      "filmweb_id": 87,
-      "photo": "nm0000206.jpg",
-      "sitelinks": 124,
-      "photo_source": "filmweb",
-      "rank": 43
-    },
-    {
-      "name": "Anthony Hopkins",
-      "imdb_id": "nm0000164",
-      "filmweb_id": 48,
-      "photo": "nm0000164.jpg",
-      "sitelinks": 122,
-      "photo_source": "filmweb",
-      "rank": 44
-    },
-    {
-      "name": "John Wayne",
-      "imdb_id": "nm0000078",
-      "filmweb_id": 46384,
-      "photo": "nm0000078.jpg",
-      "sitelinks": 122,
-      "photo_source": "filmweb",
-      "rank": 45
-    },
-    {
-      "name": "Sigourney Weaver",
-      "imdb_id": "nm0000244",
-      "filmweb_id": 116,
-      "photo": "nm0000244.jpg",
-      "sitelinks": 122,
-      "photo_source": "filmweb",
-      "rank": 46
-    },
-    {
-      "name": "Jennifer Lawrence",
-      "imdb_id": "nm2225369",
-      "filmweb_id": 612192,
-      "photo": "nm2225369.jpg",
-      "sitelinks": 121,
-      "photo_source": "filmweb",
-      "rank": 47
-    },
-    {
-      "name": "Nicolas Cage",
-      "imdb_id": "nm0000115",
-      "filmweb_id": 15,
-      "photo": "nm0000115.jpg",
-      "sitelinks": 121,
-      "photo_source": "filmweb",
-      "rank": 48
-    },
-    {
-      "name": "Halle Berry",
-      "imdb_id": "nm0000932",
-      "filmweb_id": 7918,
-      "photo": "nm0000932.jpg",
-      "sitelinks": 120,
-      "photo_source": "filmweb",
-      "rank": 49
-    },
-    {
-      "name": "Jet Li",
-      "imdb_id": "nm0001472",
-      "filmweb_id": 4583,
-      "photo": "nm0001472.jpg",
-      "sitelinks": 120,
-      "photo_source": "filmweb",
-      "rank": 50
-    },
-    {
-      "name": "Maggie Smith",
-      "imdb_id": "nm0001749",
-      "filmweb_id": 4752,
-      "photo": "nm0001749.jpg",
-      "sitelinks": 120,
-      "photo_source": "wikimedia",
-      "rank": 51
-    },
-    {
-      "name": "Penélope Cruz",
-      "imdb_id": "nm0004851",
-      "filmweb_id": 2934,
-      "photo": "nm0004851.jpg",
-      "sitelinks": 120,
-      "photo_source": "filmweb",
-      "rank": 52
-    },
-    {
-      "name": "Grace Kelly",
-      "imdb_id": "nm0000038",
-      "filmweb_id": 9533,
-      "photo": "nm0000038.jpg",
-      "sitelinks": 119,
-      "photo_source": "filmweb",
-      "rank": 53
-    },
-    {
-      "name": "Humphrey Bogart",
-      "imdb_id": "nm0000007",
-      "filmweb_id": 6777,
-      "photo": "nm0000007.jpg",
-      "sitelinks": 119,
-      "photo_source": "filmweb",
-      "rank": 54
-    },
-    {
-      "name": "Mel Gibson",
-      "imdb_id": "nm0000154",
-      "filmweb_id": 39,
-      "photo": "nm0000154.jpg",
-      "sitelinks": 119,
-      "photo_source": "filmweb",
-      "rank": 55
-    },
-    {
-      "name": "Tom Holland",
-      "imdb_id": "nm4043618",
-      "filmweb_id": 1619211,
-      "photo": "nm4043618.jpg",
-      "sitelinks": 119,
-      "photo_source": "filmweb",
-      "rank": 56
-    },
-    {
-      "name": "Charlize Theron",
-      "imdb_id": "nm0000234",
-      "filmweb_id": 2524,
-      "photo": "nm0000234.jpg",
-      "sitelinks": 118,
-      "photo_source": "filmweb",
-      "rank": 57
-    },
-    {
-      "name": "Jodie Foster",
-      "imdb_id": "nm0000149",
-      "filmweb_id": 37,
-      "photo": "nm0000149.jpg",
-      "sitelinks": 118,
-      "photo_source": "filmweb",
-      "rank": 58
-    },
-    {
-      "name": "Chris Pine",
-      "imdb_id": "nm1517976",
-      "filmweb_id": 140366,
-      "photo": "nm1517976.jpg",
-      "sitelinks": 117,
-      "photo_source": "filmweb",
-      "rank": 59
+      "rank": 18
     },
     {
       "name": "Harrison Ford",
@@ -541,52 +172,16 @@
       "photo": "nm0000148.jpg",
       "sitelinks": 117,
       "photo_source": "filmweb",
-      "rank": 60
+      "rank": 19
     },
     {
-      "name": "Matt Damon",
-      "imdb_id": "nm0000354",
-      "filmweb_id": 158,
-      "photo": "nm0000354.jpg",
-      "sitelinks": 114,
+      "name": "Benedict Cumberbatch",
+      "imdb_id": "nm1212722",
+      "filmweb_id": 232426,
+      "photo": "nm1212722.jpg",
+      "sitelinks": 90,
       "photo_source": "filmweb",
-      "rank": 61
-    },
-    {
-      "name": "Robert Downey Jr.",
-      "imdb_id": "nm0000375",
-      "filmweb_id": 31,
-      "photo": "nm0000375.jpg",
-      "sitelinks": 114,
-      "photo_source": "filmweb",
-      "rank": 62
-    },
-    {
-      "name": "Anne Hathaway",
-      "imdb_id": "nm0004266",
-      "filmweb_id": 46351,
-      "photo": "nm0004266.jpg",
-      "sitelinks": 113,
-      "photo_source": "filmweb",
-      "rank": 63
-    },
-    {
-      "name": "Demi Moore",
-      "imdb_id": "nm0000193",
-      "filmweb_id": 198,
-      "photo": "nm0000193.jpg",
-      "sitelinks": 113,
-      "photo_source": "filmweb",
-      "rank": 64
-    },
-    {
-      "name": "Dwayne Johnson",
-      "imdb_id": "nm0425005",
-      "filmweb_id": 40277,
-      "photo": "nm0425005.jpg",
-      "sitelinks": 113,
-      "photo_source": "filmweb",
-      "rank": 65
+      "rank": 20
     },
     {
       "name": "Daniel Radcliffe",
@@ -595,448 +190,34 @@
       "photo": "nm0705356.jpg",
       "sitelinks": 112,
       "photo_source": "filmweb",
-      "rank": 66
+      "rank": 21
     },
     {
-      "name": "James Dean",
-      "imdb_id": "nm0000015",
-      "filmweb_id": 41390,
-      "photo": "nm0000015.jpg",
-      "sitelinks": 112,
+      "name": "Steve Carell",
+      "imdb_id": "nm0136797",
+      "filmweb_id": 74334,
+      "photo": "nm0136797.jpg",
+      "sitelinks": 71,
       "photo_source": "filmweb",
-      "rank": 67
+      "rank": 22
     },
     {
-      "name": "Bette Davis",
-      "imdb_id": "nm0000012",
-      "filmweb_id": 46562,
-      "photo": "nm0000012.jpg",
-      "sitelinks": 110,
+      "name": "Jack Black",
+      "imdb_id": "nm0085312",
+      "filmweb_id": 4343,
+      "photo": "nm0085312.jpg",
+      "sitelinks": 82,
       "photo_source": "filmweb",
-      "rank": 68
+      "rank": 23
     },
     {
-      "name": "Chuck Norris",
-      "imdb_id": "nm0001569",
-      "filmweb_id": 325,
-      "photo": "nm0001569.jpg",
-      "sitelinks": 110,
+      "name": "Idris Elba",
+      "imdb_id": "nm0252961",
+      "filmweb_id": 111310,
+      "photo": "nm0252961.jpg",
+      "sitelinks": 86,
       "photo_source": "filmweb",
-      "rank": 69
-    },
-    {
-      "name": "Eddie Murphy",
-      "imdb_id": "nm0000552",
-      "filmweb_id": 72,
-      "photo": "nm0000552.jpg",
-      "sitelinks": 110,
-      "photo_source": "filmweb",
-      "rank": 70
-    },
-    {
-      "name": "Heath Ledger",
-      "imdb_id": "nm0005132",
-      "filmweb_id": 6322,
-      "photo": "nm0005132.jpg",
-      "sitelinks": 110,
-      "photo_source": "filmweb",
-      "rank": 71
-    },
-    {
-      "name": "Jean-Paul Belmondo",
-      "imdb_id": "nm0000901",
-      "filmweb_id": 6335,
-      "photo": "nm0000901.jpg",
-      "sitelinks": 110,
-      "photo_source": "filmweb",
-      "rank": 72
-    },
-    {
-      "name": "Michael Caine",
-      "imdb_id": "nm0000323",
-      "filmweb_id": 328,
-      "photo": "nm0000323.jpg",
-      "sitelinks": 110,
-      "photo_source": "filmweb",
-      "rank": 73
-    },
-    {
-      "name": "Cameron Diaz",
-      "imdb_id": "nm0000139",
-      "filmweb_id": 163,
-      "photo": "nm0000139.jpg",
-      "sitelinks": 109,
-      "photo_source": "filmweb",
-      "rank": 74
-    },
-    {
-      "name": "Carrie Fisher",
-      "imdb_id": "nm0000402",
-      "filmweb_id": 4788,
-      "photo": "nm0000402.jpg",
-      "sitelinks": 109,
-      "photo_source": "filmweb",
-      "rank": 75
-    },
-    {
-      "name": "Monica Bellucci",
-      "imdb_id": "nm0000899",
-      "filmweb_id": 2896,
-      "photo": "nm0000899.jpg",
-      "sitelinks": 109,
-      "photo_source": "filmweb",
-      "rank": 76
-    },
-    {
-      "name": "Paul Newman",
-      "imdb_id": "nm0000056",
-      "filmweb_id": 199,
-      "photo": "nm0000056.jpg",
-      "sitelinks": 109,
-      "photo_source": "filmweb",
-      "rank": 77
-    },
-    {
-      "name": "Keira Knightley",
-      "imdb_id": "nm0461136",
-      "filmweb_id": 45406,
-      "photo": "nm0461136.jpg",
-      "sitelinks": 108,
-      "photo_source": "filmweb",
-      "rank": 78
-    },
-    {
-      "name": "Whoopi Goldberg",
-      "imdb_id": "nm0000155",
-      "filmweb_id": 179,
-      "photo": "nm0000155.jpg",
-      "sitelinks": 108,
-      "photo_source": "filmweb",
-      "rank": 79
-    },
-    {
-      "name": "Julianne Moore",
-      "imdb_id": "nm0000194",
-      "filmweb_id": 314,
-      "photo": "nm0000194.jpg",
-      "sitelinks": 107,
-      "photo_source": "filmweb",
-      "rank": 80
-    },
-    {
-      "name": "Salma Hayek",
-      "imdb_id": "nm0000161",
-      "filmweb_id": 2853,
-      "photo": "nm0000161.jpg",
-      "sitelinks": 106,
-      "photo_source": "filmweb",
-      "rank": 81
-    },
-    {
-      "name": "Vin Diesel",
-      "imdb_id": "nm0004874",
-      "filmweb_id": 4352,
-      "photo": "nm0004874.jpg",
-      "sitelinks": 106,
-      "photo_source": "filmweb",
-      "rank": 82
-    },
-    {
-      "name": "Daniel Craig",
-      "imdb_id": "nm0185819",
-      "filmweb_id": 3552,
-      "photo": "nm0185819.jpg",
-      "sitelinks": 105,
-      "photo_source": "filmweb",
-      "rank": 83
-    },
-    {
-      "name": "Pierce Brosnan",
-      "imdb_id": "nm0000112",
-      "filmweb_id": 143,
-      "photo": "nm0000112.jpg",
-      "sitelinks": 105,
-      "photo_source": "filmweb",
-      "rank": 84
-    },
-    {
-      "name": "Zendaya",
-      "imdb_id": "nm3918035",
-      "filmweb_id": 1546035,
-      "photo": "nm3918035.jpg",
-      "sitelinks": 105,
-      "photo_source": "filmweb",
-      "rank": 85
-    },
-    {
-      "name": "Gary Oldman",
-      "imdb_id": "nm0000198",
-      "filmweb_id": 76,
-      "photo": "nm0000198.jpg",
-      "sitelinks": 104,
-      "photo_source": "filmweb",
-      "rank": 86
-    },
-    {
-      "name": "Aamir Khan",
-      "imdb_id": "nm0451148",
-      "filmweb_id": 61543,
-      "photo": "nm0451148.jpg",
-      "sitelinks": 103,
-      "photo_source": "filmweb",
-      "rank": 87
-    },
-    {
-      "name": "Helen Mirren",
-      "imdb_id": "nm0000545",
-      "filmweb_id": 7057,
-      "photo": "nm0000545.jpg",
-      "sitelinks": 103,
-      "photo_source": "filmweb",
-      "rank": 88
-    },
-    {
-      "name": "Kristen Stewart",
-      "imdb_id": "nm0829576",
-      "filmweb_id": 52530,
-      "photo": "nm0829576.jpg",
-      "sitelinks": 103,
-      "photo_source": "filmweb",
-      "rank": 89
-    },
-    {
-      "name": "Peter O'Toole",
-      "imdb_id": "nm0000564",
-      "filmweb_id": 4924,
-      "photo": "nm0000564.jpg",
-      "sitelinks": 103,
-      "photo_source": "filmweb",
-      "rank": 90
-    },
-    {
-      "name": "Reese Witherspoon",
-      "imdb_id": "nm0000702",
-      "filmweb_id": 4026,
-      "photo": "nm0000702.jpg",
-      "sitelinks": 103,
-      "photo_source": "filmweb",
-      "rank": 91
-    },
-    {
-      "name": "Antonio Banderas",
-      "imdb_id": "nm0000104",
-      "filmweb_id": 133,
-      "photo": "nm0000104.jpg",
-      "sitelinks": 102,
-      "photo_source": "filmweb",
-      "rank": 92
-    },
-    {
-      "name": "Michelle Pfeiffer",
-      "imdb_id": "nm0000201",
-      "filmweb_id": 204,
-      "photo": "nm0000201.jpg",
-      "sitelinks": 102,
-      "photo_source": "filmweb",
-      "rank": 93
-    },
-    {
-      "name": "Winona Ryder",
-      "imdb_id": "nm0000213",
-      "filmweb_id": 94,
-      "photo": "nm0000213.jpg",
-      "sitelinks": 101,
-      "photo_source": "filmweb",
-      "rank": 94
-    },
-    {
-      "name": "Cary Grant",
-      "imdb_id": "nm0000026",
-      "filmweb_id": 41178,
-      "photo": "nm0000026.jpg",
-      "sitelinks": 100,
-      "photo_source": "filmweb",
-      "rank": 95
-    },
-    {
-      "name": "Chris Evans",
-      "imdb_id": "nm0262635",
-      "filmweb_id": 132277,
-      "photo": "nm0262635.jpg",
-      "sitelinks": 99,
-      "photo_source": "filmweb",
-      "rank": 96
-    },
-    {
-      "name": "Christian Bale",
-      "imdb_id": "nm0000288",
-      "filmweb_id": 3238,
-      "photo": "nm0000288.jpg",
-      "sitelinks": 99,
-      "photo_source": "filmweb",
-      "rank": 97
-    },
-    {
-      "name": "Marcello Mastroianni",
-      "imdb_id": "nm0000052",
-      "filmweb_id": 44391,
-      "photo": "nm0000052.jpg",
-      "sitelinks": 99,
-      "photo_source": "filmweb",
-      "rank": 98
-    },
-    {
-      "name": "Mark Wahlberg",
-      "imdb_id": "nm0000242",
-      "filmweb_id": 288,
-      "photo": "nm0000242.jpg",
-      "sitelinks": 99,
-      "photo_source": "filmweb",
-      "rank": 99
-    },
-    {
-      "name": "Samuel L. Jackson",
-      "imdb_id": "nm0000168",
-      "filmweb_id": 53,
-      "photo": "nm0000168.jpg",
-      "sitelinks": 99,
-      "photo_source": "filmweb",
-      "rank": 100
-    },
-    {
-      "name": "Amy Adams",
-      "imdb_id": "nm0010736",
-      "filmweb_id": 54011,
-      "photo": "nm0010736.jpg",
-      "sitelinks": 98,
-      "photo_source": "filmweb",
-      "rank": 101
-    },
-    {
-      "name": "Judi Dench",
-      "imdb_id": "nm0001132",
-      "filmweb_id": 3315,
-      "photo": "nm0001132.jpg",
-      "sitelinks": 98,
-      "photo_source": "filmweb",
-      "rank": 102
-    },
-    {
-      "name": "Jason Statham",
-      "imdb_id": "nm0005458",
-      "filmweb_id": 6552,
-      "photo": "nm0005458.jpg",
-      "sitelinks": 97,
-      "photo_source": "filmweb",
-      "rank": 103
-    },
-    {
-      "name": "Orlando Bloom",
-      "imdb_id": "nm0089217",
-      "filmweb_id": 8346,
-      "photo": "nm0089217.jpg",
-      "sitelinks": 97,
-      "photo_source": "filmweb",
-      "rank": 104
-    },
-    {
-      "name": "Sharon Stone",
-      "imdb_id": "nm0000232",
-      "filmweb_id": 108,
-      "photo": "nm0000232.jpg",
-      "sitelinks": 97,
-      "photo_source": "filmweb",
-      "rank": 105
-    },
-    {
-      "name": "Chris Hemsworth",
-      "imdb_id": "nm1165110",
-      "filmweb_id": 196396,
-      "photo": "nm1165110.jpg",
-      "sitelinks": 95,
-      "photo_source": "filmweb",
-      "rank": 106
-    },
-    {
-      "name": "Jean-Claude Van Damme",
-      "imdb_id": "nm0000241",
-      "filmweb_id": 317,
-      "photo": "nm0000241.jpg",
-      "sitelinks": 95,
-      "photo_source": "filmweb",
-      "rank": 107
-    },
-    {
-      "name": "John Cena",
-      "imdb_id": "nm1078479",
-      "filmweb_id": 315723,
-      "photo": "nm1078479.jpg",
-      "sitelinks": 95,
-      "photo_source": "filmweb",
-      "rank": 108
-    },
-    {
-      "name": "Andrew Garfield",
-      "imdb_id": "nm1940449",
-      "filmweb_id": 502217,
-      "photo": "nm1940449.jpg",
-      "sitelinks": 80,
-      "photo_source": "wikimedia",
-      "rank": 109
-    },
-    {
-      "name": "Angelina Jolie",
-      "imdb_id": "nm0001401",
-      "filmweb_id": 329,
-      "photo": "nm0001401.jpg",
-      "sitelinks": 80,
-      "photo_source": "wikimedia",
-      "rank": 110
-    },
-    {
-      "name": "Awkwafina",
-      "imdb_id": "nm5377144",
-      "filmweb_id": 2304229,
-      "photo": "nm5377144.jpg",
-      "sitelinks": 80,
-      "photo_source": "wikimedia",
-      "rank": 111
-    },
-    {
-      "name": "Ben Affleck",
-      "imdb_id": "nm0000255",
-      "filmweb_id": 125,
-      "photo": "nm0000255.jpg",
-      "sitelinks": 80,
-      "photo_source": "wikimedia",
-      "rank": 112
-    },
-    {
-      "name": "Danuta Stenka",
-      "imdb_id": "nm0826611",
-      "filmweb_id": 401,
-      "photo": "nm0826611.jpg",
-      "sitelinks": 80,
-      "photo_source": "wikimedia",
-      "rank": 113
-    },
-    {
-      "name": "Denzel Washington",
-      "imdb_id": "nm0000243",
-      "filmweb_id": 220,
-      "photo": "nm0000243.jpg",
-      "sitelinks": 80,
-      "photo_source": "wikimedia",
-      "rank": 114
-    },
-    {
-      "name": "Emma Stone",
-      "imdb_id": "nm1297015",
-      "filmweb_id": 611405,
-      "photo": "nm1297015.jpg",
-      "sitelinks": 80,
-      "photo_source": "wikimedia",
-      "rank": 115
+      "rank": 24
     },
     {
       "name": "Hugh Jackman",
@@ -1045,52 +226,196 @@
       "photo": "nm0413168.jpg",
       "sitelinks": 80,
       "photo_source": "wikimedia",
-      "rank": 116
+      "rank": 25
     },
     {
-      "name": "Léa Seydoux",
-      "imdb_id": "nm2244205",
-      "filmweb_id": 605376,
-      "photo": "nm2244205.jpg",
-      "sitelinks": 80,
-      "photo_source": "wikimedia",
-      "rank": 117
+      "name": "Chadwick Boseman",
+      "imdb_id": "nm1569276",
+      "filmweb_id": 676063,
+      "photo": "nm1569276.jpg",
+      "sitelinks": 81,
+      "photo_source": "filmweb",
+      "rank": 26
     },
     {
-      "name": "Mads Mikkelsen",
-      "imdb_id": "nm0586568",
-      "filmweb_id": 63456,
-      "photo": "nm0586568.jpg",
-      "sitelinks": 80,
-      "photo_source": "wikimedia",
-      "rank": 118
+      "name": "Brad Pitt",
+      "imdb_id": "nm0000093",
+      "filmweb_id": 205,
+      "photo": "nm0000093.jpg",
+      "sitelinks": 147,
+      "photo_source": "filmweb",
+      "rank": 27
     },
     {
-      "name": "Meryl Streep",
-      "imdb_id": "nm0000658",
-      "filmweb_id": 109,
-      "photo": "nm0000658.jpg",
-      "sitelinks": 80,
-      "photo_source": "wikimedia",
-      "rank": 119
+      "name": "Rupert Grint",
+      "imdb_id": "nm0342488",
+      "filmweb_id": 40208,
+      "photo": "nm0342488.jpg",
+      "sitelinks": 88,
+      "photo_source": "filmweb",
+      "rank": 28
     },
     {
-      "name": "Millie Bobby Brown",
-      "imdb_id": "nm5611121",
-      "filmweb_id": 2088044,
-      "photo": "nm5611121.jpg",
-      "sitelinks": 80,
-      "photo_source": "wikimedia",
-      "rank": 120
+      "name": "Leonardo DiCaprio",
+      "imdb_id": "nm0000138",
+      "filmweb_id": 30,
+      "photo": "nm0000138.jpg",
+      "sitelinks": 150,
+      "photo_source": "filmweb",
+      "rank": 29
     },
     {
-      "name": "Patrick Stewart",
-      "imdb_id": "nm0001772",
-      "filmweb_id": 4416,
-      "photo": "nm0001772.jpg",
-      "sitelinks": 80,
+      "name": "Bruce Willis",
+      "imdb_id": "nm0000246",
+      "filmweb_id": 117,
+      "photo": "nm0000246.jpg",
+      "sitelinks": 117,
       "photo_source": "wikimedia",
-      "rank": 121
+      "rank": 30
+    },
+    {
+      "name": "Liam Neeson",
+      "imdb_id": "nm0000553",
+      "filmweb_id": 74,
+      "photo": "nm0000553.jpg",
+      "sitelinks": 98,
+      "photo_source": "filmweb",
+      "rank": 31
+    },
+    {
+      "name": "Eddie Murphy",
+      "imdb_id": "nm0000552",
+      "filmweb_id": 72,
+      "photo": "nm0000552.jpg",
+      "sitelinks": 110,
+      "photo_source": "filmweb",
+      "rank": 32
+    },
+    {
+      "name": "Anne Hathaway",
+      "imdb_id": "nm0004266",
+      "filmweb_id": 46351,
+      "photo": "nm0004266.jpg",
+      "sitelinks": 113,
+      "photo_source": "filmweb",
+      "rank": 33
+    },
+    {
+      "name": "Ryan Reynolds",
+      "imdb_id": "nm0005351",
+      "filmweb_id": 56971,
+      "photo": "nm0005351.jpg",
+      "sitelinks": 91,
+      "photo_source": "filmweb",
+      "rank": 34
+    },
+    {
+      "name": "Jason Statham",
+      "imdb_id": "nm0005458",
+      "filmweb_id": 6552,
+      "photo": "nm0005458.jpg",
+      "sitelinks": 97,
+      "photo_source": "filmweb",
+      "rank": 35
+    },
+    {
+      "name": "Ben Stiller",
+      "imdb_id": "nm0001774",
+      "filmweb_id": 381,
+      "photo": "nm0001774.jpg",
+      "sitelinks": 87,
+      "photo_source": "filmweb",
+      "rank": 36
+    },
+    {
+      "name": "Ian McKellen",
+      "imdb_id": "nm0005212",
+      "filmweb_id": 6149,
+      "photo": "nm0005212.jpg",
+      "sitelinks": 91,
+      "photo_source": "filmweb",
+      "rank": 37
+    },
+    {
+      "name": "Nicolas Cage",
+      "imdb_id": "nm0000115",
+      "filmweb_id": 15,
+      "photo": "nm0000115.jpg",
+      "sitelinks": 121,
+      "photo_source": "filmweb",
+      "rank": 38
+    },
+    {
+      "name": "Mark Wahlberg",
+      "imdb_id": "nm0000242",
+      "filmweb_id": 288,
+      "photo": "nm0000242.jpg",
+      "sitelinks": 99,
+      "photo_source": "filmweb",
+      "rank": 39
+    },
+    {
+      "name": "Jim Carrey",
+      "imdb_id": "nm0000120",
+      "filmweb_id": 148,
+      "photo": "nm0000120.jpg",
+      "sitelinks": 127,
+      "photo_source": "filmweb",
+      "rank": 40
+    },
+    {
+      "name": "Jennifer Lawrence",
+      "imdb_id": "nm2225369",
+      "filmweb_id": 612192,
+      "photo": "nm2225369.jpg",
+      "sitelinks": 121,
+      "photo_source": "filmweb",
+      "rank": 41
+    },
+    {
+      "name": "Ewan McGregor",
+      "imdb_id": "nm0000191",
+      "filmweb_id": 71,
+      "photo": "nm0000191.jpg",
+      "sitelinks": 89,
+      "photo_source": "filmweb",
+      "rank": 42
+    },
+    {
+      "name": "Christian Bale",
+      "imdb_id": "nm0000288",
+      "filmweb_id": 3238,
+      "photo": "nm0000288.jpg",
+      "sitelinks": 99,
+      "photo_source": "filmweb",
+      "rank": 43
+    },
+    {
+      "name": "Cameron Diaz",
+      "imdb_id": "nm0000139",
+      "filmweb_id": 163,
+      "photo": "nm0000139.jpg",
+      "sitelinks": 109,
+      "photo_source": "filmweb",
+      "rank": 44
+    },
+    {
+      "name": "Keanu Reeves",
+      "imdb_id": "nm0000206",
+      "filmweb_id": 87,
+      "photo": "nm0000206.jpg",
+      "sitelinks": 124,
+      "photo_source": "filmweb",
+      "rank": 45
+    },
+    {
+      "name": "Natalie Portman",
+      "imdb_id": "nm0000204",
+      "filmweb_id": 316,
+      "photo": "nm0000204.jpg",
+      "sitelinks": 138,
+      "photo_source": "filmweb",
+      "rank": 46
     },
     {
       "name": "Sandra Bullock",
@@ -1099,7 +424,214 @@
       "photo": "nm0000113.jpg",
       "sitelinks": 80,
       "photo_source": "wikimedia",
-      "rank": 122
+      "rank": 47
+    },
+    {
+      "name": "Julia Roberts",
+      "imdb_id": "nm0000210",
+      "filmweb_id": 91,
+      "photo": "nm0000210.jpg",
+      "sitelinks": 132,
+      "photo_source": "filmweb",
+      "rank": 48
+    },
+    {
+      "name": "Ralph Fiennes",
+      "imdb_id": "nm0000146",
+      "filmweb_id": 171,
+      "photo": "nm0000146.jpg",
+      "sitelinks": 81,
+      "photo_source": "filmweb",
+      "rank": 49
+    },
+    {
+      "name": "Adam Sandler",
+      "imdb_id": "nm0001191",
+      "filmweb_id": 3916,
+      "photo": "nm0001191.jpg",
+      "sitelinks": 93,
+      "photo_source": "filmweb",
+      "rank": 50
+    },
+    {
+      "name": "Ben Affleck",
+      "imdb_id": "nm0000255",
+      "filmweb_id": 125,
+      "photo": "nm0000255.jpg",
+      "sitelinks": 80,
+      "photo_source": "wikimedia",
+      "rank": 51
+    },
+    {
+      "name": "Robert De Niro",
+      "imdb_id": "nm0000134",
+      "filmweb_id": 123,
+      "photo": "nm0000134.jpg",
+      "sitelinks": 141,
+      "photo_source": "filmweb",
+      "rank": 52
+    },
+    {
+      "name": "Sylvester Stallone",
+      "imdb_id": "nm0000230",
+      "filmweb_id": 215,
+      "photo": "nm0000230.jpg",
+      "sitelinks": 126,
+      "photo_source": "filmweb",
+      "rank": 53
+    },
+    {
+      "name": "Meryl Streep",
+      "imdb_id": "nm0000658",
+      "filmweb_id": 109,
+      "photo": "nm0000658.jpg",
+      "sitelinks": 80,
+      "photo_source": "wikimedia",
+      "rank": 54
+    },
+    {
+      "name": "Morgan Freeman",
+      "imdb_id": "nm0000151",
+      "filmweb_id": 176,
+      "photo": "nm0000151.jpg",
+      "sitelinks": 129,
+      "photo_source": "filmweb",
+      "rank": 55
+    },
+    {
+      "name": "Robert Pattinson",
+      "imdb_id": "nm1500155",
+      "filmweb_id": 164450,
+      "photo": "nm1500155.jpg",
+      "sitelinks": 93,
+      "photo_source": "filmweb",
+      "rank": 56
+    },
+    {
+      "name": "Denzel Washington",
+      "imdb_id": "nm0000243",
+      "filmweb_id": 220,
+      "photo": "nm0000243.jpg",
+      "sitelinks": 80,
+      "photo_source": "wikimedia",
+      "rank": 57
+    },
+    {
+      "name": "George Clooney",
+      "imdb_id": "nm0000123",
+      "filmweb_id": 150,
+      "photo": "nm0000123.jpg",
+      "sitelinks": 128,
+      "photo_source": "filmweb",
+      "rank": 58
+    },
+    {
+      "name": "Daniel Craig",
+      "imdb_id": "nm0185819",
+      "filmweb_id": 3552,
+      "photo": "nm0185819.jpg",
+      "sitelinks": 105,
+      "photo_source": "filmweb",
+      "rank": 59
+    },
+    {
+      "name": "Orlando Bloom",
+      "imdb_id": "nm0089217",
+      "filmweb_id": 8346,
+      "photo": "nm0089217.jpg",
+      "sitelinks": 97,
+      "photo_source": "filmweb",
+      "rank": 60
+    },
+    {
+      "name": "Robin Williams",
+      "imdb_id": "nm0000245",
+      "filmweb_id": 223,
+      "photo": "nm0000245.jpg",
+      "sitelinks": 163,
+      "photo_source": "filmweb",
+      "rank": 61
+    },
+    {
+      "name": "Jason Momoa",
+      "imdb_id": "nm0597388",
+      "filmweb_id": 140909,
+      "photo": "nm0597388.jpg",
+      "sitelinks": 77,
+      "photo_source": "filmweb",
+      "rank": 62
+    },
+    {
+      "name": "Mel Gibson",
+      "imdb_id": "nm0000154",
+      "filmweb_id": 39,
+      "photo": "nm0000154.jpg",
+      "sitelinks": 119,
+      "photo_source": "filmweb",
+      "rank": 63
+    },
+    {
+      "name": "Arnold Schwarzenegger",
+      "imdb_id": "nm0000216",
+      "filmweb_id": 210,
+      "photo": "nm0000216.jpg",
+      "sitelinks": 155,
+      "photo_source": "filmweb",
+      "rank": 64
+    },
+    {
+      "name": "Michael B. Jordan",
+      "imdb_id": "nm0430107",
+      "filmweb_id": 52446,
+      "photo": "nm0430107.jpg",
+      "sitelinks": 61,
+      "photo_source": "filmweb",
+      "rank": 65
+    },
+    {
+      "name": "Zendaya",
+      "imdb_id": "nm3918035",
+      "filmweb_id": 1546035,
+      "photo": "nm3918035.jpg",
+      "sitelinks": 105,
+      "photo_source": "filmweb",
+      "rank": 66
+    },
+    {
+      "name": "Emma Stone",
+      "imdb_id": "nm1297015",
+      "filmweb_id": 611405,
+      "photo": "nm1297015.jpg",
+      "sitelinks": 80,
+      "photo_source": "wikimedia",
+      "rank": 67
+    },
+    {
+      "name": "Angelina Jolie",
+      "imdb_id": "nm0001401",
+      "filmweb_id": 329,
+      "photo": "nm0001401.jpg",
+      "sitelinks": 80,
+      "photo_source": "wikimedia",
+      "rank": 68
+    },
+    {
+      "name": "Margot Robbie",
+      "imdb_id": "nm3053338",
+      "filmweb_id": 956654,
+      "photo": "nm3053338.jpg",
+      "sitelinks": 92,
+      "photo_source": "filmweb",
+      "rank": 69
+    },
+    {
+      "name": "Gal Gadot",
+      "imdb_id": "nm2933757",
+      "filmweb_id": 878630,
+      "photo": "nm2933757.jpg",
+      "sitelinks": 94,
+      "photo_source": "filmweb",
+      "rank": 70
     },
     {
       "name": "Timothée Chalamet",
@@ -1108,88 +640,268 @@
       "photo": "nm3154303.jpg",
       "sitelinks": 80,
       "photo_source": "wikimedia",
-      "rank": 123
+      "rank": 71
     },
     {
-      "name": "Tobey Maguire",
-      "imdb_id": "nm0001497",
-      "filmweb_id": 4774,
-      "photo": "nm0001497.jpg",
-      "sitelinks": 80,
-      "photo_source": "wikimedia",
-      "rank": 124
-    },
-    {
-      "name": "Zoe Kravitz",
-      "imdb_id": "nm2368789",
-      "filmweb_id": 621882,
-      "photo": "nm2368789.jpg",
-      "sitelinks": 80,
-      "photo_source": "wikimedia",
-      "rank": 125
-    },
-    {
-      "name": "Daniel Olbrychski",
-      "imdb_id": "nm0646037",
-      "filmweb_id": 270,
-      "photo": "nm0646037.jpg",
-      "sitelinks": 34,
+      "name": "Ryan Gosling",
+      "imdb_id": "nm0331516",
+      "filmweb_id": 55013,
+      "photo": "nm0331516.jpg",
+      "sitelinks": 90,
       "photo_source": "filmweb",
-      "rank": 126
+      "rank": 72
     },
     {
-      "name": "Krystyna Janda",
-      "imdb_id": "nm0417370",
-      "filmweb_id": 54,
-      "photo": "nm0417370.jpg",
-      "sitelinks": 33,
+      "name": "Cillian Murphy",
+      "imdb_id": "nm0614165",
+      "filmweb_id": 84517,
+      "photo": "nm0614165.jpg",
+      "sitelinks": 89,
       "photo_source": "filmweb",
-      "rank": 127
+      "rank": 73
     },
     {
-      "name": "Joanna Kulig",
-      "imdb_id": "nm2251846",
-      "filmweb_id": 629836,
-      "photo": "nm2251846.jpg",
-      "sitelinks": 31,
+      "name": "Pedro Pascal",
+      "imdb_id": "nm0050959",
+      "filmweb_id": 1003573,
+      "photo": "nm0050959.jpg",
+      "sitelinks": 68,
       "photo_source": "filmweb",
-      "rank": 128
+      "rank": 74
     },
     {
-      "name": "Andrzej Seweryn",
-      "imdb_id": "nm0786614",
-      "filmweb_id": 99,
-      "photo": "nm0786614.jpg",
-      "sitelinks": 25,
+      "name": "Al Pacino",
+      "imdb_id": "nm0000199",
+      "filmweb_id": 78,
+      "photo": "nm0000199.jpg",
+      "sitelinks": 135,
       "photo_source": "filmweb",
-      "rank": 129
+      "rank": 75
     },
     {
-      "name": "Bogusław Linda",
-      "imdb_id": "nm0511277",
-      "filmweb_id": 66,
-      "photo": "nm0511277.jpg",
-      "sitelinks": 24,
+      "name": "Jack Nicholson",
+      "imdb_id": "nm0000197",
+      "filmweb_id": 75,
+      "photo": "nm0000197.jpg",
+      "sitelinks": 130,
       "photo_source": "filmweb",
-      "rank": 130
+      "rank": 76
     },
     {
-      "name": "Agnieszka Grochowska",
-      "imdb_id": "nm1377449",
-      "filmweb_id": 95954,
-      "photo": "nm1377449.jpg",
-      "sitelinks": 23,
+      "name": "Anthony Hopkins",
+      "imdb_id": "nm0000164",
+      "filmweb_id": 48,
+      "photo": "nm0000164.jpg",
+      "sitelinks": 122,
       "photo_source": "filmweb",
-      "rank": 131
+      "rank": 77
     },
     {
-      "name": "Agata Kulesza",
-      "imdb_id": "nm0474492",
-      "filmweb_id": 74184,
-      "photo": "nm0474492.jpg",
-      "sitelinks": 22,
+      "name": "Joaquin Phoenix",
+      "imdb_id": "nm0001618",
+      "filmweb_id": 5028,
+      "photo": "nm0001618.jpg",
+      "sitelinks": 92,
       "photo_source": "filmweb",
-      "rank": 132
+      "rank": 78
+    },
+    {
+      "name": "Tom Hardy",
+      "imdb_id": "nm0362766",
+      "filmweb_id": 57104,
+      "photo": "nm0362766.jpg",
+      "sitelinks": 88,
+      "photo_source": "filmweb",
+      "rank": 79
+    },
+    {
+      "name": "Matthew McConaughey",
+      "imdb_id": "nm0000190",
+      "filmweb_id": 2556,
+      "photo": "nm0000190.jpg",
+      "sitelinks": 93,
+      "photo_source": "filmweb",
+      "rank": 80
+    },
+    {
+      "name": "Jake Gyllenhaal",
+      "imdb_id": "nm0350453",
+      "filmweb_id": 48101,
+      "photo": "nm0350453.jpg",
+      "sitelinks": 85,
+      "photo_source": "filmweb",
+      "rank": 81
+    },
+    {
+      "name": "Henry Cavill",
+      "imdb_id": "nm0147147",
+      "filmweb_id": 56028,
+      "photo": "nm0147147.jpg",
+      "sitelinks": 82,
+      "photo_source": "filmweb",
+      "rank": 82
+    },
+    {
+      "name": "Charlize Theron",
+      "imdb_id": "nm0000234",
+      "filmweb_id": 2524,
+      "photo": "nm0000234.jpg",
+      "sitelinks": 118,
+      "photo_source": "filmweb",
+      "rank": 83
+    },
+    {
+      "name": "Nicole Kidman",
+      "imdb_id": "nm0000173",
+      "filmweb_id": 59,
+      "photo": "nm0000173.jpg",
+      "sitelinks": 134,
+      "photo_source": "filmweb",
+      "rank": 84
+    },
+    {
+      "name": "Cate Blanchett",
+      "imdb_id": "nm0000949",
+      "filmweb_id": 6495,
+      "photo": "nm0000949.jpg",
+      "sitelinks": 134,
+      "photo_source": "filmweb",
+      "rank": 85
+    },
+    {
+      "name": "Kate Winslet",
+      "imdb_id": "nm0000701",
+      "filmweb_id": 119,
+      "photo": "nm0000701.jpg",
+      "sitelinks": 134,
+      "photo_source": "filmweb",
+      "rank": 86
+    },
+    {
+      "name": "Jennifer Aniston",
+      "imdb_id": "nm0000098",
+      "filmweb_id": 6757,
+      "photo": "nm0000098.jpg",
+      "sitelinks": 128,
+      "photo_source": "filmweb",
+      "rank": 87
+    },
+    {
+      "name": "Halle Berry",
+      "imdb_id": "nm0000932",
+      "filmweb_id": 7918,
+      "photo": "nm0000932.jpg",
+      "sitelinks": 120,
+      "photo_source": "filmweb",
+      "rank": 88
+    },
+    {
+      "name": "Jackie Chan",
+      "imdb_id": "nm0000329",
+      "filmweb_id": 3108,
+      "photo": "nm0000329.jpg",
+      "sitelinks": 163,
+      "photo_source": "filmweb",
+      "rank": 89
+    },
+    {
+      "name": "Clint Eastwood",
+      "imdb_id": "nm0000142",
+      "filmweb_id": 122,
+      "photo": "nm0000142.jpg",
+      "sitelinks": 136,
+      "photo_source": "filmweb",
+      "rank": 90
+    },
+    {
+      "name": "Sean Connery",
+      "imdb_id": "nm0000125",
+      "filmweb_id": 152,
+      "photo": "nm0000125.jpg",
+      "sitelinks": 146,
+      "photo_source": "filmweb",
+      "rank": 91
+    },
+    {
+      "name": "Heath Ledger",
+      "imdb_id": "nm0005132",
+      "filmweb_id": 6322,
+      "photo": "nm0005132.jpg",
+      "sitelinks": 110,
+      "photo_source": "filmweb",
+      "rank": 92
+    },
+    {
+      "name": "Bill Murray",
+      "imdb_id": "nm0000195",
+      "filmweb_id": 73,
+      "photo": "nm0000195.jpg",
+      "sitelinks": 87,
+      "photo_source": "filmweb",
+      "rank": 93
+    },
+    {
+      "name": "Jamie Foxx",
+      "imdb_id": "nm0004937",
+      "filmweb_id": 5859,
+      "photo": "nm0004937.jpg",
+      "sitelinks": 83,
+      "photo_source": "filmweb",
+      "rank": 94
+    },
+    {
+      "name": "Antonio Banderas",
+      "imdb_id": "nm0000104",
+      "filmweb_id": 133,
+      "photo": "nm0000104.jpg",
+      "sitelinks": 102,
+      "photo_source": "filmweb",
+      "rank": 95
+    },
+    {
+      "name": "Penélope Cruz",
+      "imdb_id": "nm0004851",
+      "filmweb_id": 2934,
+      "photo": "nm0004851.jpg",
+      "sitelinks": 120,
+      "photo_source": "filmweb",
+      "rank": 96
+    },
+    {
+      "name": "Sigourney Weaver",
+      "imdb_id": "nm0000244",
+      "filmweb_id": 116,
+      "photo": "nm0000244.jpg",
+      "sitelinks": 122,
+      "photo_source": "filmweb",
+      "rank": 97
+    },
+    {
+      "name": "Marilyn Monroe",
+      "imdb_id": "nm0000054",
+      "filmweb_id": 40889,
+      "photo": "nm0000054.jpg",
+      "sitelinks": 243,
+      "photo_source": "filmweb",
+      "rank": 98
+    },
+    {
+      "name": "Bruce Lee",
+      "imdb_id": "nm0000045",
+      "filmweb_id": 42494,
+      "photo": "nm0000045.jpg",
+      "sitelinks": 169,
+      "photo_source": "filmweb",
+      "rank": 99
+    },
+    {
+      "name": "Pierce Brosnan",
+      "imdb_id": "nm0000112",
+      "filmweb_id": 143,
+      "photo": "nm0000112.jpg",
+      "sitelinks": 105,
+      "photo_source": "filmweb",
+      "rank": 100
     },
     {
       "name": "Janusz Gajos",
@@ -1198,70 +910,25 @@
       "photo": "nm0301515.jpg",
       "sitelinks": 22,
       "photo_source": "filmweb",
-      "rank": 133
+      "rank": 101
     },
     {
-      "name": "Zbigniew Zamachowski",
-      "imdb_id": "nm0952498",
-      "filmweb_id": 390,
-      "photo": "nm0952498.jpg",
-      "sitelinks": 22,
+      "name": "Bogusław Linda",
+      "imdb_id": "nm0511277",
+      "filmweb_id": 66,
+      "photo": "nm0511277.jpg",
+      "sitelinks": 24,
       "photo_source": "filmweb",
-      "rank": 134
+      "rank": 102
     },
     {
-      "name": "Piotr Adamczyk",
-      "imdb_id": "nm0010611",
-      "filmweb_id": 399,
-      "photo": "nm0010611.jpg",
-      "sitelinks": 21,
+      "name": "Krystyna Janda",
+      "imdb_id": "nm0417370",
+      "filmweb_id": 54,
+      "photo": "nm0417370.jpg",
+      "sitelinks": 33,
       "photo_source": "filmweb",
-      "rank": 135
-    },
-    {
-      "name": "Andrzej Chyra",
-      "imdb_id": "nm0161607",
-      "filmweb_id": 393,
-      "photo": "nm0161607.jpg",
-      "sitelinks": 20,
-      "photo_source": "filmweb",
-      "rank": 136
-    },
-    {
-      "name": "Kinga Preis",
-      "imdb_id": "nm0695835",
-      "filmweb_id": 3011,
-      "photo": "nm0695835.jpg",
-      "sitelinks": 20,
-      "photo_source": "filmweb",
-      "rank": 137
-    },
-    {
-      "name": "Robert Więckiewicz",
-      "imdb_id": "nm0927240",
-      "filmweb_id": 8931,
-      "photo": "nm0927240.jpg",
-      "sitelinks": 20,
-      "photo_source": "filmweb",
-      "rank": 138
-    },
-    {
-      "name": "Maja Ostaszewska",
-      "imdb_id": "nm0652292",
-      "filmweb_id": 7883,
-      "photo": "nm0652292.jpg",
-      "sitelinks": 19,
-      "photo_source": "filmweb",
-      "rank": 139
-    },
-    {
-      "name": "Tomasz Kot",
-      "imdb_id": "nm1682799",
-      "filmweb_id": 148066,
-      "photo": "nm1682799.jpg",
-      "sitelinks": 19,
-      "photo_source": "filmweb",
-      "rank": 140
+      "rank": 103
     },
     {
       "name": "Cezary Pazura",
@@ -1270,88 +937,16 @@
       "photo": "nm0668640.jpg",
       "sitelinks": 17,
       "photo_source": "filmweb",
-      "rank": 141
+      "rank": 104
     },
     {
-      "name": "Maciej Stuhr",
-      "imdb_id": "nm0836137",
-      "filmweb_id": 360,
-      "photo": "nm0836137.jpg",
-      "sitelinks": 17,
+      "name": "Daniel Olbrychski",
+      "imdb_id": "nm0646037",
+      "filmweb_id": 270,
+      "photo": "nm0646037.jpg",
+      "sitelinks": 34,
       "photo_source": "filmweb",
-      "rank": 142
-    },
-    {
-      "name": "Marek Kondrat",
-      "imdb_id": "nm0464945",
-      "filmweb_id": 253,
-      "photo": "nm0464945.jpg",
-      "sitelinks": 17,
-      "photo_source": "filmweb",
-      "rank": 143
-    },
-    {
-      "name": "Jakub Gierszał",
-      "imdb_id": "nm3617350",
-      "filmweb_id": 1100397,
-      "photo": "nm3617350.jpg",
-      "sitelinks": 16,
-      "photo_source": "filmweb",
-      "rank": 144
-    },
-    {
-      "name": "Dawid Ogrodnik",
-      "imdb_id": "nm4221607",
-      "filmweb_id": 1223717,
-      "photo": "nm4221607.jpg",
-      "sitelinks": 15,
-      "photo_source": "filmweb",
-      "rank": 145
-    },
-    {
-      "name": "Magdalena Cielecka",
-      "imdb_id": "nm0162123",
-      "filmweb_id": 354,
-      "photo": "nm0162123.jpg",
-      "sitelinks": 15,
-      "photo_source": "filmweb",
-      "rank": 146
-    },
-    {
-      "name": "Borys Szyc",
-      "imdb_id": "nm0844371",
-      "filmweb_id": 56091,
-      "photo": "nm0844371.jpg",
-      "sitelinks": 14,
-      "photo_source": "filmweb",
-      "rank": 147
-    },
-    {
-      "name": "Aleksandra Konieczna",
-      "imdb_id": "nm1452458",
-      "filmweb_id": 63720,
-      "photo": "nm1452458.jpg",
-      "sitelinks": 13,
-      "photo_source": "filmweb",
-      "rank": 148
-    },
-    {
-      "name": "Bartosz Bielenia",
-      "imdb_id": "nm5849568",
-      "filmweb_id": 1993954,
-      "photo": "nm5849568.jpg",
-      "sitelinks": 13,
-      "photo_source": "filmweb",
-      "rank": 149
-    },
-    {
-      "name": "Tony Leung",
-      "imdb_id": "nm0504897",
-      "filmweb_id": 31739,
-      "photo": "nm0504897.jpg",
-      "sitelinks": 100,
-      "photo_source": "filmweb",
-      "rank": 150
+      "rank": 105
     }
   ]
 }
