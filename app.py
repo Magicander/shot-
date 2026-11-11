@@ -309,10 +309,18 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 rows = [(r["title"], r["pl_title"]) for r in
                         con.execute("SELECT title, pl_title FROM movies WHERE pack_id=?", (int(m.group(1)),))]
-            out = {t for t, _ in rows}
-            if self.lang == "pl":
-                out |= {pl for _, pl in rows if pl}
-            return self.json(sorted(out, key=str.lower))
+            seen, out = set(), []
+            for title, pl in rows:
+                title, pl = (title or "").strip(), (pl or "").strip()
+                if not title and not pl:
+                    continue
+                key = (title.lower(), pl.lower())
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append({"title": title, "pl_title": pl})
+            out.sort(key=lambda x: (x["title"] or x["pl_title"]).lower())
+            return self.json(out)
         if method == "POST" and path == "/api/rooms":
             d = self.body()
             kind = d.get("kind") or ("most" if d.get("pack_id") in ("most", "filmrun") else
@@ -386,7 +394,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json(r.state(p, self.lang))
             if method == "POST" and action == "guess":
                 return self.json(r.answer(p, d, self.lang))
-            if method == "POST" and action in ("start", "next", "again", "kick", "setup"):
+            if method == "POST" and action in ("start", "next", "again", "kick", "setup", "advance"):
                 if not is_host:
                     raise ApiError(403, "Tylko gospodarz może to zrobić")
                 if action == "setup":
@@ -399,6 +407,8 @@ class Handler(BaseHTTPRequestHandler):
                         raise ApiError(400, msg)
                 elif action == "next" and r.phase in ("round", "reveal"):
                     r.next()
+                elif action == "advance" and r.phase == "round":
+                    r.advance(p)
                 elif action == "again":
                     r.phase = "lobby"
                     for pl in r.players.values():

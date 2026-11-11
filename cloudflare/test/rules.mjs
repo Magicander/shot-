@@ -1,6 +1,6 @@
 // Testy zasad portu (bez wranglera): node cloudflare/test/rules.mjs - te same scenariusze co test_rules.py
 import { readFileSync } from "node:fs";
-import { Game, newRoom, normSettings, JUDGE_GRACE, LIC_DONE_DELAY, LIC_BID_CAP, licTotal, topScore, topAssign, availability, mergePackData, MODES, remakeTags } from "../src/game.js";
+import { Game, newRoom, normSettings, JUDGE_GRACE, LIC_DONE_DELAY, LIC_BID_CAP, licTotal, topScore, topAssign, availability, mergePackData, MODES, remakeTags, placeMarks, timeOpt } from "../src/game.js";
 import { mostScore, pathMovies, pickPairFromGraph, localGraph, pickFilmrunPair, poolPeople } from "../src/most.js";
 
 const FX = JSON.parse(readFileSync(new URL("./fixture.json", import.meta.url)));
@@ -27,7 +27,7 @@ const st = (g, p) => g.state(p, "pl");
 let A, B, C, t;
 
 console.log("ustawienia");
-const DEF = { time: 0, mode_time: {}, order: "mix", per_mode: false, mode_rounds: {}, answer: "type", mode_answer: {}, judge: "rotate", lic_answer: 30, lic_bid: 10, hints: true, final_x: 1, top_n: 5, top_own: 45, top_guess: 45, most_time: 90 };
+const DEF = { time: 0, mode_time: {}, order: "mix", per_mode: false, mode_rounds: {}, answer: "type", mode_answer: {}, judge: "rotate", lic_answer: 30, lic_bid: 10, hints: true, final_x: 1, top_n: 5, top_own: 45, top_guess: 45, most_time: 90, titles: "ui" };
 check(eq(normSettings({}), DEF), "domyślne ustawienia");
 let d = normSettings({ time: 5, mode_time: { kadry: 500, licytacja: 40, xx: 3 }, order: "fixed", answer: "voice", mode_answer: { rok: "voice", zoom: "type" }, judge: "vote", lic_answer: 999, lic_bid: 1, final_x: 7, hints: false, mode_rounds: { rok: 50 } });
 check(d.time === 10 && eq(d.mode_time, { kadry: 120 }), "czas przycięty do 10..120, licytacja bez nadpisania");
@@ -301,4 +301,99 @@ for (let i = 0; i < 5; i++) {
 }
 check(new Set(seen).size === 5 && seen.length === 5, `5 rund, 5 różnych pytań z puli 13 (${seen})`);
 
+{
+console.log("czas wyłączony i język tytułów");
+check(normSettings({}).titles === "ui", "domyślny język tytułów: ui");
+check(normSettings({ titles: "pl" }).titles === "pl", "tytuły: tylko pl");
+check(normSettings({ titles: "en" }).titles === "en", "tytuły: tylko en");
+check(normSettings({ titles: "both" }).titles === "both", "tytuły: oba");
+check(normSettings({ titles: "xx" }).titles === "ui", "zły język tytułów -> ui");
+check(timeOpt(-1) === -1 && normSettings({ time: -1 }).time === -1, "czas: -1 = bez limitu");
+check(normSettings({ time: "off" }).time === -1, "czas: off = bez limitu");
+check(eq(normSettings({ mode_time: { zoom: -1, rok: 40 } }).mode_time, { zoom: -1, rok: 40 }), "nadpisanie trybu: -1 zostaje");
+check(normSettings({ top_own: -1, top_guess: "bez" }).top_own === -1 && normSettings({ top_own: -1, top_guess: "bez" }).top_guess === -1, "top: bez limitu");
+
+[g, [A, B]] = room(2, { time: -1 }, ["zoom"]);
+g.start();
+check(g.r.plan[0].dur == null && !g.hasTimer(), "zoom bez limitu: dur=null");
+let sOff = st(g, A);
+check(sOff.untimed && sOff.duration == null && sOff.can_end && sOff.settings.titles === "ui", "stan: untimed, can_end, titles w ustawieniach");
+const title = "Movie " + g.r.task.movie.id;
+check(g.answer(A, { text: title }, "pl").correct, "A zgaduje bez zegara");
+check(g.answer(B, { text: title }, "pl").correct, "B też zgaduje");
+adv(g, 5);
+check(g.r.phase === "round", "wszyscy odpowiedzieli, runda bez czasu nie kończy się sama");
+g.next();
+check(g.r.phase === "reveal" && st(g, A).untimed, "odsłona czeka na gospodarza");
+adv(g, 30);
+check(g.r.phase === "reveal", "odsłona bez czasu nie przechodzi sama");
+g.next();
+check(g.r.phase === "round" && g.r.round === 1, "host puszcza następną rundę");
+
+[g, [A]] = room(1, { time: 30, mode_time: { rok: -1 } }, ["rok", "zoom"]);
+g.start();
+const durs = Object.fromEntries(g.r.plan.map(t => [t.mode, t.dur]));
+check(durs.rok == null && durs.zoom === 30, "limit tylko w wybranym trybie, rok bez czasu, zoom 30 s");
+
+[g, [A]] = room(1, { time: -1 }, ["licytacja"]);
+g.start();
+check(g.r.plan[0].dur === 30 && g.r.task.step === 10, "globalny brak czasu nie psuje zegara licytacji");
+
+[g, [A]] = room(1, { time: -1 }, ["kadry"]);
+g.start();
+check(g.r.task.dur == null && (g.r.task.stage || 0) === 0, "kadry bez czasu startują od etapu 0");
+check(st(g, A).can_advance && st(g, A).stage === 0, "host może podać kolejny kadr");
+g.advance(A);
+check(g.r.task.stage === 1 && st(g, A).stage === 1, "advance: kolejny kadr");
+g.advance(A);
+check(g.r.task.stage === 2 && !st(g, A).can_advance, "ostatni kadr, brak dalszego advance");
+
+console.log("porównanie wyników Top i Ułóż po kolei");
+check(eq(placeMarks([1, 2, 3, 4], [1, 2, 3, 4]), ["ok", "ok", "ok", "ok"]), "identyczny układ: wszystko zielone");
+check(eq(placeMarks([1, 3, 2, 4], [1, 2, 3, 4]), ["ok", "bad", "bad", "ok"]), "złe miejsca: czerwone, dobre: zielone");
+check(eq(placeMarks([4, 3, 2, 1], [1, 2, 3, 4]), ["bad", "bad", "bad", "bad"]), "odwrotny układ: wszystko czerwone");
+check(eq(placeMarks([1, 2], [1, 2, 3]), ["ok", "ok"]), "krótszy układ gracza");
+check(eq(placeMarks([], [1, 2]), []), "brak układu: puste oznaczenia");
+
+[g, [A]] = room(1, { time: -1 }, ["kolejnosc"]);
+g.start();
+const items = g.r.task.items;
+const right = items.slice().sort((a, b) => a.year - b.year).map(m => m.id);
+let wrong = right.slice().reverse();
+if (eq(wrong, right)) wrong = right.slice(1).concat(right.slice(0, 1));
+g.answer(A, { order: wrong }, "pl");
+g.next();
+const ans = st(g, A).answer;
+check(ans.order && ans.correct && ans.marks, "odsłona układu: lewa (order) i prawa (correct) plus marks");
+check(eq(ans.order.map(m => m.id), wrong), "lewa kolumna to układ gracza");
+check(eq(ans.correct.map(m => m.id), right), "prawa kolumna to poprawna kolejność");
+check(eq(ans.marks, placeMarks(wrong, right)), "marks ok/bad po pozycjach");
+check(ans.marks.every(m => m === "ok" || m === "bad"), "oznaczenia tylko ok albo bad");
+
+[g, [A, B]] = room(2, { time: -1, top_n: 3, top_own: -1, top_guess: -1 }, ["top"]);
+g.start();
+const ids = g.r.task.items.map(m => m.id);
+const ownA = ids.slice(), ownB = ids.slice().reverse();
+check(g.answer(A, { order: ownA }, "pl").ok !== false, "A zapisuje topkę");
+check(g.answer(B, { order: ownB }, "pl").ok !== false, "B zapisuje topkę");
+adv(g, 2);
+check(g.r.task.sub === "own" && g.r.phase === "round", "top bez czasu: own nie przechodzi samo do zgadywania");
+g.advance(A);
+check(g.r.task.sub === "guess", "host przechodzi do zgadywania");
+const tgt = g.r.task.targets[A.id];
+const truth = g.r.task.own[tgt];
+let guess = truth.slice().reverse();
+if (eq(guess, truth)) guess = truth.slice(1).concat(truth.slice(0, 1));
+g.answer(A, { order: guess }, "pl");
+g.answer(B, { order: g.r.task.own[g.r.task.targets[B.id]] }, "pl");
+adv(g, 2);
+check(g.r.phase === "round", "top guess bez czasu nie kończy się sam po odpowiedziach");
+g.next();
+const mine = st(g, A).answer.mine;
+check(mine.guess && mine.truth && mine.marks, "odsłona top: twój układ, poprawna topka, marks");
+check(eq(mine.guess.map(m => m.id), guess), "lewa: układ gracza");
+check(eq(mine.truth.map(m => m.id), truth), "prawa: poprawna topka");
+check(eq(mine.marks, placeMarks(guess, truth)), "top marks ok/bad");
+
+}
 console.log(`\nOK: ${OK} sprawdzeń`);

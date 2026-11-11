@@ -54,7 +54,7 @@ LIC_DONE_DELAY = 3          # licytacja na głos: chwila na cofnięcie ostatnieg
 DEFAULTS = {"time": 0, "mode_time": {}, "order": "mix", "per_mode": False, "mode_rounds": {},
             "answer": "type", "mode_answer": {}, "judge": "rotate", "lic_answer": 30, "lic_bid": 10,
             "hints": True, "final_x": 1, "top_n": TOP_N, "top_own": TOP_OWN, "top_guess": TOP_GUESS,
-            "most_time": MOST_TIME}
+            "most_time": MOST_TIME, "titles": "ui"}
 
 
 def _int(v, lo, hi, dflt):
@@ -67,17 +67,51 @@ def _int(v, lo, hi, dflt):
     return max(lo, min(v, hi))
 
 
+def time_opt(v, dflt=0):
+    """0 = domyślny czas trybu, -1 = bez limitu, 10-120 = sekundy."""
+    if v in ("off", "none", "bez") or (isinstance(v, str) and v.strip().lower() in ("off", "none", "bez")):
+        return -1
+    n = _int(v, -1, 120, dflt)
+    if n < 0:
+        return -1
+    if n == 0:
+        return 0
+    return max(10, n)
+
+
+def phase_limit(v, lo, hi, dflt):
+    """-1 = bez limitu, inaczej lo..hi (np. czas topki)."""
+    if v in ("off", "none", "bez") or (isinstance(v, str) and v.strip().lower() in ("off", "none", "bez")):
+        return -1
+    if not isinstance(v, bool):
+        raw = _int(v, -9999, 9999, dflt)
+        if raw == -1:
+            return -1
+    return _int(v, lo, hi, dflt)
+
+
+def place_marks(got, right):
+    """Dla każdej pozycji układu gracza: 'ok' jeśli zgadza się z poprawną, inaczej 'bad'."""
+    got, right = list(got or []), list(right or [])
+    return ["ok" if i < len(right) and got[i] == right[i] else "bad" for i in range(len(got))]
+
+
 def norm_settings(d):
     """Ustawienia gospodarza -> bezpieczny słownik (identycznie jak normSettings w cloudflare/src/game.js)."""
     d = d if isinstance(d, dict) else {}
     mt = d.get("mode_time") if isinstance(d.get("mode_time"), dict) else {}
     mr = d.get("mode_rounds") if isinstance(d.get("mode_rounds"), dict) else {}
     ma = d.get("mode_answer") if isinstance(d.get("mode_answer"), dict) else {}
-    t = _int(d.get("time"), 0, 120, 0)
+    titles = d.get("titles") if d.get("titles") in ("ui", "pl", "en", "both") else "ui"
+    mode_time = {}
+    for k in MODES:
+        if k in mt and k != "licytacja":
+            mv = time_opt(mt[k], 0)
+            if mv != 0:
+                mode_time[k] = mv
     return {
-        "time": max(10, t) if t else 0,
-        "mode_time": {k: max(10, _int(mt[k], 0, 120, 0)) for k in MODES
-                      if k in mt and k != "licytacja" and _int(mt[k], 0, 120, 0) > 0},
+        "time": time_opt(d.get("time"), 0),
+        "mode_time": mode_time,
         "order": "fixed" if d.get("order") == "fixed" else "mix",
         "per_mode": bool(d.get("per_mode")),
         "mode_rounds": {k: _int(mr[k], 1, 10, 1) for k in MODES if k in mr},
@@ -89,9 +123,10 @@ def norm_settings(d):
         "hints": d.get("hints") is not False,
         "final_x": _int(d.get("final_x"), 1, 3, 1),
         "top_n": _int(d.get("top_n"), TOP_N_MIN, TOP_N_MAX, TOP_N),
-        "top_own": _int(d.get("top_own"), 15, 180, TOP_OWN),
-        "top_guess": _int(d.get("top_guess"), 15, 180, TOP_GUESS),
+        "top_own": phase_limit(d.get("top_own"), 15, 180, TOP_OWN),
+        "top_guess": phase_limit(d.get("top_guess"), 15, 180, TOP_GUESS),
         "most_time": _int(d.get("most_time"), 30, 180, MOST_TIME),
+        "titles": titles,
     }
 
 
@@ -474,14 +509,17 @@ class Room:
         mode, c = t["mode"], self.cfg
         if mode == "licytacja":
             return c["lic_answer"], c["lic_bid"]
-        s = c["mode_time"].get(mode) or c["time"]
+        if mode == "most":
+            return None, None
+        if mode == "top":
+            own, guess = c["top_own"], c["top_guess"]
+            return (None if own == -1 else own), (None if guess == -1 else guess)
+        s = c["mode_time"][mode] if mode in c["mode_time"] else c["time"]
+        if s == -1:
+            return None, None
         if mode == "aktorzy":
             dur = s or ACTOR_SECONDS * len(t["cast"])
             return dur, round(dur / len(t["cast"]), 2)
-        if mode == "top":
-            return c["top_own"], c["top_guess"]
-        if mode == "most":
-            return None, None
         dur = s or DURATION.get(mode, 30)
         return dur, (round(dur / 3, 2) if mode == "kadry" else None)
 
@@ -570,6 +608,11 @@ class Room:
         d = self.task.get("dur") if self.task else None
         return d if d is not None else 0
 
+    def has_timer(self):
+        """Czy ta faza rundy ma odliczanie (False = gospodarz kończy rundę)."""
+        d = self.task.get("dur") if self.task else None
+        return d is not None and d > 0
+
     def mult(self):
         return self.cfg["final_x"] if self.plan and self.round == len(self.plan) - 1 else 1
 
@@ -587,13 +630,18 @@ class Room:
                      found=[], type_end=None, done_at=None, turn_end=self.t0 + t["step"])
         elif t["mode"] == "top":
             t.update(sub="own", own={}, guess={}, targets={})
-            t["dur"] = t.get("own_dur") or self.cfg["top_own"]
+            t["dur"] = t["own_dur"] if "own_dur" in t else self.cfg["top_own"]
         elif t["mode"] == "most":
             t.setdefault("started", {})
             t.setdefault("stopped", {})
             t["winner"] = None
         elif t["voice"]:
             t.update(claims=[], peek=[])
+        if t.get("dur") is None:
+            if t["mode"] == "kadry":
+                t["stage"] = 0
+            elif t["mode"] == "aktorzy":
+                t["shown"] = 1
         self.version += 1
 
     # --- sędziowanie (tryb "na głos")
@@ -679,12 +727,20 @@ class Room:
     def title_points(self, t, el):
         mode, step = t["mode"], t["step"]
         if mode == "kadry":
+            if t.get("dur") is None or not step:
+                stage = min(2, int(t.get("stage") or 0))
+                return STAGE_POINTS[stage], stage
             stage = min(2, int(el // step))
             within = (el - stage * step) / step
             return int(STAGE_POINTS[stage] * (1 - 0.5 * min(1, within))), stage
         if mode == "aktorzy":
+            if t.get("dur") is None or not step:
+                k = min(len(t["cast"]), int(t.get("shown") or 1))
+                return max(250, 1000 - 150 * (k - 1)), k
             k = min(len(t["cast"]), int(el // step) + 1)
             return max(250, 1000 - 150 * (k - 1)), k
+        if not t.get("dur"):
+            return 1000, 0
         return int(1000 * (1 - 0.7 * min(1, el / t["dur"]))), 0
 
     def award(self, p, el):
@@ -724,17 +780,19 @@ class Room:
                     self.end_round()
             elif t["mode"] == "top":
                 if t.get("sub") == "own":
-                    if el >= self.duration() or (act and all(p["id"] in t["own"] for p in act)):
+                    if self.has_timer() and (el >= self.duration() or (act and all(p["id"] in t["own"] for p in act))):
                         self.top_to_guess()
-                elif el >= self.duration() or (act and all(p["id"] in t["guess"] for p in act)):
+                elif self.has_timer() and (el >= self.duration() or (act and all(p["id"] in t["guess"] for p in act))):
                     self.end_round()
             elif t["mode"] == "most":
                 if t.get("winner"):
                     self.end_round()
-            elif el >= self.duration() or (act and all(p["ans"] is not None or p["got"] for p in act)):
+            elif self.has_timer() and (el >= self.duration() or (act and all(p["ans"] is not None or p["got"] for p in act))):
                 self.end_round()
-        elif self.phase == "reveal" and now - self.t0 >= REVEAL_SECONDS + (6 if self.mode in ("kolejnosc", "licytacja", "top", "most") else 0):
-            self.next()
+        elif self.phase == "reveal":
+            auto = not (self.task and self.task.get("dur") is None and self.mode not in ("most", "licytacja"))
+            if auto and now - self.t0 >= REVEAL_SECONDS + (6 if self.mode in ("kolejnosc", "licytacja", "top", "most") else 0):
+                self.next()
 
     # --- licytacja po kolei
     def lic_tick(self, now):
@@ -831,6 +889,24 @@ class Room:
             self.round += 1
             self.begin_round()
 
+    def advance(self, p):
+        """Gospodarz: kolejny kadr/aktor albo przejście topki do zgadywania."""
+        if not p or p["id"] != self.host or self.phase != "round" or not self.task:
+            return {"ok": False}
+        t = self.task
+        if t["mode"] == "kadry" and t.get("dur") is None:
+            t["stage"] = min(2, int(t.get("stage") or 0) + 1)
+            self.version += 1
+            return {"ok": True, "stage": t["stage"]}
+        if t["mode"] == "aktorzy" and t.get("dur") is None:
+            t["shown"] = min(len(t["cast"]), int(t.get("shown") or 1) + 1)
+            self.version += 1
+            return {"ok": True, "shown": t["shown"]}
+        if t["mode"] == "top" and t.get("sub") == "own":
+            self.top_to_guess()
+            return {"ok": True}
+        return {"ok": False}
+
     def top_lock_remaining(self):
         t = self.task
         default = [m["id"] for m in t["items"]]
@@ -850,7 +926,7 @@ class Room:
             self.players[pid]["ans"] = None
         t["targets"] = top_assign(list(self.players))
         t["sub"] = "guess"
-        t["dur"] = t.get("guess_dur") or self.cfg["top_guess"]
+        t["dur"] = t["guess_dur"] if "guess_dur" in t else self.cfg["top_guess"]
         self.t0 = time.time()
         self.version += 1
         if not t["targets"]:
@@ -1085,7 +1161,7 @@ class Room:
     # --- stan dla klienta
     @staticmethod
     def mview(m, lang, year=True):
-        out = {"id": m["id"], "title": m["title"], "pl_title": m["pl_title"] if lang == "pl" else ""}
+        out = {"id": m["id"], "title": m["title"], "pl_title": m.get("pl_title") or ""}
         if year:
             out["year"] = m["year"]
         return out
@@ -1096,7 +1172,7 @@ class Room:
 
     @staticmethod
     def fview(f, lang):
-        return {"title": f["text"], "pl_title": f.get("pl") if lang == "pl" else ""}
+        return {"title": f["text"], "pl_title": f.get("pl") or ""}
 
     @staticmethod
     def thumb(m):
@@ -1138,17 +1214,28 @@ class Room:
         if self.phase == "round":
             out.update(elapsed=round(el, 2))
             if mode != "licytacja":
-                out.update(duration=self.duration(), left=round(self.duration() - el, 1))
+                if self.has_timer():
+                    out.update(duration=self.duration(), left=round(self.duration() - el, 1), untimed=False)
+                else:
+                    out.update(duration=None, left=None, untimed=True)
             if mode == "kadry":
-                stage = min(2, int(el // t["step"]))
-                out.update(stage=stage, frames=t["movie"]["frames"][:stage + 1], stage_seconds=t["step"])
+                if t.get("dur") is None or not t.get("step"):
+                    stage = min(2, int(t.get("stage") or 0))
+                    out.update(stage=stage, frames=t["movie"]["frames"][:stage + 1], stage_seconds=None)
+                else:
+                    stage = min(2, int(el // t["step"]))
+                    out.update(stage=stage, frames=t["movie"]["frames"][:stage + 1], stage_seconds=t["step"])
             elif mode == "zoom":
                 out.update(img=f"/frame/{t['frame']}.jpg", ox=t["ox"], oy=t["oy"])
             elif mode == "plakat":
                 out.update(img=f"/poster/{t['movie']['id']}.jpg", style=t["style"], seed=t["seed"])
             elif mode == "aktorzy":
-                k = min(len(t["cast"]), int(el // t["step"]) + 1)
-                out.update(cast=t["cast"][:k], cast_total=len(t["cast"]), actor_seconds=t["step"])
+                if t.get("dur") is None or not t.get("step"):
+                    k = min(len(t["cast"]), int(t.get("shown") or 1))
+                    out.update(cast=t["cast"][:k], cast_total=len(t["cast"]), actor_seconds=None)
+                else:
+                    k = min(len(t["cast"]), int(el // t["step"]) + 1)
+                    out.update(cast=t["cast"][:k], cast_total=len(t["cast"]), actor_seconds=t["step"])
             elif mode == "top":
                 items = [dict(self.mview(m, lang), img=self.thumb(m)) for m in t["items"]]
                 mine = (me and t.get("own" if t.get("sub") == "own" else "guess", {}).get(me["id"]))
@@ -1179,6 +1266,14 @@ class Room:
                                        **({"remake": tags[m["id"]]} if m["id"] in tags else {}))
                                   for m in t["items"]],
                            mine=me and me["ans"])
+            if me and self.host == me["id"]:
+                out["can_end"] = True
+                if mode == "kadry" and t.get("dur") is None and int(t.get("stage") or 0) < 2:
+                    out["can_advance"] = True
+                elif mode == "aktorzy" and t.get("dur") is None and int(t.get("shown") or 1) < len(t["cast"]):
+                    out["can_advance"] = True
+                elif mode == "top" and t.get("sub") == "own":
+                    out["can_advance"] = True
             if mode in TITLE_MODES and t["voice"]:
                 j = self.judge()
                 vote = self.cfg["judge"] == "vote"
@@ -1229,6 +1324,7 @@ class Room:
             return out
         # reveal
         out["left"] = round(REVEAL_SECONDS - el, 1)
+        out["untimed"] = bool(t and t.get("dur") is None and mode not in ("most", "licytacja"))
         ans = {"mode": mode}
         if "movie" in t:
             m = t["movie"]
@@ -1246,9 +1342,20 @@ class Room:
         if mode == "kolejnosc":
             right = sorted(t["items"], key=lambda m: m["year"])
             tags = remake_tags(right)
-            ans["items"] = [dict(self.mview(m, lang), img=self.thumb(m),
-                                 **({"remake": tags[m["id"]]} if m["id"] in tags else {}))
-                            for m in right]
+            def row(ms):
+                return [dict(self.mview(m, lang), img=self.thumb(m),
+                             **({"remake": tags[m["id"]]} if m["id"] in tags else {}))
+                        for m in ms]
+            by_id = {m["id"]: m for m in t["items"]}
+            ans["items"] = row(right)
+            ans["correct"] = row(right)
+            if me and me.get("ans"):
+                mine_ms = [by_id[i] for i in me["ans"] if i in by_id]
+                ans["order"] = row(mine_ms)
+                ans["marks"] = place_marks(me["ans"], [m["id"] for m in right])
+            else:
+                ans["order"] = []
+                ans["marks"] = []
         if mode == "top":
             by_id = {m["id"]: dict(self.mview(m, lang), img=self.thumb(m)) for m in t["items"]}
             def row(ids):
@@ -1272,11 +1379,15 @@ class Room:
                 })
             if me:
                 tgt = t.get("targets", {}).get(me["id"])
+                guess_ids = t["guess"].get(me["id"]) or []
+                truth_ids = t["own"].get(tgt) or []
                 ans["mine"] = {
                     "own": row(t["own"].get(me["id"]) or []),
                     "target": self.pname(tgt),
-                    "guess": row(t["guess"].get(me["id"]) or []),
-                    "truth": row(t["own"].get(tgt) or []),
+                    "guess": row(guess_ids),
+                    "truth": row(truth_ids),
+                    "marks": place_marks(guess_ids, truth_ids),
+                    "own_marks": [],
                     "points": (me["history"][-1] if me["history"] else 0),
                 }
         if mode == "most":

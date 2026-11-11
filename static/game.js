@@ -122,9 +122,9 @@ function renderMostEntry() {
         <button type="button" class="pill orange big" id="mostgo">${T("graj")}</button>
       </div>
       <div class="filmrun-art" aria-hidden="true">
-        <div class="fr-bust"><span>?</span></div>
+        <figure class="fr-bust photo"><img src="/static/filmrun/photos/nm0000199.jpg" alt=""><figcaption>Al Pacino</figcaption></figure>
         <span class="fr-to">→</span>
-        <div class="fr-bust goal"><span>?</span></div>
+        <figure class="fr-bust photo goal"><img src="/static/filmrun/photos/nm0000134.jpg" alt=""><figcaption>Robert De Niro</figcaption></figure>
       </div>
     </div>`;
   host.querySelector("#mostgo").onclick = () => askName(T("Filmrun"), T("{rounds}. Jak cię nazywać?", {rounds: plRounds(rounds.n)}), async name => {
@@ -320,12 +320,24 @@ function remakeSuffix(o) {
   const label = /^\d{4}$/.test(s) ? s : T(s);
   return ` <span class="remake">(${esc(label)})</span>`;
 }
+function titlesMode() {
+  const v = (S && S.settings && S.settings.titles) || "ui";
+  if (v === "pl" || v === "en" || v === "both") return v;
+  return LANG === "pl" ? "both" : "en";
+}
 const showTitle = o => {
   if (!o) return "";
   const tag = remakeSuffix(o);
-  if (o.pl_title && LANG === "pl" && fold(o.pl_title) !== fold(o.title))
-    return `${esc(o.pl_title)}${tag} <small class="orig">(${esc(o.title)})</small>`;
-  return esc(o.title) + tag;
+  const mode = titlesMode();
+  const pl = o.pl_title || "", en = o.title || "";
+  if (mode === "pl") return esc(pl || en) + tag;
+  if (mode === "en") return esc(en || pl) + tag;
+  if (pl && en && fold(pl) !== fold(en)) {
+    const main = LANG === "en" ? en : pl;
+    const sub = LANG === "en" ? pl : en;
+    return `${esc(main)}${tag} <small class="orig">(${esc(sub)})</small>`;
+  }
+  return esc(en || pl) + tag;
 };
 
 
@@ -339,15 +351,33 @@ function roundKey() {
   const claims = (S.claims || []).map(c => c.pid + c.st + c.vote + c.can).join(";");
   return [S.mode, S.stage, (S.cast || []).length, S.hint_year, S.sub, (S.found || []).length, JSON.stringify(S.mine ?? null),
     claims, S.can_claim, S.can_peek, !!S.solution, S.judge, S.turn, S.bid, (S.history || []).length, S.can_count, S.closing === null ? "" : "c",
-    S.bidder].join(",");
+    S.bidder, S.untimed, !!S.can_advance, S.timer_started, S.can_start_timer, S.can_verdict,
+    S.can_start, S.can_stop, S.winner, (S.started_names || []).join(), (S.back_names || S.stopped_names || []).join()].join(",");
+}
+function shellKey() {
+  if (S.phase === "lobby")
+    return ["lobby", S.modes.join(), S.rounds, JSON.stringify(S.settings), S.players.map(p => p.id + p.name + p.online).join(), S.host].join("|");
+  if (S.phase === "round") return ["round", S.round, roundKey()].join("|");
+  if (S.phase === "reveal") return ["reveal", S.round, S.mode].join("|");
+  return [S.phase, S.round].join("|");
+}
+function patchLive() {
+  const b = $("#board");
+  if (b) {
+    const open = b.classList.contains("open");
+    b.outerHTML = board();
+    if (open) { $("#board")?.classList.add("open"); $("#sheetbg")?.classList.add("open"); }
+    wireCommon();
+  }
+  const hs = $("#sheetbtn");
+  if (hs) hs.textContent = T("{pts} pkt", {pts: me().score || 0});
 }
 function render() {
   renderMeta();
   document.body.classList.toggle("inround", S.phase === "round" || S.phase === "reveal");
-  const key = [S.phase, S.round, roundKey(), S.players.map(p => p.id + p.name + p.score + !!p.got + !!p.done + p.online).join(), S.host,
-    S.phase === "lobby" ? S.modes.join() + S.rounds + JSON.stringify(S.settings) : ""].join("|");
   if (S.phase === "round") updateClock();
-  if (key === lastKey) return;
+  const key = shellKey();
+  if (key === lastKey) { patchLive(); return; }
   const v = $("#view");
   const keepInput = S.phase === "round" && lastKey.startsWith("round|" + S.round + "|");
   lastKey = key;
@@ -415,21 +445,23 @@ function settingsPanel() {
     grp(T("rundy"), c.per_mode ? T("Ustawione osobno dla trybów w opcjach zaawansowanych.") : T("Ile rund zagracie. Tryby przeplatają się."),
       c.per_mode ? `<span class="tag">${plRounds(S.rounds)}</span>`
         : `<div class="stepper small" role="group" aria-label="${T("Liczba rund")}"><button type="button" id="rminus" ${d} aria-label="${T("mniej rund")}">-</button><span class="n">${plRounds(S.rounds)}</span><button type="button" id="rplus" ${d} aria-label="${T("więcej rund")}">+</button></div>`),
-    grp(T("czas na rundę"), c.time ? T("Każdy tryb dostaje {n} s. Kadry dzielą czas na 3 etapy.", {n: c.time}) : T("Każdy tryb ma swój czas, np. Kadry 3 x 15 s, Zoom 30 s."),
-      seg("time", timeOpts, [0, 15, 20, 30, 45, 60].includes(c.time) ? c.time : -1, dis) +
-      `<label class="range"><input type="range" id="trange" min="10" max="120" step="5" value="${c.time || 30}" ${d} aria-label="${T("czas na rundę")}"><span id="tval">${c.time ? sec(c.time) : T("domyślny")}</span></label>`),
+    grp(T("czas na rundę"), c.time === -1 ? T("Bez odliczania. Runda czeka, aż gospodarz kliknie „zakończ rundę”.") : (c.time ? T("Każdy tryb dostaje {n} s. Kadry dzielą czas na 3 etapy.", {n: c.time}) : T("Każdy tryb ma swój czas, np. Kadry 3 x 15 s, Zoom 30 s. Gospodarz i tak może zakończyć rundę wcześniej.")),
+      seg("time", [[-1, T("bez limitu")], ...timeOpts], [ -1, 0, 15, 20, 30, 45, 60].includes(c.time) ? c.time : "x", dis) +
+      (c.time === -1 ? "" : `<label class="range"><input type="range" id="trange" min="10" max="120" step="5" value="${c.time || 30}" ${d} aria-label="${T("czas na rundę")}"><span id="tval">${c.time ? sec(c.time) : T("domyślny")}</span></label>`)),
+    grp(T("tytuły filmów"), T("Jak pokazywać nazwy w rundzie, w wynikach i w podpowiedziach."),
+      seg("titles", [["ui", T("jak język gry")], ["pl", T("tylko polski")], ["en", T("tylko angielski")], ["both", T("polski i oryginał")]], c.titles || "ui", dis)),
     S.modes.includes("licytacja") ? grp(T("licytacja"), T("Gracze licytują po kolei. Timer puszcza przeciwnik, a po czasie pozostali oceniają, czy zadanie zostało zaliczone. Czas odpowiedzi: {n} s.", {n: c.lic_answer}),
       `<div class="sub2"><span>${T("czas na odpowiedź")}</span>${seg("lic_answer", [20, 30, 45, 60].map(n => [n, sec(n)]), c.lic_answer, dis)}</div>
        <div class="sub2"><span>${T("czas na turę")}</span>${seg("lic_bid", [5, 10, 15, 20].map(n => [n, sec(n)]), c.lic_bid, dis)}</div>`) : "",
     S.modes.includes("top") ? grp(T("Top"), T("Za każdy film: {n} pkt za dokładne miejsce, o 1 mniej za każde miejsce pomyłki (minimum 0). Przy {n} filmach maksimum to {m}.", {n: c.top_n || 5, m: (c.top_n || 5) * (c.top_n || 5)}),
       `<div class="sub2"><span>${T("liczba filmów")}</span>${seg("top_n", [3,4,5,6,7,8].map(n => [n, String(n)]), c.top_n || 5, dis)}</div>
-       <div class="sub2"><span>${T("czas na własną topkę")}</span>${seg("top_own", [30,45,60,90].map(n => [n, sec(n)]), c.top_own || 45, dis)}</div>
-       <div class="sub2"><span>${T("czas na zgadywanie")}</span>${seg("top_guess", [30,45,60,90].map(n => [n, sec(n)]), c.top_guess || 45, dis)}</div>`) : "",
+       <div class="sub2"><span>${T("czas na własną topkę")}</span>${seg("top_own", [[-1, T("bez limitu")], ...[30,45,60,90].map(n => [n, sec(n)])], c.top_own ?? 45, dis)}</div>
+       <div class="sub2"><span>${T("czas na zgadywanie")}</span>${seg("top_guess", [[-1, T("bez limitu")], ...[30,45,60,90].map(n => [n, sec(n)])], c.top_guess ?? 45, dis)}</div>`) : "",
   ].join("");
   const sel = (attr, k, opts, val) => `<select class="input sel" data-${attr}="${k}" ${d}>${opts.map(([v, l]) => `<option value="${v}" ${String(v) === String(val) ? "selected" : ""}>${l}</option>`).join("")}</select>`;
   const adv = [
     grp(T("czas dla trybu"), T("Nadpisuje czas ogólny tylko dla wybranego trybu."),
-      `<div class="mgrid">${titleModes.map(k => `<label><span>${modeName(k)}</span>${sel("mt", k, [[0, k === "aktorzy" ? T("ogólny (6 s na aktora)") : T("ogólny ({n} s)", {n: c.time || DEF_TIME[k]})], ...[15, 20, 30, 45, 60, 90].map(n => [n, sec(n)])], c.mode_time[k] || 0)}</label>`).join("") || `<span class="muted">-</span>`}</div>`),
+      `<div class="mgrid">${titleModes.map(k => `<label><span>${modeName(k)}</span>${sel("mt", k, [[0, c.time === -1 ? T("ogólny (bez limitu)") : (k === "aktorzy" ? T("ogólny (6 s na aktora)") : T("ogólny ({n} s)", {n: c.time || DEF_TIME[k]}))], [-1, T("bez limitu")], ...[15, 20, 30, 45, 60, 90].map(n => [n, sec(n)])], c.mode_time[k] || 0)}</label>`).join("") || `<span class="muted">-</span>`}</div>`),
     grp(T("rundy na tryb"), T("Zamiast ogólnej liczby rund: ile rund każdego trybu."),
       `<label class="toggle"><input type="checkbox" id="permode" ${c.per_mode ? "checked" : ""} ${d}><span>${T("ustaw osobno")}</span></label>
        ${c.per_mode ? `<div class="mgrid">${S.modes.map(k => `<label><span>${modeName(k)}</span>${sel("mr", k, Array.from({length: 10}, (_, i) => [i + 1, String(i + 1)]), c.mode_rounds[k] || 1)}</label>`).join("")}</div>` : ""}`),
@@ -523,10 +555,26 @@ function me() { return S.players.find(p => p.id === S.me) || {}; }
 
 const board = () => `<aside class="panel board" id="board"><div class="sheethead"><h3>${T("wyniki")}</h3><button type="button" class="pill small ghost sheetclose" id="sheetx">${T("zamknij")}</button></div>${playerList(S.players, {score:true, status:true})}
   <div class="feed">${S.feed.slice().reverse().map(f => `<span>${esc(feedText(f))}</span>`).join("")}</div>
-  ${isHost() && S.phase === "round" ? `<button class="pill ghost small" style="margin-top:14px" id="skip">${T("pomiń rundę")}</button>` : ""}</aside>`;
+  </aside>`;
 const hud = () => `<div class="hud"><span class="hr">${T("runda {r}/{n}", {r:S.round, n:S.rounds})}</span><span class="hm">${modeName(S.mode)}</span>${S.mult > 1 ? `<span class="hx">x${S.mult}</span>` : ""}
-  ${S.phase === "round" ? `<span class="hc" id="hclock"></span>` : ""}<button type="button" class="hs" id="sheetbtn" aria-label="${T("wyniki")}">${T("{pts} pkt", {pts: me().score || 0})}</button></div>`;
-const bar = () => `<div class="timeline one"><div class="cur"><i id="bar1"></i></div></div>`;
+  ${S.phase === "round" && S.mode !== "most" ? `<span class="hc" id="hclock"></span>` : ""}<button type="button" class="hs" id="sheetbtn" aria-label="${T("wyniki")}">${T("{pts} pkt", {pts: me().score || 0})}</button></div>`;
+const bar = () => S.untimed ? "" : `<div class="timeline one"><div class="cur"><i id="bar1"></i></div></div>`;
+function orderWrap(listHtml, topLab, botLab) {
+  return `<div class="orderwrap"><div class="olab-top">${esc(topLab)}</div>${listHtml}<div class="olab-bot">${esc(botLab)}</div></div>`;
+}
+function cmpCol(title, items, marks, year) {
+  const lis = (items || []).map((i, n) => `<li class="${(marks && marks[n]) || ""}">${i.img && !year ? `<img src="${i.img}" alt="">` : (i.img && year ? `<img src="${i.img}" alt="">` : "")}<span class="tpos">${n + 1}</span><span class="ot">${showTitle(i)}</span>${year && i.year ? `<span class="oy">${i.year}</span>` : ""}</li>`).join("");
+  return `<div class="cmp-col"><h3>${title}</h3><ol class="orderlist done cmp-list">${lis || `<li class="miss">${T("brak układu")}</li>`}</ol></div>`;
+}
+function hostDock() {
+  if (!isHost() || S.phase !== "round" || S.mode === "most") return "";
+  const bits = [];
+  if (S.can_advance && S.mode === "kadry") bits.push(`<button type="button" class="pill ghost big" id="adv">${T("kolejny kadr")}</button>`);
+  else if (S.can_advance && S.mode === "aktorzy") bits.push(`<button type="button" class="pill ghost big" id="adv">${T("kolejna osoba")}</button>`);
+  else if (S.can_advance && S.mode === "top") bits.push(`<button type="button" class="pill ghost big" id="adv">${T("przejdź do zgadywania")}</button>`);
+  bits.push(`<button type="button" class="pill ${S.untimed ? "orange" : "ghost"} ${bits.length ? "" : "big"}" id="endround">${S.untimed ? T("zakończ rundę") : T("pomiń rundę")}</button>`);
+  return `<div class="hostbar">${bits.join("")}</div>`;
+}
 const guessForm = ph => `<form class="guess" id="gf" autocomplete="off"><ul class="ac hidden" id="ac"></ul>
   <input class="input" id="g" placeholder="${ph || T("Jaki to film?")}" enterkeyhint="send" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="${T("Tytuł filmu")}">
   <button class="pill orange big">${T("zgaduję")}</button></form><div class="feedback" id="fb"></div>`;
@@ -593,13 +641,13 @@ function renderRound(v, keepInput) {
     const label = S.sub === "guess"
       ? T("ułóż topkę tak, jak {name}", {name: (S.target && S.target.name) || "?"})
       : T("twoja topka · od najlepszego do najgorszego");
-    stage = `<div class="stage textstage orderstage topstage"><span class="lvl">${esc(label)}</span><span class="clock" id="clock"></span>
-      <p class="muted small-note">${T("Chwyć kafelek i przeciągnij. Za każdy film: {n} pkt za dokładne miejsce, o 1 mniej za każde miejsce pomyłki.", {n: S.top_n || S.items.length})}</p>
-      <ol class="orderlist toplist bigtop" id="toplist">${ids.map((id, i) => `<li draggable="false" data-i="${i}" data-id="${id}">
+    const topList = `<ol class="orderlist toplist bigtop" id="toplist">${ids.map((id, i) => `<li draggable="false" data-i="${i}" data-id="${id}">
         <span class="tpos">${i + 1}</span>
         <span class="ot">${byId[id] ? showTitle(byId[id]) : ""}</span>
-      </li>`).join("")}</ol>
-      <div class="olabels"><span>${T("najlepszy")}</span><span>${T("najgorszy")}</span></div></div>${bar()}`;
+      </li>`).join("")}</ol>`;
+    stage = `<div class="stage textstage orderstage topstage"><span class="lvl">${esc(label)}</span><span class="clock" id="clock"></span>
+      <p class="muted small-note">${T("Chwyć kafelek i przeciągnij. Za każdy film: {n} pkt za dokładne miejsce, o 1 mniej za każde miejsce pomyłki.", {n: S.top_n || S.items.length})}</p>
+      ${orderWrap(topList, T("najlepszy"), T("najgorszy"))}</div>${bar()}`;
     input = S.mine ? waitBox(S.sub === "guess" ? T("Zgadnięcie wysłane") : T("Topka wysłana, czekamy na resztę"))
       : `<button class="pill orange big" id="osend" style="width:100%">${T("zatwierdzam topkę")}</button>`;
   } else if (mode === "most") {
@@ -614,20 +662,21 @@ function renderRound(v, keepInput) {
     if (ORDER.round !== S.round) ORDER = {round: S.round, ids: S.items.map(i => i.id)};
     const byId = Object.fromEntries(S.items.map(i => [i.id, i]));
     const ids = S.mine || ORDER.ids;
+    const ordList = `<ol class="orderlist">${ids.map((id, i) => `<li>${byId[id].img ? `<img src="${byId[id].img}" alt="">` : `<span class="noimg"></span>`}<span class="ot">${showTitle(byId[id])}</span>
+        ${S.mine ? "" : `<span class="ob"><button type="button" class="pill small" data-up="${i}" ${i ? "" : "disabled"} aria-label="${T("wyżej")}">&uarr;</button><button type="button" class="pill small" data-dn="${i}" ${i < ids.length - 1 ? "" : "disabled"} aria-label="${T("niżej")}">&darr;</button></span>`}</li>`).join("")}</ol>`;
     stage = `<div class="stage textstage orderstage"><span class="lvl">${T("od najstarszego do najnowszego")}</span><span class="clock" id="clock"></span>
-      <ol class="orderlist">${ids.map((id, i) => `<li>${byId[id].img ? `<img src="${byId[id].img}" alt="">` : `<span class="noimg"></span>`}<span class="ot">${showTitle(byId[id])}</span>
-        ${S.mine ? "" : `<span class="ob"><button type="button" class="pill small" data-up="${i}" ${i ? "" : "disabled"} aria-label="${T("wyżej")}">&uarr;</button><button type="button" class="pill small" data-dn="${i}" ${i < ids.length - 1 ? "" : "disabled"} aria-label="${T("niżej")}">&darr;</button></span>`}</li>`).join("")}</ol>
-      <div class="olabels"><span>${T("najstarszy")}</span><span>${T("najnowszy")}</span></div></div>${bar()}`;
+      ${orderWrap(ordList, T("najstarszy"), T("najnowszy"))}</div>${bar()}`;
     input = S.mine ? waitBox(T("Kolejność wysłana")) : `<button class="pill orange big" id="osend" style="width:100%">${T("zatwierdzam kolejność")}</button>`;
   } else if (mode === "licytacja") {
     [stage, input] = renderAuction(m);
   }
-  v.innerHTML = `<div class="game"><div class="gmain">${hud()}${stage}<div class="dock" id="dock">${input}</div></div>${board()}</div><div class="sheetbg" id="sheetbg"></div>`;
+  v.innerHTML = `<div class="game"><div class="gmain">${hud()}${stage}<div class="dock" id="dock">${input}${hostDock()}</div></div>${board()}</div><div class="sheetbg" id="sheetbg"></div>`;
   wireCommon();
   updateClock(true);
-  if ($("#gf")) setupGuess(prev, hadFocus || !keepInput, mode === "licytacja");
+  const fine = matchMedia("(pointer:fine)").matches;
+  if ($("#gf")) setupGuess(prev, hadFocus || (!keepInput && fine), mode === "licytacja");
   if ($("#yf")) {
-    const y = $("#y"); y.value = prevY; if ((hadFocus || !keepInput) && matchMedia("(pointer:fine)").matches) y.focus();
+    const y = $("#y"); y.value = prevY; if (hadFocus || (!keepInput && fine)) y.focus({preventScroll: true});
     $("#yf").onsubmit = async e => { e.preventDefault(); const n = parseInt(y.value, 10); if (!(n >= 1880 && n <= 2100)) return toast(T("Podaj rok, np. 1984")); await guessAct({year:n}); };
   }
   if ((mode === "kolejnosc" || mode === "top") && !S.mine) {
@@ -656,6 +705,8 @@ function renderRound(v, keepInput) {
 }
 function wireCommon() {
   if ($("#skip")) $("#skip").onclick = () => act("next");
+  if ($("#endround")) $("#endround").onclick = () => act("next");
+  if ($("#adv")) $("#adv").onclick = () => act("advance");
   const open = o => { $("#board")?.classList.toggle("open", o); $("#sheetbg")?.classList.toggle("open", o); };
   if ($("#sheetbtn")) $("#sheetbtn").onclick = () => open(true);
   if ($("#sheetx")) $("#sheetx").onclick = () => open(false);
@@ -730,6 +781,24 @@ function updateClock(force) {
   const el = S.elapsed + (performance.now() - localT0) / 1000;
   const c = $("#clock"), hc = $("#hclock"), bc = $("#bigclock");
   const setT = t => { const x = Math.max(0, Math.ceil(t)) + " s"; if (c) c.textContent = x; if (hc) hc.textContent = x; if (bc) { bc.textContent = x; bc.classList.toggle("low", t <= 10); } };
+  const auctionTick = S.mode === "licytacja" && (S.sub === "bid" || S.sub === "timed");
+  const timed = auctionTick || (!(S.untimed || S.duration == null) && S.mode !== "most");
+  const visual = S.mode === "zoom" || S.mode === "plakat";
+  if (S.mode === "most" || (S.mode === "licytacja" && !auctionTick)) {
+    if (c) c.textContent = "";
+    if (hc) hc.textContent = "";
+    return;
+  }
+  if (!timed) {
+    if (c) c.textContent = "";
+    if (hc) hc.textContent = T("bez limitu");
+    if (visual) {
+      const dur = DEF_TIME[S.mode] || 30, f = Math.max(0, Math.min(1, el / dur));
+      if (S.mode === "zoom") { const z = $("#zimg"); if (z) z.style.transform = `scale(${(1 + 5 * Math.pow(1 - f, 1.5)).toFixed(3)})`; }
+      if (S.mode === "plakat") drawPoster(f, force);
+    }
+    return;
+  }
   if (S.mode === "kadry") {
     setT(S.stage_seconds * 3 - el);
     document.querySelectorAll("#tl i").forEach((bar, i) => {
@@ -738,17 +807,7 @@ function updateClock(force) {
     });
     return;
   }
-  if (S.mode === "most" || (S.mode === "licytacja" && S.sub !== "bid" && S.sub !== "timed")) {
-    if (c) c.textContent = "";
-    if (hc) hc.textContent = "";
-    return;
-  }
-  if (S.duration == null && !(S.mode === "licytacja" && S.sub === "timed")) {
-    if (c) c.textContent = "";
-    if (hc) hc.textContent = "";
-    return;
-  }
-  const dur = S.duration || 30, f = Math.max(0, Math.min(1, el / dur));
+  const dur = S.duration || DEF_TIME[S.mode] || 30, f = Math.max(0, Math.min(1, el / dur));
   setT(dur - el);
   const b = $("#bar1"); if (b) b.style.width = (f * 100) + "%";
   if (S.mode === "zoom") { const z = $("#zimg"); if (z) z.style.transform = `scale(${(1 + 5 * Math.pow(1 - f, 1.5)).toFixed(3)})`; }
@@ -789,19 +848,22 @@ tickT = setInterval(updateClock, 200);
 if (window.visualViewport) {
   const vv = window.visualViewport;
   const onVV = () => {
-    const kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+    const layoutH = document.documentElement.clientHeight;
+    const already = layoutH <= vv.height + 48;
+    const raw = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+    const kb = already ? 0 : raw;
     document.documentElement.style.setProperty("--kb", kb + "px");
-    document.body.classList.toggle("kbopen", kb > 80);
+    document.body.classList.toggle("kbopen", raw > 80 || (layoutH - vv.height) > 80);
   };
   vv.addEventListener("resize", onVV); vv.addEventListener("scroll", onVV);
 }
 
 function fold(s) { return String(s || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/ł/g, "l").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
 
-function titleMatches(title, q) {
+function titleMatchesText(text, q) {
   const query = fold(q);
   if (!query) return false;
-  const f = fold(title);
+  const f = fold(text);
   const bare = f.replace(/^(the|a|an|le|la|el|il|der|die|das)\s+/, "");
   if (f.startsWith(query) || bare.startsWith(query)) return true;
   const words = f.split(" ").filter(Boolean);
@@ -814,6 +876,27 @@ function titleMatches(title, q) {
   }
   return false;
 }
+function titleHaystacks(t) {
+  if (!t) return [];
+  if (typeof t === "string") return [t];
+  return [t.title, t.pl_title].filter(Boolean);
+}
+function titleMatches(title, q) {
+  return titleHaystacks(title).some(s => titleMatchesText(s, q));
+}
+function fillTitle(t) {
+  if (!t) return "";
+  if (typeof t === "string") return t;
+  const mode = titlesMode();
+  const pl = t.pl_title || "", en = t.title || "";
+  if (mode === "pl") return pl || en;
+  if (mode === "en") return en || pl;
+  return LANG === "en" ? (en || pl) : (pl || en);
+}
+function hintLabel(t) {
+  if (typeof t === "string") return esc(t);
+  return showTitle(t);
+}
 function titleHints(pool, q, limit) {
   return (pool || []).filter(t => titleMatches(t, q)).slice(0, limit || 8);
 }
@@ -822,13 +905,13 @@ function setupGuess(prev, focus, auction) {
   const g = $("#g"), ac = $("#ac"), fb = $("#fb");
   let sel = -1, items = [];
   g.value = prev;
-  if (focus && matchMedia("(pointer:fine)").matches) g.focus();
+  if (focus) g.focus({preventScroll: true});
   const show = () => {
     const q = fold(g.value);
     const off = auction || (S.settings && S.settings.hints === false);
     items = (!q || off) ? [] : titleHints(titles, g.value, 8);
     sel = -1;
-    ac.innerHTML = items.map((t, i) => `<li data-i="${i}">${esc(t)}</li>`).join("");
+    ac.innerHTML = items.map((t, i) => `<li data-i="${i}">${hintLabel(t)}</li>`).join("");
     ac.classList.toggle("hidden", !items.length);
   };
   g.oninput = () => { show(); fb.textContent = ""; fb.className = "feedback"; };
@@ -837,10 +920,10 @@ function setupGuess(prev, focus, auction) {
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault(); sel = (sel + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
       ac.querySelectorAll("li").forEach((li, i) => li.classList.toggle("on", i === sel));
-    } else if (e.key === "Enter" && sel >= 0) { e.preventDefault(); g.value = items[sel]; ac.classList.add("hidden"); submit(); }
+    } else if (e.key === "Enter" && sel >= 0) { e.preventDefault(); g.value = fillTitle(items[sel]); ac.classList.add("hidden"); submit(); }
     else if (e.key === "Escape") ac.classList.add("hidden");
   };
-  ac.onpointerdown = e => { const li = e.target.closest("li"); if (!li) return; e.preventDefault(); g.value = items[+li.dataset.i]; ac.classList.add("hidden"); submit(); };
+  ac.onpointerdown = e => { const li = e.target.closest("li"); if (!li) return; e.preventDefault(); g.value = fillTitle(items[+li.dataset.i]); ac.classList.add("hidden"); submit(); };
   g.onblur = () => setTimeout(() => ac.classList.add("hidden"), 150);
   const submit = async () => {
     const text = g.value.trim(); if (!text) return;
@@ -897,18 +980,27 @@ function wireTopDrag() {
   list.addEventListener("pointercancel", end);
 }
 
+function markedList(arr, marks, cls="") {
+  return `<ol class="orderlist done bigtop cmp-list ${cls}">${(arr || []).map((i, n) =>
+    `<li class="${(marks && marks[n]) || ""}"><span class="tpos">${n + 1}</span><span class="ot">${showTitle(i)}</span></li>`).join("") || `<li class="miss">${T("brak układu")}</li>`}</ol>`;
+}
 function renderTopReveal(a) {
-  const row = (arr, cls="") => `<ol class="orderlist done bigtop ${cls}">${(arr || []).map((i, n) => `<li><span class="tpos">${n + 1}</span><span class="ot">${showTitle(i)}</span></li>`).join("")}</ol>`;
-  const mine = a.mine ? `<div class="toprev-me">
-      <h3>${T("twoja topka")}</h3>${row(a.mine.own)}
-      ${a.mine.target ? `<h3>${T("zgadywałeś topkę gracza {name}", {name: esc(a.mine.target)})}</h3>
-        <div class="topcmp"><div><b>${T("twój układ")}</b>${row(a.mine.guess)}</div>
-        <div><b>${T("prawdziwa topka")}</b>${row(a.mine.truth)}</div></div>
-        <p class="muted">${T("Masz {pts} pkt. Za każdy film: pełne punkty za dokładne miejsce, o 1 mniej za każde miejsce pomyłki.", {pts: a.mine.points})}</p>` : ""}
-    </div>` : "";
+  const mine = a.mine && a.mine.target ? `<div class="toprev-me">
+      <h2>${T("zgadywałeś topkę gracza {name}", {name: esc(a.mine.target)})}</h2>
+      <div class="cmp">
+        <div class="cmp-col">
+          <h3>${T("twój układ")}</h3>
+          ${orderWrap(markedList(a.mine.guess, a.mine.marks), T("najlepszy"), T("najgorszy"))}
+        </div>
+        <div class="cmp-col">
+          <h3>${T("poprawna topka")}</h3>
+          ${orderWrap(markedList(a.mine.truth, (a.mine.truth || []).map(() => "ok")), T("najlepszy"), T("najgorszy"))}
+        </div>
+      </div>
+      <p class="muted">${T("Masz {pts} pkt. Za każdy film: pełne punkty za dokładne miejsce, o 1 mniej za każde miejsce pomyłki.", {pts: a.mine.points || 0})}</p>
+    </div>` : (a.mine ? `<div class="toprev-me"><h3>${T("twoja topka")}</h3>${orderWrap(markedList(a.mine.own), T("najlepszy"), T("najgorszy"))}</div>` : "");
   const all = (a.tops || []).map(t => `<div class="toprev">
-      <h3>${esc(t.name)}</h3>${row(t.own)}
-      ${t.guessed_by ? `<p class="muted">${T("układ od {name}:", {name: esc(t.guessed_by)})} ${T("+{pts} pkt", {pts: t.points})}</p>${row(t.guess, "guess")}` : ""}
+      <h3>${esc(t.name)}</h3>${orderWrap(markedList(t.own), T("najlepszy"), T("najgorszy"))}
     </div>`).join("");
   return `<h2>${T("topki")}</h2>${mine}${all}`;
 }
@@ -945,21 +1037,42 @@ function renderMost() {
   let input;
   if (S.winner) input = waitBox(T("Runda zakończona"), T("{name} wcisnął Stop jako pierwszy.", {name: esc(S.winner_name || "")}));
   else if (S.can_stop) input = `<button type="button" class="pill orange big" id="frstop">${T("Stop")}</button><p class="muted small-note">${T("Znalazłeś drugiego aktora? Wróć i wciśnij Stop.")}</p>`;
-  else if (S.can_start) input = `<button type="button" class="pill orange big" id="frstart">${T("Start")}</button>`;
+  else if (S.can_start) {
+    const href = (S.link && S.link.url) || (S.start && S.start.link && S.start.link.url) || "";
+    input = `<button type="button" class="pill orange big" id="frstart">${T("Start")}</button>${href ? `<a class="fr-open" href="${esc(href)}" target="_blank" rel="noopener">${T("otwórz profil {src}", {src: (S.link && S.link.label) || (LANG === "pl" ? "Filmweb" : "IMDb")})}</a>` : ""}`;
+  }
   else input = waitBox(T("Runda w toku"), T("Czekamy, aż ktoś wróci i wciśnie Stop."));
   return [stage, input];
 }
 
 function wireMost() {
-  if ($("#frstart")) $("#frstart").onclick = async () => {
+  if ($("#frstart")) $("#frstart").onclick = async ev => {
+    ev.preventDefault();
+    const known = (S.link && S.link.url) || (S.start && S.start.link && S.start.link.url);
+    let popup = null;
+    if (known) {
+      popup = window.open(known, "_blank");
+    }
     try {
       const r = await roomCall("guess", {start: true});
-      const url = (r && r.link && r.link.url) || (S.link && S.link.url) || (S.start && S.start.link && S.start.link.url);
-      if (url) window.open(url, "_blank", "noopener");
+      const url = (r && r.link && r.link.url) || known;
+      if (url) {
+        if (popup && !popup.closed) {
+          try { if (popup.location.href === "about:blank") popup.location = url; } catch {}
+        } else if (!popup) {
+          const a = document.createElement("a");
+          a.href = url; a.target = "_blank"; a.rel = "noopener"; a.click();
+        }
+      } else if (popup) popup.close();
       lastKey = ""; if (!WS_MODE) poll();
-    } catch (e) { toast(e.message); }
+    } catch (e) {
+      if (popup && !known) popup.close();
+      toast(e.message);
+    }
   };
   if ($("#frstop")) $("#frstop").onclick = () => guessAct({stop: true});
+  const open = document.querySelector(".fr-open");
+  if (open) open.addEventListener("click", () => { roomCall("guess", {start: true}).catch(() => {}); });
 }
 
 async function loadMostOptions() {
@@ -1028,7 +1141,18 @@ function renderReveal(v) {
   else if (mode === "most") body = renderMostReveal(a);
   else if (mode === "rok") body = `<h2>${showTitle(a)}</h2><div class="year big">${a.year}</div>
     <ul class="guesses">${a.guesses.map(g => `<li><b>${esc(g.name)}</b><span>${g.year}</span><span class="d">${g.year === a.year ? T("dokładnie") : T("{d} lat różnicy", {d: Math.abs(g.year - a.year)})}</span><span class="sc">+${g.points}</span></li>`).join("") || `<li class="miss">${T("Nikt nie odpowiedział.")}</li>`}</ul>`;
-  else if (mode === "kolejnosc") { applyRemakeTags(a.items); body = `<h2>${T("dobra kolejność")}</h2><ol class="orderlist done">${a.items.map(i => `<li>${i.img ? `<img src="${i.img}" alt="">` : `<span class="noimg"></span>`}<span class="ot">${showTitle(i)}</span><span class="oy">${i.year}</span></li>`).join("")}</ol>`; }
+  else if (mode === "kolejnosc") {
+    applyRemakeTags(a.items);
+    applyRemakeTags(a.order || []);
+    applyRemakeTags(a.correct || a.items || []);
+    const yearList = (arr, marks) => `<ol class="orderlist done cmp-list">${(arr || []).map((i, n) =>
+      `<li class="${(marks && marks[n]) || ""}">${i.img ? `<img src="${i.img}" alt="">` : `<span class="noimg"></span>`}<span class="ot">${showTitle(i)}</span><span class="oy">${i.year || ""}</span></li>`).join("") || `<li class="miss">${T("brak układu")}</li>`}</ol>`;
+    body = `<h2>${T("kolejność")}</h2>
+      <div class="cmp">
+        <div class="cmp-col"><h3>${T("twój układ")}</h3>${orderWrap(yearList(a.order, a.marks), T("najstarszy"), T("najnowszy"))}</div>
+        <div class="cmp-col"><h3>${T("poprawna kolejność")}</h3>${orderWrap(yearList(a.correct || a.items, (a.correct || a.items || []).map(() => "ok")), T("najstarszy"), T("najnowszy"))}</div>
+      </div>`;
+  }
   else if (mode === "licytacja") {
     body = (a.prompt ? `<p class="muted qprompt-r">${esc(a.prompt)}</p>` : "") + (a.bidder_name ? `<h2>${a.success ? T("{name} zaliczył zadanie", {name: esc(a.bidder_name)}) : T("{name} nie zaliczył zadania", {name: esc(a.bidder_name)})}</h2>
       <div class="year">${T("deklaracja: {n}", {n: a.bid})}</div>
@@ -1037,10 +1161,13 @@ function renderReveal(v) {
       ${(a.answers || a.missed || a.found || []).length ? `<p class="muted" style="margin:10px 0 4px">${T("Lista poprawnych odpowiedzi:")}</p><ul class="found">${(a.answers || a.missed || a.found).map(f => `<li>${showTitle(f)}</li>`).join("")}</ul>` : ""}`
       : `<h2>${T("nikt nie licytował")}</h2>`);
   }
+  const waitNext = S.untimed
+    ? (isHost() ? T("Gdy będziecie gotowi, puść następną rundę.") : T("Czekamy, aż gospodarz puści następną rundę."))
+    : (S.round >= S.rounds ? T("Zaraz wyniki końcowe...") : T("Za chwilę kolejna runda..."));
   v.innerHTML = `<div class="game"><div class="gmain">${hud()}<div class="panel reveal">${head}${body}${roundResults()}</div>
       <div class="dock revdock">
-        <div class="wait"><span class="spin"></span>${S.round >= S.rounds ? T("Zaraz wyniki końcowe...") : T("Za chwilę kolejna runda...")}</div>
-        ${isHost() ? `<button class="pill orange big" id="nx">${S.round >= S.rounds ? T("pokaż wyniki") : T("dalej")}</button>` : ""}
+        <div class="wait">${S.untimed && isHost() ? "" : `<span class="spin"></span>`}${waitNext}</div>
+        ${isHost() ? `<button class="pill orange big" id="nx">${S.round >= S.rounds ? T("pokaż wyniki") : (S.untimed ? T("następna runda") : T("dalej"))}</button>` : ""}
       </div></div>${board()}</div><div class="sheetbg" id="sheetbg"></div>`;
   wireCommon();
   if (isHost()) $("#nx").onclick = () => act("next");

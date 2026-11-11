@@ -6,7 +6,7 @@ import { errText } from "./i18n.js";
 import { pickPair, localGraph, tmdbIsAdjacent, tmdbAdjacent, isAdjacentLocal, enrichLocal } from "./most.js";
 
 const IDLE_TTL = 6 * 3600;          // pusty pokój znika po 6 h
-const ACTIONS_HOST = new Set(["start", "next", "again", "kick", "setup"]);
+const ACTIONS_HOST = new Set(["start", "next", "again", "kick", "setup", "advance"]);
 
 export class Room extends DurableObject {
   constructor(ctx, env) {
@@ -223,6 +223,7 @@ export class Room extends DurableObject {
           } else g.start();
         }
         else if (m.a === "next" && ["round", "reveal"].includes(r.phase)) g.next();
+        else if (m.a === "advance" && r.phase === "round") g.advance(p);
         else if (m.a === "again") g.again();
         else if (m.a === "kick" && b.victim in r.players && b.victim !== r.host) g.removePlayer(b.victim);
         out = { ok: true };

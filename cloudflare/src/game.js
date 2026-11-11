@@ -42,15 +42,41 @@ const toInt = (v, lo, hi, dflt) => {
 };
 const isObj = x => x && typeof x === "object" && !Array.isArray(x);
 
+export function timeOpt(v, dflt = 0) {
+  if (v === "off" || v === "none" || v === "bez") return -1;
+  if (typeof v === "string" && ["off", "none", "bez"].includes(v.trim().toLowerCase())) return -1;
+  const n = toInt(v, -1, 120, dflt);
+  if (n < 0) return -1;
+  if (n === 0) return 0;
+  return Math.max(10, n);
+}
+export function phaseLimit(v, lo, hi, dflt) {
+  if (v === "off" || v === "none" || v === "bez") return -1;
+  if (typeof v === "string" && ["off", "none", "bez"].includes(v.trim().toLowerCase())) return -1;
+  const raw = toInt(v, -9999, 9999, dflt);
+  if (raw === -1) return -1;
+  return toInt(v, lo, hi, dflt);
+}
+export function placeMarks(got, right) {
+  const g = got || [], r = right || [];
+  return g.map((id, i) => (i < r.length && id === r[i]) ? "ok" : "bad");
+}
+
 // to samo co norm_settings w rooms.py
 export function normSettings(d) {
   d = isObj(d) ? d : {};
   const mt = isObj(d.mode_time) ? d.mode_time : {}, mr = isObj(d.mode_rounds) ? d.mode_rounds : {}, ma = isObj(d.mode_answer) ? d.mode_answer : {};
-  const t = toInt(d.time, 0, 120, 0);
   const pick = (src, ok, fn) => { const o = {}; for (const k of MODES) if (k in src && ok(k)) o[k] = fn(src[k]); return o; };
+  const modeTime = {};
+  for (const k of MODES) {
+    if (k in mt && k !== "licytacja") {
+      const mv = timeOpt(mt[k], 0);
+      if (mv !== 0) modeTime[k] = mv;
+    }
+  }
   return {
-    time: t ? Math.max(10, t) : 0,
-    mode_time: pick(mt, k => k !== "licytacja" && toInt(mt[k], 0, 120, 0) > 0, v => Math.max(10, toInt(v, 0, 120, 0))),
+    time: timeOpt(d.time, 0),
+    mode_time: modeTime,
     order: d.order === "fixed" ? "fixed" : "mix",
     per_mode: !!d.per_mode,
     mode_rounds: pick(mr, () => true, v => toInt(v, 1, 10, 1)),
@@ -62,9 +88,10 @@ export function normSettings(d) {
     hints: d.hints !== false,
     final_x: toInt(d.final_x, 1, 3, 1),
     top_n: toInt(d.top_n, TOP_N_MIN, TOP_N_MAX, TOP_N),
-    top_own: toInt(d.top_own, 15, 180, TOP_OWN),
-    top_guess: toInt(d.top_guess, 15, 180, TOP_GUESS),
+    top_own: phaseLimit(d.top_own, 15, 180, TOP_OWN),
+    top_guess: phaseLimit(d.top_guess, 15, 180, TOP_GUESS),
     most_time: toInt(d.most_time, 30, 180, MOST_TIME),
+    titles: ["ui", "pl", "en", "both"].includes(d.titles) ? d.titles : "ui",
   };
 }
 
@@ -389,10 +416,14 @@ export class Game {
   timing(t) {
     const c = this.cfg, mode = t.mode;
     if (mode === "licytacja") return [c.lic_answer, c.lic_bid];
-    const s = c.mode_time[mode] || c.time;
-    if (mode === "aktorzy") { const dur = s || ACTOR_SECONDS * t.cast.length; return [dur, r2(dur / t.cast.length)]; }
-    if (mode === "top") return [c.top_own, c.top_guess];
     if (mode === "most") return [null, null];
+    if (mode === "top") {
+      const own = c.top_own, guess = c.top_guess;
+      return [own === -1 ? null : own, guess === -1 ? null : guess];
+    }
+    const s = (mode in c.mode_time) ? c.mode_time[mode] : c.time;
+    if (s === -1) return [null, null];
+    if (mode === "aktorzy") { const dur = s || ACTOR_SECONDS * t.cast.length; return [dur, r2(dur / t.cast.length)]; }
     const dur = s || DURATION[mode] || 30;
     return [dur, mode === "kadry" ? r2(dur / 3) : null];
   }
@@ -483,6 +514,7 @@ export class Game {
 
   get mode() { return this.r.task ? this.r.task.mode : null; }
   duration() { const d = this.r.task && this.r.task.dur; return d == null ? 0 : d; }
+  hasTimer() { const d = this.r.task && this.r.task.dur; return d != null && d > 0; }
   mult() { const r = this.r; return r.plan.length && r.round === r.plan.length - 1 ? this.cfg.final_x : 1; }
 
   beginRound() {
@@ -499,12 +531,16 @@ export class Game {
         found: [], type_end: null, done_at: null, turn_end: r.t0 + t.step });
     } else if (t.mode === "top") {
       Object.assign(t, { sub: "own", own: t.own || {}, guess: {}, targets: {} });
-      t.dur = t.own_dur || this.cfg.top_own;
+      t.dur = t.own_dur !== undefined ? t.own_dur : this.cfg.top_own;
     } else if (t.mode === "most") {
       t.started = t.started || {};
       t.stopped = t.stopped || {};
       t.winner = null;
     } else if (t.voice) Object.assign(t, { claims: [], peek: [] });
+    if (t.dur == null) {
+      if (t.mode === "kadry") t.stage = 0;
+      else if (t.mode === "aktorzy") t.shown = 1;
+    }
     r.version++;
   }
 
@@ -565,11 +601,23 @@ export class Game {
   titlePoints(t, el) {
     const step = t.step;
     if (t.mode === "kadry") {
+      if (t.dur == null || !step) {
+        const stage = Math.min(2, t.stage || 0);
+        return [STAGE_POINTS[stage], stage];
+      }
       const stage = Math.min(2, Math.floor(el / step));
       const within = (el - stage * step) / step;
       return [Math.trunc(STAGE_POINTS[stage] * (1 - 0.5 * Math.min(1, within))), stage];
     }
-    if (t.mode === "aktorzy") { const k = Math.min(t.cast.length, Math.floor(el / step) + 1); return [Math.max(250, 1000 - 150 * (k - 1)), k]; }
+    if (t.mode === "aktorzy") {
+      if (t.dur == null || !step) {
+        const k = Math.min(t.cast.length, t.shown || 1);
+        return [Math.max(250, 1000 - 150 * (k - 1)), k];
+      }
+      const k = Math.min(t.cast.length, Math.floor(el / step) + 1);
+      return [Math.max(250, 1000 - 150 * (k - 1)), k];
+    }
+    if (!t.dur) return [1000, 0];
     return [Math.trunc(1000 * (1 - 0.7 * Math.min(1, el / t.dur))), 0];
   }
   award(p, el) {
@@ -600,35 +648,42 @@ export class Game {
         else if (!pend.length && (el >= this.duration() || (players.length && players.every(p => p.got)))) this.endRound();
       } else if (t.mode === "top") {
         if (t.sub === "own") {
-          if (el >= this.duration() || (act.length && act.every(p => p.id in t.own))) this.topToGuess();
-        } else if (el >= this.duration() || (act.length && act.every(p => p.id in t.guess))) this.endRound();
+          if (this.hasTimer() && (el >= this.duration() || (act.length && act.every(p => p.id in t.own)))) this.topToGuess();
+        } else if (this.hasTimer() && (el >= this.duration() || (act.length && act.every(p => p.id in t.guess)))) this.endRound();
       } else if (t.mode === "most") {
         if (t.winner) this.endRound();
-      } else if (el >= this.duration() || (act.length && act.every(p => p.ans !== null || p.got))) this.endRound();
-    } else if (r.phase === "reveal" && n - r.t0 >= REVEAL_SECONDS + (["kolejnosc", "licytacja", "top", "most"].includes(this.mode) ? 6 : 0)) {
-      this.next();
+      } else if (this.hasTimer() && (el >= this.duration() || (act.length && act.every(p => p.ans !== null || p.got)))) this.endRound();
+    } else if (r.phase === "reveal") {
+      const auto = !(r.task && r.task.dur == null && !["most", "licytacja"].includes(this.mode));
+      if (auto && n - r.t0 >= REVEAL_SECONDS + (["kolejnosc", "licytacja", "top", "most"].includes(this.mode) ? 6 : 0)) this.next();
     }
   }
 
   // kiedy stan zmieni się sam z siebie (granica etapu, koniec rundy, koniec tury) - pod alarm Durable Object
   nextWake() {
     const r = this.r;
-    if (r.phase === "reveal") return r.t0 + REVEAL_SECONDS + (["kolejnosc", "licytacja", "top", "most"].includes(this.mode) ? 6 : 0);
+    if (r.phase === "reveal") {
+      const auto = !(r.task && r.task.dur == null && !["most", "licytacja"].includes(this.mode));
+      if (!auto) return null;
+      return r.t0 + REVEAL_SECONDS + (["kolejnosc", "licytacja", "top", "most"].includes(this.mode) ? 6 : 0);
+    }
     if (r.phase !== "round") return null;
     const t = r.task, n = now();
     const marks = [];
     if (t.mode === "licytacja") {
       if (t.bidder === null) marks.push(t.turn_end);
       else if (t.timer_started && t.type_end && t.sub !== "verdict") marks.push(t.type_end);
-    } else {
+    } else if (this.hasTimer()) {
       const dur = this.duration();
       marks.push(r.t0 + dur);
       if (t.voice) marks.push(r.t0 + dur + JUDGE_GRACE);
-      if (t.mode === "kadry") marks.push(r.t0 + t.step, r.t0 + 2 * t.step);
-      if (t.mode === "aktorzy") for (let k = 1; k < t.cast.length; k++) marks.push(r.t0 + k * t.step);
+      if (t.mode === "kadry" && t.step) marks.push(r.t0 + t.step, r.t0 + 2 * t.step);
+      if (t.mode === "aktorzy" && t.step) for (let k = 1; k < t.cast.length; k++) marks.push(r.t0 + k * t.step);
     }
     const future = marks.filter(x => x > n + 0.001);
-    return future.length ? Math.min(...future) : (t.voice && t.mode !== "licytacja" ? null : n);
+    if (future.length) return Math.min(...future);
+    if (!this.hasTimer() && t.mode !== "licytacja") return null;
+    return (t.voice && t.mode !== "licytacja" ? null : n);
   }
 
   // --- licytacja po kolei
@@ -707,6 +762,23 @@ export class Game {
     else { r.round++; this.beginRound(); }
   }
 
+  advance(p) {
+    const r = this.r, t = r.task;
+    if (!p || p.id !== r.host || r.phase !== "round" || !t) return { ok: false };
+    if (t.mode === "kadry" && t.dur == null) {
+      t.stage = Math.min(2, (t.stage || 0) + 1);
+      r.version++;
+      return { ok: true, stage: t.stage };
+    }
+    if (t.mode === "aktorzy" && t.dur == null) {
+      t.shown = Math.min(t.cast.length, (t.shown || 1) + 1);
+      r.version++;
+      return { ok: true, shown: t.shown };
+    }
+    if (t.mode === "top" && t.sub === "own") { this.topToGuess(); return { ok: true }; }
+    return { ok: false };
+  }
+
   again() {
     const r = this.r;
     r.phase = "lobby";
@@ -737,7 +809,7 @@ export class Game {
     }
     t.targets = topAssign(Object.keys(r.players));
     t.sub = "guess";
-    t.dur = t.guess_dur || this.cfg.top_guess;
+    t.dur = t.guess_dur !== undefined ? t.guess_dur : this.cfg.top_guess;
     r.t0 = now();
     r.version++;
     if (!Object.keys(t.targets).length) this.endRound();
@@ -963,12 +1035,12 @@ export class Game {
 
   // --- stan dla klienta (ten sam kształt co Room.state w rooms.py)
   static mview(m, lang, year = true) {
-    const out = { id: m.id, title: m.title, pl_title: lang === "pl" ? m.pl_title : "" };
+    const out = { id: m.id, title: m.title, pl_title: m.pl_title || "" };
     if (year) out.year = m.year;
     return out;
   }
   static prompt(q, lang) { return lang === "en" ? (q.prompt_en || q.prompt_pl) : (q.prompt_pl || q.prompt_en); }
-  static fview(f, lang) { return { title: f.text, pl_title: lang === "pl" ? (f.pl ?? "") : "" }; }
+  static fview(f, lang) { return { title: f.text, pl_title: f.pl ?? "" }; }
   static thumb(m) {
     if (m.frames) return `/frame/${m.frames[2]}.jpg`;
     if (m.poster) return `/poster/${m.id}.jpg`;
@@ -1003,15 +1075,18 @@ export class Game {
     Object.assign(out, { mode, voice: !!t.voice, mult: this.mult() });
     if (r.phase === "round") {
       out.elapsed = r2(el);
-      if (mode !== "licytacja") { out.duration = this.duration(); out.left = r1(this.duration() - el); }
+      if (mode !== "licytacja") {
+        if (this.hasTimer()) Object.assign(out, { duration: this.duration(), left: r1(this.duration() - el), untimed: false });
+        else Object.assign(out, { duration: null, left: null, untimed: true });
+      }
       if (mode === "kadry") {
-        const stage = Math.min(2, Math.floor(el / t.step));
-        Object.assign(out, { stage, frames: t.movie.frames.slice(0, stage + 1), stage_seconds: t.step });
+        const stage = (t.dur == null || !t.step) ? Math.min(2, t.stage || 0) : Math.min(2, Math.floor(el / t.step));
+        Object.assign(out, { stage, frames: t.movie.frames.slice(0, stage + 1), stage_seconds: (t.dur == null || !t.step) ? null : t.step });
       } else if (mode === "zoom") Object.assign(out, { img: `/frame/${t.frame}.jpg`, ox: t.ox, oy: t.oy });
       else if (mode === "plakat") Object.assign(out, { img: `/poster/${t.movie.id}.jpg`, style: t.style, seed: t.seed });
       else if (mode === "aktorzy") {
-        const k = Math.min(t.cast.length, Math.floor(el / t.step) + 1);
-        Object.assign(out, { cast: t.cast.slice(0, k), cast_total: t.cast.length, actor_seconds: t.step });
+        const k = (t.dur == null || !t.step) ? Math.min(t.cast.length, t.shown || 1) : Math.min(t.cast.length, Math.floor(el / t.step) + 1);
+        Object.assign(out, { cast: t.cast.slice(0, k), cast_total: t.cast.length, actor_seconds: (t.dur == null || !t.step) ? null : t.step });
       } else if (mode === "top") {
         const items = t.items.map(m => ({ ...Game.mview(m, lang), img: Game.thumb(m) }));
         const mine = me && (t[t.sub === "own" ? "own" : "guess"] || {})[me.id];
@@ -1045,6 +1120,12 @@ export class Game {
           }),
           mine: me ? me.ans : null,
         });
+      }
+      if (me && r.host === me.id) {
+        out.can_end = true;
+        if (mode === "kadry" && t.dur == null && (t.stage || 0) < 2) out.can_advance = true;
+        else if (mode === "aktorzy" && t.dur == null && (t.shown || 1) < t.cast.length) out.can_advance = true;
+        else if (mode === "top" && t.sub === "own") out.can_advance = true;
       }
       if (TITLE_MODES.has(mode) && t.voice) {
         const j = this.judge(), vote = this.cfg.judge === "vote";
@@ -1097,6 +1178,8 @@ export class Game {
       return out;
     }
     out.left = r1(REVEAL_SECONDS - el);
+    out.untimed = !!(t && t.dur == null && !["most", "licytacja"].includes(mode));
+
     const ans = { mode };
     if (t.movie) {
       const m = t.movie;
@@ -1109,11 +1192,18 @@ export class Game {
     if (mode === "kolejnosc") {
       const right = t.items.slice().sort((a, b) => a.year - b.year);
       const tags = remakeTags(right);
-      ans.items = right.map(m => {
-        const row = { ...Game.mview(m, lang), img: Game.thumb(m) };
-        if (tags[m.id]) row.remake = tags[m.id];
-        return row;
+      const rowOf = ms => ms.map(m => {
+        const item = { ...Game.mview(m, lang), img: Game.thumb(m) };
+        if (tags[m.id]) item.remake = tags[m.id];
+        return item;
       });
+      const byId = Object.fromEntries(t.items.map(m => [m.id, m]));
+      ans.items = rowOf(right);
+      ans.correct = rowOf(right);
+      if (me && me.ans && me.ans.length) {
+        ans.order = rowOf(me.ans.map(i => byId[i]).filter(Boolean));
+        ans.marks = placeMarks(me.ans, right.map(m => m.id));
+      } else { ans.order = []; ans.marks = []; }
     }
     if (mode === "top") {
       const byId = Object.fromEntries(t.items.map(m => [m.id, { ...Game.mview(m, lang), img: Game.thumb(m) }]));
@@ -1128,7 +1218,9 @@ export class Game {
       }
       if (me) {
         const tgt = (t.targets || {})[me.id];
-        ans.mine = { own: row(t.own[me.id]), target: this.pname(tgt), guess: row(t.guess[me.id]), truth: row(t.own[tgt]), points: me.history.length ? me.history[me.history.length - 1] : 0 };
+        const guessIds = t.guess[me.id] || [], truthIds = t.own[tgt] || [];
+        ans.mine = { own: row(t.own[me.id]), target: this.pname(tgt), guess: row(guessIds), truth: row(truthIds),
+          marks: placeMarks(guessIds, truthIds), points: me.history.length ? me.history[me.history.length - 1] : 0 };
       }
     }
     if (mode === "most") {

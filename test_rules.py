@@ -363,6 +363,101 @@ for i in range(5):
     adv(r, rooms.REVEAL_SECONDS + 7)
 check(len(seen) == len(set(seen)) == 5, f"5 rund, 5 różnych pytań z puli 13 ({seen})")
 
+print("czas wyłączony i język tytułów")
+check(rooms.DEFAULTS["titles"] == "ui", "domyślny język tytułów: ui")
+check(rooms.norm_settings({})["titles"] == "ui", "puste ustawienia: titles=ui")
+check(rooms.norm_settings({"titles": "pl"})["titles"] == "pl", "tytuły: tylko pl")
+check(rooms.norm_settings({"titles": "en"})["titles"] == "en", "tytuły: tylko en")
+check(rooms.norm_settings({"titles": "both"})["titles"] == "both", "tytuły: oba")
+check(rooms.norm_settings({"titles": "xx"})["titles"] == "ui", "zły język tytułów -> ui")
+check(rooms.norm_settings({"time": -1})["time"] == -1, "czas: -1 = bez limitu")
+check(rooms.norm_settings({"time": "off"})["time"] == -1, "czas: off = bez limitu")
+check(rooms.norm_settings({"mode_time": {"zoom": -1, "rok": 40}})["mode_time"] == {"zoom": -1, "rok": 40}, "nadpisanie trybu: -1 zostaje")
+check(rooms.norm_settings({"top_own": -1, "top_guess": "bez"})["top_own"] == -1 and rooms.norm_settings({"top_own": -1, "top_guess": "bez"})["top_guess"] == -1, "top: bez limitu")
+
+r, (A, B) = room(2, {"time": -1}, modes=["zoom"])
+r.start()
+check(r.plan[0]["dur"] is None and not r.has_timer(), "zoom bez limitu: dur=None")
+s = r.state(A)
+check(s.get("untimed") and s.get("duration") is None and s.get("can_end") and s.get("settings", {}).get("titles") == "ui", "stan: untimed, can_end, titles w ustawieniach")
+title = "Movie " + str(r.task["movie"]["id"])
+check(r.answer(A, {"text": title}, "pl").get("correct"), "A zgaduje bez zegara")
+check(r.answer(B, {"text": title}, "pl").get("correct"), "B też zgaduje")
+adv(r, 5)
+check(r.phase == "round", "wszyscy odpowiedzieli, runda bez czasu nie kończy się sama")
+check(r.next() is None or r.phase == "reveal", "host kończy rundę")
+check(r.phase == "reveal" and r.state(A).get("untimed"), "odsłona czeka na gospodarza")
+adv(r, rooms.REVEAL_SECONDS + 20)
+check(r.phase == "reveal", "odsłona bez czasu nie przechodzi sama")
+r.next()
+check(r.phase == "round" and r.round == 1, "host puszcza następną rundę")
+
+r, (A,) = room(1, {"time": 30, "mode_time": {"rok": -1}}, modes=["rok", "zoom"])
+r.start()
+# plan may mix; find modes
+durs = {t["mode"]: t["dur"] for t in r.plan}
+check(durs.get("rok") is None and durs.get("zoom") == 30, "limit tylko w wybranym trybie, rok bez czasu, zoom 30 s")
+
+r, (A,) = room(1, {"time": -1}, modes=["licytacja"])
+r.start()
+check(r.plan[0]["dur"] == 30 and r.task.get("step") == 10, "globalny brak czasu nie psuje zegara licytacji")
+
+r, (A,) = room(1, {"time": -1}, modes=["kadry"])
+r.start()
+check(r.task.get("dur") is None and r.task.get("stage") == 0, "kadry bez czasu startują od etapu 0")
+s = r.state(A)
+check(s.get("can_advance") and s.get("stage") == 0, "host może podać kolejny kadr")
+r.advance(A)
+check(r.task["stage"] == 1 and r.state(A)["stage"] == 1, "advance: kolejny kadr")
+r.advance(A)
+check(r.task["stage"] == 2 and not r.state(A).get("can_advance"), "ostatni kadr, brak dalszego advance")
+
+print("porównanie wyników Top i Ułóż po kolei")
+check(rooms.place_marks([1, 2, 3, 4], [1, 2, 3, 4]) == ["ok", "ok", "ok", "ok"], "identyczny układ: wszystko zielone")
+check(rooms.place_marks([1, 3, 2, 4], [1, 2, 3, 4]) == ["ok", "bad", "bad", "ok"], "złe miejsca: czerwone, dobre: zielone")
+check(rooms.place_marks([4, 3, 2, 1], [1, 2, 3, 4]) == ["bad", "bad", "bad", "bad"], "odwrotny układ: wszystko czerwone")
+check(rooms.place_marks([1, 2], [1, 2, 3]) == ["ok", "ok"], "krótszy układ gracza")
+check(rooms.place_marks([], [1, 2]) == [], "brak układu: puste oznaczenia")
+
+r, (A,) = room(1, {"time": -1}, modes=["kolejnosc"])
+r.start()
+items = r.task["items"]
+right = [m["id"] for m in sorted(items, key=lambda m: m["year"])]
+wrong = list(reversed(right)) if right != list(reversed(right)) else right[1:] + right[:1]
+r.answer(A, {"order": wrong}, "pl")
+r.next()
+ans = r.state(A, "pl")["answer"]
+check(ans["order"] and ans["correct"] and ans["marks"], "odsłona układu: lewa (order) i prawa (correct) plus marks")
+check([m["id"] for m in ans["order"]] == wrong, "lewa kolumna to układ gracza")
+check([m["id"] for m in ans["correct"]] == right, "prawa kolumna to poprawna kolejność")
+check(ans["marks"] == rooms.place_marks(wrong, right), "marks ok/bad po pozycjach")
+check(all(m in ("ok", "bad") for m in ans["marks"]), "oznaczenia tylko ok albo bad")
+
+r, (A, B) = room(2, {"time": -1, "top_n": 3, "top_own": -1, "top_guess": -1}, modes=["top"])
+r.start()
+ids = [m["id"] for m in r.task["items"]]
+own_a, own_b = ids[:], list(reversed(ids))
+check(r.answer(A, {"order": own_a}, "pl").get("ok") is not False, "A zapisuje topkę")
+check(r.answer(B, {"order": own_b}, "pl").get("ok") is not False, "B zapisuje topkę")
+adv(r, 2)
+check(r.task.get("sub") == "own" and r.phase == "round", "top bez czasu: own nie przechodzi samo do zgadywania")
+r.advance(A)
+check(r.task.get("sub") == "guess", "host przechodzi do zgadywania")
+# A zgaduje topkę celu
+tgt = r.task["targets"][A["id"]]
+truth = r.task["own"][tgt]
+guess = list(reversed(truth)) if truth != list(reversed(truth)) else truth[1:] + truth[:1]
+r.answer(A, {"order": guess}, "pl")
+r.answer(B, {"order": r.task["own"][r.task["targets"][B["id"]]]}, "pl")
+adv(r, 2)
+check(r.phase == "round", "top guess bez czasu nie kończy się sam po odpowiedziach")
+r.next()
+mine = r.state(A, "pl")["answer"]["mine"]
+check(mine["guess"] and mine["truth"] and mine["marks"], "odsłona top: twój układ, poprawna topka, marks")
+check([m["id"] for m in mine["guess"]] == guess, "lewa: układ gracza")
+check([m["id"] for m in mine["truth"]] == truth, "prawa: poprawna topka")
+check(mine["marks"] == rooms.place_marks(guess, truth), "top marks ok/bad")
+
 # składnia frontendu — zepsuty i18n.js wyłącza całą stronę
 import subprocess, pathlib
 for name in ("static/i18n.js", "static/game.js", "static/admin.js", "static/rt.js"):

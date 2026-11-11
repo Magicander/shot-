@@ -92,9 +92,10 @@ Gospodarz ustawia grę w lobby; pozostali gracze widzą ustawienia tylko do odcz
 
 Podstawowe:
 - **rundy** – liczba rund (tryby się przeplatają),
-- **czas na rundę** – `domyślny` (każdy tryb swój, np. Kadry 3 x 15 s, Zoom 30 s) albo stały 10–120 s,
+- **czas na rundę** – `bez limitu` (brak odliczania, runda kończy się dopiero gdy gospodarz kliknie „zakończ rundę”; po wynikach gospodarz puszcza następną rundę), `domyślny` (każdy tryb swój, np. Kadry 3 x 15 s, Zoom 30 s) albo stały 10–120 s. Przy włączonym czasie gospodarz i tak może zakończyć rundę wcześniej. W zaawansowanych ustawieniach ten sam wybór jest osobno dla trybu (`bez limitu` albo sekundy). Filmrun nie ma zegara gracza. W licytacji zegar tury i zegar zadania (puszczany przez przeciwnika) zostają niezależnie od limitu rundy.
+- **tytuły filmów** – `jak język gry` (domyślnie: w PL polski tytuł i oryginał mniejszą czcionką, w EN sam oryginał), `tylko polski`, `tylko angielski` albo `polski i oryginał`. Dotyczy rund, wyników, Topki, układu i podpowiedzi. Dopiski remake’u (starszy)/(nowszy) zostają przy każdej opcji.
 - **licytacja** – czas na odpowiedź zwycięzcy po puszczeniu timera (domyślnie 30 s) i czas na jedną turę licytacji (domyślnie 10 s),
-- **Top** – liczba filmów (domyślnie 5, od 3 do 8), czas na własną topkę i czas na zgadywanie (domyślnie po 45 s).
+- **Top** – liczba filmów (domyślnie 5, od 3 do 8), czas na własną topkę i czas na zgadywanie (domyślnie po 45 s; oba można ustawić na `bez limitu`).
 
 Zaawansowane: czas osobno dla trybu, liczba rund każdego trybu, kolejność trybów (losowa albo Twoja), podpowiedzi tytułów (domyślnie włączone, jak we Framed: od pierwszej litery widać Alien, Aladdin, Alexander…), mnożnik punktów w finale (x1/x2/x3).
 

@@ -205,25 +205,36 @@ async function gameApi(req, env, path, url) {
   let m = path.match(/^\/api\/packs\/(custom|\d+)\/titles$/);
   if (m) {
     const lang = detectLang(req);
+    const asItems = movies => {
+      const seen = new Set(), out = [];
+      for (const x of movies) {
+        const title = String(x.title || "").trim(), pl_title = String(x.pl_title || "").trim();
+        if (!title && !pl_title) continue;
+        const key = title.toLowerCase() + "\0" + pl_title.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({ title, pl_title });
+      }
+      out.sort((a, b) => (a.title || a.pl_title).localeCompare(b.title || b.pl_title, lang));
+      return json(out);
+    };
     if (m[1] === "custom") {
       const packsList = await (await asset(env, req, "/data/packs.json")).json();
-      const tset = new Set();
+      const raw = new URL(req.url).searchParams.get("packs") || "";
+      const want = new Set(raw.split(",").map(s => s.trim()).filter(s => /^\d+$/.test(s)).map(Number));
+      const movies = [];
       for (const p of packsList) {
         if (p.custom || p.id === "custom") continue;
+        if (!want.size || !want.has(Number(p.id))) continue;
         try {
           const data = await loadMergedPack(env, req, p.id);
-          for (const x of data.movies) {
-            tset.add(x.title);
-            if (lang === "pl" && x.pl_title) tset.add(x.pl_title);
-          }
+          movies.push(...data.movies);
         } catch {}
       }
-      return json([...tset].sort((a, b) => a.localeCompare(b, lang)));
+      return asItems(movies);
     }
     const data = await loadMergedPack(env, req, +m[1]);
-    const tset = new Set(data.movies.map(x => x.title));
-    if (lang === "pl") for (const mv of data.movies) if (mv.pl_title) tset.add(mv.pl_title);
-    return json([...tset].sort((a, b) => a.localeCompare(b, lang)));
+    return asItems(data.movies);
   }
   if (req.method === "POST" && path === "/api/rooms") {
     const d = await body(req);
