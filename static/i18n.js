@@ -91,6 +91,8 @@ const EN = {
   "niżej": "down",
   "najstarszy": "oldest",
   "najnowszy": "newest",
+  "starszy": "older",
+  "nowszy": "newer",
   "Kolejność wysłana": "Order sent",
   "zatwierdzam kolejność": "submit order",
   "Podaj rok, np. 1984": "Enter a year, e.g. 1984",

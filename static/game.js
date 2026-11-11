@@ -260,7 +260,74 @@ function modeHint(k, a) {
     quotes: "Za mało cytatów ({have}/{need}). Admin dopisuje je w edytorze trybów.",
     movies: "Za mało filmów w puli ({have}/{need})."}[a.reason] || "", v);
 }
-const showTitle = o => o.pl_title && LANG === "pl" && fold(o.pl_title) !== fold(o.title) ? `${esc(o.pl_title)} <small class="orig">(${esc(o.title)})</small>` : esc(o.title);
+function normTitleKey(s) {
+  s = String(s || "").replace(/ł/g, "l").replace(/Ł/g, "L").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  s = s.replace(/&/g, " and ").replace(/[^a-z0-9]+/g, " ").trim();
+  s = s.replace(/^(the|a|an) /, "").replace(/ (19|20)\d\d$/, "");
+  return s.replace(/ /g, "");
+}
+function remakeTags(items) {
+  const rows = Array.isArray(items) ? items : [];
+  const n = rows.length;
+  const keys = rows.map(m => {
+    const ks = new Set();
+    const title = normTitleKey(m && m.title);
+    if (title) ks.add(title);
+    const pl = normTitleKey(m && m.pl_title);
+    if (pl) ks.add(pl);
+    return ks;
+  });
+  const parent = Array.from({ length: n }, (_, i) => i);
+  const find = i => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+  const union = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent[rb] = ra; };
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+    if (!keys[i].size || !keys[j].size) continue;
+    for (const k of keys[i]) { if (keys[j].has(k)) { union(i, j); break; } }
+  }
+  const groups = new Map();
+  for (let i = 0; i < n; i++) {
+    const r = find(i);
+    if (!groups.has(r)) groups.set(r, []);
+    groups.get(r).push(i);
+  }
+  const tags = {};
+  for (const g of groups.values()) {
+    const dated = g.filter(i => rows[i] && rows[i].year != null);
+    const years = new Set(dated.map(i => Number(rows[i].year)));
+    if (dated.length < 2 || years.size < 2) continue;
+    dated.sort((a, b) => Number(rows[a].year) - Number(rows[b].year) || (rows[a].id || 0) - (rows[b].id || 0));
+    if (dated.length === 2) {
+      tags[rows[dated[0]].id] = "starszy";
+      tags[rows[dated[1]].id] = "nowszy";
+    } else {
+      for (const i of dated) tags[rows[i].id] = String(Number(rows[i].year));
+    }
+  }
+  return tags;
+}
+function applyRemakeTags(items) {
+  const list = items || [];
+  const tags = remakeTags(list);
+  for (const i of list) {
+    if (i && tags[i.id] && !i.remake) i.remake = tags[i.id];
+  }
+  return list;
+}
+function remakeSuffix(o) {
+  const tag = o && o.remake;
+  if (!tag) return "";
+  const s = String(tag);
+  const label = /^\d{4}$/.test(s) ? s : T(s);
+  return ` <span class="remake">(${esc(label)})</span>`;
+}
+const showTitle = o => {
+  if (!o) return "";
+  const tag = remakeSuffix(o);
+  if (o.pl_title && LANG === "pl" && fold(o.pl_title) !== fold(o.title))
+    return `${esc(o.pl_title)}${tag} <small class="orig">(${esc(o.title)})</small>`;
+  return esc(o.title) + tag;
+};
+
 
 function renderMeta() {
   $("#roommeta").innerHTML = `<span class="tag" style="--c:${S.pack.color}"><span class="dot"></span>${esc(packName(S.pack))}</span>
@@ -543,6 +610,7 @@ function renderRound(v, keepInput) {
     input = S.mine ? waitBox(T("Twoja odpowiedź: {y}", {y:S.mine}))
       : `<form class="guess" id="yf"><input class="input" id="y" type="number" inputmode="numeric" min="1900" max="2030" placeholder="${T("np. 1984")}" aria-label="${T("Rok premiery")}"><button class="pill orange big">${T("odpowiadam")}</button></form>`;
   } else if (mode === "kolejnosc") {
+    applyRemakeTags(S.items);
     if (ORDER.round !== S.round) ORDER = {round: S.round, ids: S.items.map(i => i.id)};
     const byId = Object.fromEntries(S.items.map(i => [i.id, i]));
     const ids = S.mine || ORDER.ids;
@@ -960,7 +1028,7 @@ function renderReveal(v) {
   else if (mode === "most") body = renderMostReveal(a);
   else if (mode === "rok") body = `<h2>${showTitle(a)}</h2><div class="year big">${a.year}</div>
     <ul class="guesses">${a.guesses.map(g => `<li><b>${esc(g.name)}</b><span>${g.year}</span><span class="d">${g.year === a.year ? T("dokładnie") : T("{d} lat różnicy", {d: Math.abs(g.year - a.year)})}</span><span class="sc">+${g.points}</span></li>`).join("") || `<li class="miss">${T("Nikt nie odpowiedział.")}</li>`}</ul>`;
-  else if (mode === "kolejnosc") body = `<h2>${T("dobra kolejność")}</h2><ol class="orderlist done">${a.items.map(i => `<li>${i.img ? `<img src="${i.img}" alt="">` : `<span class="noimg"></span>`}<span class="ot">${showTitle(i)}</span><span class="oy">${i.year}</span></li>`).join("")}</ol>`;
+  else if (mode === "kolejnosc") { applyRemakeTags(a.items); body = `<h2>${T("dobra kolejność")}</h2><ol class="orderlist done">${a.items.map(i => `<li>${i.img ? `<img src="${i.img}" alt="">` : `<span class="noimg"></span>`}<span class="ot">${showTitle(i)}</span><span class="oy">${i.year}</span></li>`).join("")}</ol>`; }
   else if (mode === "licytacja") {
     body = (a.prompt ? `<p class="muted qprompt-r">${esc(a.prompt)}</p>` : "") + (a.bidder_name ? `<h2>${a.success ? T("{name} zaliczył zadanie", {name: esc(a.bidder_name)}) : T("{name} nie zaliczył zadania", {name: esc(a.bidder_name)})}</h2>
       <div class="year">${T("deklaracja: {n}", {n: a.bid})}</div>

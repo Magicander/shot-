@@ -1,6 +1,6 @@
 // Testy zasad portu (bez wranglera): node cloudflare/test/rules.mjs - te same scenariusze co test_rules.py
 import { readFileSync } from "node:fs";
-import { Game, newRoom, normSettings, JUDGE_GRACE, LIC_DONE_DELAY, LIC_BID_CAP, licTotal, topScore, topAssign, availability, mergePackData, MODES } from "../src/game.js";
+import { Game, newRoom, normSettings, JUDGE_GRACE, LIC_DONE_DELAY, LIC_BID_CAP, licTotal, topScore, topAssign, availability, mergePackData, MODES, remakeTags } from "../src/game.js";
 import { mostScore, pathMovies, pickPairFromGraph, localGraph, pickFilmrunPair, poolPeople } from "../src/most.js";
 
 const FX = JSON.parse(readFileSync(new URL("./fixture.json", import.meta.url)));
@@ -245,5 +245,60 @@ console.log("Filmrun: lobby bez czasu, Start/Stop");
   check(licTotal({ answers: [] }) === LIC_BID_CAP, "licytacja bez listy: pułap deklaracji");
   check(licTotal({ answers: [{}, {}] }) === 2, "licytacja z listą: pułap to liczba odpowiedzi");
 }
+
+console.log("remake: etykiety w Ułóż po kolei");
+let tags = remakeTags([
+  { id: 1, title: "A Nightmare on Elm Street", pl_title: "Koszmar z ulicy Wiązów", year: 1984 },
+  { id: 2, title: "Jaws", pl_title: "Szczęki", year: 1975 },
+  { id: 3, title: "The Nightmare on Elm Street", pl_title: "Koszmar z ulicy Wiązów", year: 2010 },
+  { id: 4, title: "Alien", pl_title: "Obcy", year: 1979 },
+]);
+check(eq(tags, { 1: "starszy", 3: "nowszy" }), "para remake: (starszy)/(nowszy), kinds articles znormalizowane");
+tags = remakeTags([
+  { id: 1, title: "Halloween", pl_title: "Halloween", year: 1978 },
+  { id: 2, title: "Halloween", pl_title: "Halloween", year: 2007 },
+  { id: 3, title: "Halloween", pl_title: "Halloween", year: 2018 },
+  { id: 4, title: "Jaws", pl_title: "Szczęki", year: 1975 },
+]);
+check(eq(tags, { 1: "1978", 2: "2007", 3: "2018" }), "3+ wersje: rok w nawiasie, nie dwa 'nowszy'");
+tags = remakeTags([
+  { id: 1, title: "Completely Different EN", pl_title: "Koszmar z ulicy Wiązów", year: 1984 },
+  { id: 2, title: "Other English Title", pl_title: "Koszmar z ulicy Wiązów", year: 2010 },
+]);
+check(eq(tags, { 1: "starszy", 2: "nowszy" }), "sparowanie po polskim tytule");
+check(eq(remakeTags([{ id: 1, title: "Halloween", year: 1978 }, { id: 2, title: "Halloween", year: 1978 }]), {}), "ten sam tytuł i rok: bez etykiety");
+[g, ps] = room(1, {}, ["kolejnosc"]);
+g.start();
+const blank = { aliases: [], frames: [], poster: null, cast: [], quotes: [] };
+g.r.task.items = [
+  { ...blank, id: 11, title: "A Nightmare on Elm Street", pl_title: "Koszmar z ulicy Wiązów", year: 1984 },
+  { ...blank, id: 12, title: "Halloween", pl_title: "Halloween", year: 1978 },
+  { ...blank, id: 13, title: "A Nightmare on Elm Street", pl_title: "Koszmar z ulicy Wiązów", year: 2010 },
+  { ...blank, id: 14, title: "Jaws", pl_title: "Szczęki", year: 1975 },
+];
+let stK = g.state(ps[0], "pl");
+let by = Object.fromEntries(stK.items.map(m => [m.id, m]));
+check(stK.items.every(m => m.year == null), "w rundzie rok jest ukryty");
+check(by[11].remake === "starszy" && by[13].remake === "nowszy", "stan rundy ma etykiety remake");
+check(!by[12].remake && !by[14].remake, "inne tytuły bez etykiety");
+g.endRound();
+const byr = Object.fromEntries(g.state(ps[0], "pl").answer.items.map(m => [m.id, m]));
+check(byr[11].remake === "starszy" && byr[11].year === 1984, "odsłona: etykieta i rok");
+
+console.log("licytacja: pula pytań bez listy odpowiedzi");
+[g, ps] = room(2, { order: "fixed", per_mode: true, mode_rounds: { licytacja: 5 } }, ["licytacja"]);
+g.r.pack.questions = Array.from({ length: 13 }, (_, i) => ({
+  id: 101 + i, prompt_pl: `Horror ${i + 1}`, prompt_en: `Horror EN ${i + 1}`, answers: [],
+}));
+g.start();
+const seen = [];
+for (let i = 0; i < 5; i++) {
+  check(g.mode === "licytacja", `runda ${i + 1} to licytacja`);
+  seen.push(g.r.task.q.id);
+  check(g.state(ps[0], "pl").prompt === `Horror ${seen[seen.length - 1] - 100}`, "prompt z puli pytań bez odpowiedzi");
+  g.endRound();
+  adv(g, 16);
+}
+check(new Set(seen).size === 5 && seen.length === 5, `5 rund, 5 różnych pytań z puli 13 (${seen})`);
 
 console.log(`\nOK: ${OK} sprawdzeń`);

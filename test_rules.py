@@ -285,6 +285,84 @@ except Exception:
     check(False, "is_real_headshot nie powinien rzucać")
 check(not webscrape.is_real_headshot(b"not-an-image"), "nie-obrazek odrzucony")
 
+print("remake: etykiety w Ułóż po kolei")
+pair = rooms.remake_tags([
+    {"id": 1, "title": "A Nightmare on Elm Street", "pl_title": "Koszmar z ulicy Wiązów", "year": 1984},
+    {"id": 2, "title": "Jaws", "pl_title": "Szczęki", "year": 1975},
+    {"id": 3, "title": "The Nightmare on Elm Street", "pl_title": "Koszmar z ulicy Wiązów", "year": 2010},
+    {"id": 4, "title": "Alien", "pl_title": "Obcy", "year": 1979},
+])
+check(pair == {1: "starszy", 3: "nowszy"}, "para remake: (starszy)/(nowszy), kinds articles znormalizowane")
+triple = rooms.remake_tags([
+    {"id": 1, "title": "Halloween", "pl_title": "Halloween", "year": 1978},
+    {"id": 2, "title": "Halloween", "pl_title": "Halloween", "year": 2007},
+    {"id": 3, "title": "Halloween", "pl_title": "Halloween", "year": 2018},
+    {"id": 4, "title": "Jaws", "pl_title": "Szczęki", "year": 1975},
+])
+check(triple == {1: "1978", 2: "2007", 3: "2018"}, "3+ wersje: rok w nawiasie, nie dwa 'nowszy'")
+pl_only = rooms.remake_tags([
+    {"id": 1, "title": "Completely Different EN", "pl_title": "Koszmar z ulicy Wiązów", "year": 1984},
+    {"id": 2, "title": "Other English Title", "pl_title": "Koszmar z ulicy Wiązów", "year": 2010},
+])
+check(pl_only == {1: "starszy", 2: "nowszy"}, "sparowanie po polskim tytule, gdy oryginały się różnią")
+check(rooms.remake_tags([
+    {"id": 1, "title": "Halloween", "year": 1978},
+    {"id": 2, "title": "Halloween", "year": 1978},
+]) == {}, "ten sam tytuł i rok: bez etykiety")
+r, (A,) = room(1, modes=["kolejnosc"])
+r.start()
+blank = {"aliases": [], "frames": [], "poster": None, "cast": [], "quotes": []}
+r.task["items"] = [
+    {**blank, "id": 11, "title": "A Nightmare on Elm Street", "pl_title": "Koszmar z ulicy Wiązów", "year": 1984},
+    {**blank, "id": 12, "title": "Halloween", "pl_title": "Halloween", "year": 1978},
+    {**blank, "id": 13, "title": "A Nightmare on Elm Street", "pl_title": "Koszmar z ulicy Wiązów", "year": 2010},
+    {**blank, "id": 14, "title": "Jaws", "pl_title": "Szczęki", "year": 1975},
+]
+st = r.state(A, "pl")
+by = {m["id"]: m for m in st["items"]}
+check(all(m.get("year") in (None, False) or "year" not in m for m in st["items"]), "w rundzie rok jest ukryty")
+check(by[11].get("remake") == "starszy" and by[13].get("remake") == "nowszy", "stan rundy ma etykiety remake")
+check(not by[12].get("remake") and not by[14].get("remake"), "inne tytuły bez etykiety")
+r.end_round()
+rev = r.state(A, "pl")["answer"]["items"]
+byr = {m["id"]: m for m in rev}
+check(byr[11].get("remake") == "starszy" and byr[11].get("year") == 1984, "odsłona: etykieta i rok")
+
+print("licytacja: pula pytań bez listy odpowiedzi")
+import sqlite3, tempfile, os
+fd, qpath = tempfile.mkstemp(suffix=".db")
+os.close(fd)
+qcon = sqlite3.connect(qpath)
+qcon.row_factory = sqlite3.Row
+qcon.execute("CREATE TABLE questions (id INTEGER PRIMARY KEY, pack_id INTEGER, prompt_pl TEXT, prompt_en TEXT, answers TEXT, created REAL)")
+qcon.executemany("INSERT INTO questions VALUES (?,?,?,?,?,1)", [
+    (1, 1, "Pytanie 1", "Q 1", "[]"),
+    (2, 1, "Pytanie 2", "Q 2", "[]"),
+    (3, 1, "", "", "[]"),
+    (4, 1, "Pytanie 4", "Q 4", '[{"text":"A"},{"text":"B"}]'),
+    (5, 2, "Inny pakiet", "Other", "[]"),
+])
+qcon.commit()
+loaded = rooms.load_questions(qcon, 1)
+qcon.close(); os.remove(qpath)
+check([q["id"] for q in loaded] == [1, 2, 4], "load_questions: pytania z treścią, też bez odpowiedzi; puste odrzucone")
+check(loaded[0]["answers"] == [] and len(loaded[2]["answers"]) == 2, "pusta lista odpowiedzi zostaje, stare odpowiedzi też")
+
+r, (A, B) = room(2, {"order": "fixed", "per_mode": True, "mode_rounds": {"licytacja": 5}}, modes=["licytacja"])
+r.pack["questions"] = [
+    {"id": 101 + i, "prompt_pl": f"Horror {i+1}", "prompt_en": f"Horror EN {i+1}", "answers": []}
+    for i in range(13)
+]
+r.start()
+seen = []
+for i in range(5):
+    check(r.mode == "licytacja", f"runda {i+1} to licytacja")
+    seen.append(r.task["q"]["id"])
+    check(r.state(A, "pl")["prompt"] == f"Horror {seen[-1]-100}", "prompt z puli pytań bez odpowiedzi")
+    r.end_round()
+    adv(r, rooms.REVEAL_SECONDS + 7)
+check(len(seen) == len(set(seen)) == 5, f"5 rund, 5 różnych pytań z puli 13 ({seen})")
+
 # składnia frontendu — zepsuty i18n.js wyłącza całą stronę
 import subprocess, pathlib
 for name in ("static/i18n.js", "static/game.js", "static/admin.js", "static/rt.js"):

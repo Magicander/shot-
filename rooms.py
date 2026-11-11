@@ -191,9 +191,65 @@ def load_questions(con, pack_id):
             ans = json.loads(r["answers"] or "[]")
         except ValueError:
             ans = []
-        if len(ans) >= 2 and (r["prompt_pl"] or r["prompt_en"]):
+        if r["prompt_pl"] or r["prompt_en"]:
             out.append({"id": r["id"], "prompt_pl": r["prompt_pl"], "prompt_en": r["prompt_en"], "answers": ans})
     return out
+
+
+
+def remake_tags(items):
+    """Etykiety dla remake'ów w jednej liście (Ułóż po kolei).
+
+    Dwie wersje tego samego tytułu (po normalizacji oryginału albo polskiego tytułu)
+    dostają 'starszy' / 'nowszy'. Trzy i więcej: rok jako napis, bo dwa 'nowszy'
+    nic by nie rozróżniły.
+    """
+    rows = list(items or [])
+    n = len(rows)
+    keys = []
+    for m in rows:
+        ks = set()
+        t = norm_title(m.get("title") or "")
+        if t:
+            ks.add(t)
+        pl = norm_title(m.get("pl_title") or "")
+        if pl:
+            ks.add(pl)
+        keys.append(ks)
+    parent = list(range(n))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if keys[i] and keys[j] and (keys[i] & keys[j]):
+                union(i, j)
+    groups = {}
+    for i in range(n):
+        groups.setdefault(find(i), []).append(i)
+    tags = {}
+    for g in groups.values():
+        dated = [i for i in g if rows[i].get("year") is not None]
+        years = {int(rows[i]["year"]) for i in dated}
+        if len(dated) < 2 or len(years) < 2:
+            continue
+        dated.sort(key=lambda i: (int(rows[i]["year"]), rows[i].get("id") or 0))
+        if len(dated) == 2:
+            tags[rows[dated[0]]["id"]] = "starszy"
+            tags[rows[dated[1]]["id"]] = "nowszy"
+        else:
+            for i in dated:
+                tags[rows[i]["id"]] = str(int(rows[i]["year"]))
+    return tags
 
 
 def pack_data(con, pack):
@@ -1118,7 +1174,10 @@ class Room:
                 out.update(movie=self.mview(t["movie"], lang, year=False), img=self.thumb(t["movie"]),
                            mine=me and me["ans"])
             elif mode == "kolejnosc":
-                out.update(items=[dict(self.mview(m, lang, year=False), img=self.thumb(m)) for m in t["items"]],
+                tags = remake_tags(t["items"])
+                out.update(items=[dict(self.mview(m, lang, year=False), img=self.thumb(m),
+                                       **({"remake": tags[m["id"]]} if m["id"] in tags else {}))
+                                  for m in t["items"]],
                            mine=me and me["ans"])
             if mode in TITLE_MODES and t["voice"]:
                 j = self.judge()
@@ -1186,7 +1245,10 @@ class Room:
                                   for p in players if p["ans"] is not None]
         if mode == "kolejnosc":
             right = sorted(t["items"], key=lambda m: m["year"])
-            ans["items"] = [dict(self.mview(m, lang), img=self.thumb(m)) for m in right]
+            tags = remake_tags(right)
+            ans["items"] = [dict(self.mview(m, lang), img=self.thumb(m),
+                                 **({"remake": tags[m["id"]]} if m["id"] in tags else {}))
+                            for m in right]
         if mode == "top":
             by_id = {m["id"]: dict(self.mview(m, lang), img=self.thumb(m)) for m in t["items"]}
             def row(ids):

@@ -182,6 +182,55 @@ export function normTitle(s) {
   return s.replace(/ /g, "");
 }
 
+
+export function remakeTags(items) {
+  const rows = Array.isArray(items) ? items : [];
+  const n = rows.length;
+  const keys = rows.map(m => {
+    const ks = new Set();
+    const title = normTitle(m && m.title);
+    if (title) ks.add(title);
+    const pl = normTitle(m && m.pl_title);
+    if (pl) ks.add(pl);
+    return ks;
+  });
+  const parent = Array.from({ length: n }, (_, i) => i);
+  const find = i => {
+    while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; }
+    return i;
+  };
+  const union = (a, b) => {
+    const ra = find(a), rb = find(b);
+    if (ra !== rb) parent[rb] = ra;
+  };
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      if (!keys[i].size || !keys[j].size) continue;
+      for (const k of keys[i]) { if (keys[j].has(k)) { union(i, j); break; } }
+    }
+  }
+  const groups = new Map();
+  for (let i = 0; i < n; i++) {
+    const r = find(i);
+    if (!groups.has(r)) groups.set(r, []);
+    groups.get(r).push(i);
+  }
+  const tags = {};
+  for (const g of groups.values()) {
+    const dated = g.filter(i => rows[i] && rows[i].year != null);
+    const years = new Set(dated.map(i => Number(rows[i].year)));
+    if (dated.length < 2 || years.size < 2) continue;
+    dated.sort((a, b) => Number(rows[a].year) - Number(rows[b].year) || (rows[a].id || 0) - (rows[b].id || 0));
+    if (dated.length === 2) {
+      tags[rows[dated[0]].id] = "starszy";
+      tags[rows[dated[1]].id] = "nowszy";
+    } else {
+      for (const i of dated) tags[rows[i].id] = String(Number(rows[i].year));
+    }
+  }
+  return tags;
+}
+
 export function lev(a, b, cap = 3) {
   if (Math.abs(a.length - b.length) > cap) return cap + 1;
   let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
@@ -987,7 +1036,15 @@ export class Game {
       } else if (mode === "rok") {
         Object.assign(out, { movie: Game.mview(t.movie, lang, false), img: Game.thumb(t.movie), mine: me ? me.ans : null });
       } else if (mode === "kolejnosc") {
-        Object.assign(out, { items: t.items.map(m => ({ ...Game.mview(m, lang, false), img: Game.thumb(m) })), mine: me ? me.ans : null });
+        const tags = remakeTags(t.items);
+        Object.assign(out, {
+          items: t.items.map(m => {
+            const row = { ...Game.mview(m, lang, false), img: Game.thumb(m) };
+            if (tags[m.id]) row.remake = tags[m.id];
+            return row;
+          }),
+          mine: me ? me.ans : null,
+        });
       }
       if (TITLE_MODES.has(mode) && t.voice) {
         const j = this.judge(), vote = this.cfg.judge === "vote";
@@ -1049,7 +1106,15 @@ export class Game {
       if (mode === "plakat") ans.img = `/poster/${m.id}.jpg`;
       if (mode === "rok") ans.guesses = players.filter(p => p.ans !== null).map(p => ({ name: p.name, year: p.ans, points: p.history.length ? p.history[p.history.length - 1] : 0 }));
     }
-    if (mode === "kolejnosc") ans.items = t.items.slice().sort((a, b) => a.year - b.year).map(m => ({ ...Game.mview(m, lang), img: Game.thumb(m) }));
+    if (mode === "kolejnosc") {
+      const right = t.items.slice().sort((a, b) => a.year - b.year);
+      const tags = remakeTags(right);
+      ans.items = right.map(m => {
+        const row = { ...Game.mview(m, lang), img: Game.thumb(m) };
+        if (tags[m.id]) row.remake = tags[m.id];
+        return row;
+      });
+    }
     if (mode === "top") {
       const byId = Object.fromEntries(t.items.map(m => [m.id, { ...Game.mview(m, lang), img: Game.thumb(m) }]));
       const row = ids => (ids || []).map(i => byId[i]).filter(Boolean);

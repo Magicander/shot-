@@ -318,6 +318,40 @@ def main():
     check(sr["phase"] == "reveal" and pts == {"Ala": 500, "Bob": 0}, f"werdykt nie: pozostali po 100 x oferta ({pts})")
     check((sr.get("answer") or {}).get("prompt") == "Wymień potwory z kosmosu (PL)", "odsłona pokazuje pytanie")
 
+    # --- 13 pytań bez odpowiedzi: wszystkie w puli, rundy bez powtórzeń
+    for q in adm.req("GET", f"/api/admin/packs/{pid}/questions"):
+        adm.req("DELETE", f"/api/admin/questions/{q['id']}")
+    for i in range(13):
+        adm.req("POST", f"/api/admin/packs/{pid}/questions",
+                {"prompt_pl": f"Horror {i+1}", "prompt_en": f"Horror EN {i+1}"})
+    listed = adm.req("GET", f"/api/admin/packs/{pid}/questions")
+    check(len(listed) == 13 and all(q["answers"] == [] for q in listed), "admin widzi 13 pytań bez odpowiedzi")
+    md13 = adm.req("GET", f"/api/admin/packs/{pid}/modes")
+    check(md13["questions"] == 13 and md13["avail"]["licytacja"]["ok"], "hub: 13 pytań w puli licytacji")
+    # pack_data (to samo źródło co gra i deploy) też ma 13
+    import rooms, db as _db
+    with _db.connect() as con:
+        pdata = rooms.pack_data(con, {"id": pid})
+    check(len(pdata["questions"]) == 13, "pack_data / gra widzi 13 pytań, nie tylko te z listą odpowiedzi")
+    a2, b2 = Client(base, "pl"), Client(base, "en")
+    ra2 = a2.req("POST", "/api/rooms", {"pack_id": pid, "name": "Ala"}); code2 = ra2["code"]
+    A2 = {"pid": ra2["pid"], "token": ra2["token"]}
+    rb2 = b2.req("POST", f"/api/rooms/{code2}/join", {"name": "Bob"}); B2 = {"pid": rb2["pid"], "token": rb2["token"]}
+    a2.req("POST", f"/api/rooms/{code2}/setup", {**A2, "modes": ["licytacja"], "rounds": 5, "per_mode": False})
+    a2.req("POST", f"/api/rooms/{code2}/start", A2)
+    room2 = app.rooms[code2]
+    st2 = lambda: a2.req("GET", f"/api/rooms/{code2}?pid={A2['pid']}&token={A2['token']}")
+    seen_p = []
+    for i in range(5):
+        snap = st2()
+        check(snap.get("mode") == "licytacja" and snap.get("prompt", "").startswith("Horror "),
+              f"runda {i+1} ładuje pytanie z puli")
+        seen_p.append(snap["prompt"])
+        room2.end_round()
+        room2.t0 = __import__("time").time() - 20
+        room2.tick()
+    check(len(set(seen_p)) == 5, f"5 rund, 5 różnych pytań ({seen_p})")
+
     # --- kadr Zoom niezależny od Kadry
     mid = m0["id"]
     before_pick = adm.req("GET", f"/api/admin/movies/{mid}")
