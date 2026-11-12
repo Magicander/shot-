@@ -156,13 +156,14 @@ python3 test_rules.py           # zasady: Top, Filmrun (Start/Stop), licytacja (
 python3 test_game.py            # na kopii quiz.db: migracje, wklejanie PL, atrapa TMDB, gra 2 graczy we wszystkich trybach (w tym Top)
 python3 test_editors.py         # na kopii quiz.db: scraper IMDb/Filmweb na atrapie, edytory (w tym kadr Zoom), Custom na liście pakietów, licytacja z pytaniem
 node cloudflare/test/rules.mjs  # ten sam zestaw zasad dla portu na Workers
+node cloudflare/test/frontend_bundle.mjs  # Worker serwuje bundlowany interfejs zgodny z repo
 ```
 
 ## Odzyskiwanie quiz.db z Cloudflare
 
 Dane w chmurze to Static Assets (JSON + kadry + plakaty), nie osobna baza D1. Worker blokuje publiczny dostęp do `/data/pack-*.json`. Cloudflare API też **nie pozwala pobrać** wdrożonych assetów (upload jest tylko do zapisu).
 
-**Pułapka (chicken-egg):** przycisk **Pobierz bazę** i `GET /api/admin/export` istnieją dopiero po wdrożeniu nowego kodu. Zwykłe `python deploy_cloudflare.py` buduje assety z lokalnej `quiz.db` i **nadpisze** nowsze dane na Cloudflare. Dlatego najpierw wgrywamy **tylko kod** (`--code-only`, `keep_assets=true`), potem ściągamy dane, dopiero potem pełny deploy.
+**Pułapka (chicken-egg):** przycisk **Pobierz bazę** i `GET /api/admin/export` istnieją dopiero po wdrożeniu nowego kodu. Zwykłe `python deploy_cloudflare.py` buduje assety z lokalnej `quiz.db` i **nadpisze** nowsze dane na Cloudflare. Dlatego najpierw wgrywamy **tylko kod** (`--code-only`, `keep_assets=true`): nowy Worker **i interfejs** (html/js/css idą w bundlu Workera), a kadry, plakaty, zdjęcia Filmrun i dane pakietów na live zostają. Potem ściągamy dane, dopiero potem pełny deploy (assety).
 
 Aktualnie wdrożony Worker (ok. `951a404` / `287a12b`) **nie ma** eksportu — sam `pull_from_cloudflare.py` przeciwko niemu zakończy się komunikatem z instrukcją `--code-only`.
 
@@ -174,7 +175,7 @@ git pull
 cd cloudflare
 npm install
 cd ..
-# 1) TYLKO kod Workera — assety (filmy/kadry) na live ZOSTAJĄ
+# 1) kod Workera + interfejs — kadry/plakaty/zdjęcia Filmrun/dane na live ZOSTAJĄ
 python deploy_cloudflare.py --code-only
 # 2) ściągnij dane z chmury do lokalnego quiz.db (stary plik -> quiz-backup-YYYYMMDD-HHMM.db)
 python pull_from_cloudflare.py --url https://shot-quiz.<twoje>.workers.dev
@@ -229,7 +230,7 @@ Static Assets są niemutowalne między deployami, więc zapisy idą do singleton
 |---|---|
 | **Pobierz bazę** / `pull_from_cloudflare.py` | eksport `kadr-export-v1` już ze **scaloną** nakładką |
 | **Pełny deploy** | przed buildem: backup `quiz.db`, pobranie overlay, merge do lokalnej bazy (podsumowanie + konflikty), potem build+deploy; po sukcesie **czyszczenie overlay** (edycje są już w assetach) |
-| **`--code-only`** | bez ruszania assetów; binding CONTENT zostaje; safety check działa |
+| **`--code-only`** | Worker + interfejs (bundle html/js/css); kadry, plakaty, zdjęcia Filmrun i JSON pakietów bez zmian; binding CONTENT zostaje |
 | **Konflikty** | nowszy `updated_at` wygrywa; cytaty bez lokalnego timestampu → chmura + wpis w konfliktach |
 
 ### Aktualizacja do wersji z edycją w chmurze (PowerShell)
@@ -256,7 +257,7 @@ Architektura (plan Free):
 - **Worker** `shot-quiz` — strony, API, admin z zapisem, geo PL/EN
 - **Durable Object `Room`** — pokój + WebSocket (jak wcześniej)
 - **Durable Object `Content`** — nakładka edycji (SQLite)
-- **Workers Static Assets** — kadry / plakaty / JSON pakietów z `quiz.db` → `cloudflare/build/` (poza gitem)
+- **Workers Static Assets** — kadry / plakaty / zdjęcia Filmrun / JSON pakietów z `quiz.db` → `cloudflare/build/` (poza gitem). Tekstowy interfejs (html/js/css) jest dodatkowo w bundlu Workera, więc `--code-only` aktualizuje UI bez wgrywania assetów.
 
 Nie dotyka workera ani bazy `mozg` (osobna nazwa `shot-quiz`).
 

@@ -1,6 +1,7 @@
 // index.js - Worker: strony (PL/EN), API pokoi -> Room DO, panel admina z zapisem do Content DO.
 // Kadry/plakaty/pakiety bazowe = Workers Static Assets. Edycje w chmurze = overlay w Content DO.
 import { errText } from "./i18n.js";
+import { frontendBody, frontendResponse } from "./frontend.js";
 import { handleAdmin, ApiError as AdminApiError, loadMergedPack, contentOp } from "./admin_api.js";
 import { contentStub } from "./content.js";
 import { tmdbPersonMovies, tmdbMovieCast, tmdbPersonDetail, localGraph, extLinks } from "./most.js";
@@ -42,9 +43,15 @@ async function asset(env, req, path) {
 
 async function page(env, req, file, extraScript = "") {
   const lang = detectLang(req);
-  const res = await env.ASSETS.fetch(new URL("/static/" + file, req.url));
-  if (!res.ok) return res;
-  let html = await res.text();
+  const bundled = frontendBody("/static/" + file);
+  let html;
+  if (bundled != null) {
+    html = bundled;
+  } else {
+    const res = await env.ASSETS.fetch(new URL("/static/" + file, req.url));
+    if (!res.ok) return res;
+    html = await res.text();
+  }
   for (const [k, v] of Object.entries(META[lang])) html = html.replaceAll(`{{${k}}}`, v);
   html = html.replace(/<html lang="(pl|en)"/, `<html lang="$1" data-geo="${geoLang(req)}"`);
   if (extraScript) {
@@ -330,8 +337,13 @@ export default {
       if (req.method === "GET" && am) {
         return serveActor(env, req, +am[1]);
       }
-      if (path.startsWith("/data/") || path === "/static/index.html" || path === "/static/admin.html" || path === "/static/cloud-admin.html")
+      if (path.startsWith("/data/") || path === "/static/index.html" || path === "/static/admin.html")
         throw new ApiError(404, "Nie ma takiej strony");
+      if (req.method === "GET" && path.startsWith("/static/")) {
+        const ui = frontendResponse(req, path);
+        if (ui) return ui;
+        return env.ASSETS.fetch(req);
+      }
       if (path.startsWith("/api/admin")) return await adminApi(req, env, path);
       if (path.startsWith("/api/")) return await gameApi(req, env, path, url);
       return env.ASSETS.fetch(req);

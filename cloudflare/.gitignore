@@ -2,3 +2,5 @@ node_modules/
 build/
 .wrangler/
 .dev.vars
+# generowany przez deploy_cloudflare.py (write_frontend_bundle)
+src/frontend_bundle.js

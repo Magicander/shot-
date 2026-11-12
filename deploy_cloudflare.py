@@ -6,18 +6,22 @@ Synchronizacja dwukierunkowa treści edytowalnych:
   2) buduje Static Assets z (już scalonego) quiz.db i wdraża,
   3) po udanym deployu czyści nakładkę w chmurze (edycje są już w bazie assetów).
 
-Scraper / kadry YouTube nadal tylko lokalnie. --code-only nie rusza assetów ani nakładki.
+Scraper / kadry YouTube nadal tylko lokalnie. --code-only wgrywa kod Workera i tekstowy interfejs
+(html/js/css z bundla w Workerze); kadry, plakaty, zdjęcia Filmrun i dane pakietów na live zostają.
 
   python deploy_cloudflare.py              # zbuduj i wdroż
   python deploy_cloudflare.py --build-only # tylko zbuduj cloudflare/build/
   python deploy_cloudflare.py --dev        # zbuduj i uruchom lokalnie `wrangler dev`
   python deploy_cloudflare.py --db inna.db # inna baza
-  python deploy_cloudflare.py --code-only  # TYLKO kod Workera; assety w chmurze zostają
+  python deploy_cloudflare.py --code-only  # Worker + interfejs; kadry/zdjęcia/dane na live zostają
+  python deploy_cloudflare.py --write-frontend-bundle  # tylko wygeneruj cloudflare/src/frontend_bundle.js
   python deploy_cloudflare.py --force      # pomiń ostrzeżenie o mniejszej lokalnej bazie
   python deploy_cloudflare.py --url URL    # adres live do porównania liczby filmów
 
---code-only używa Cloudflare API (keep_assets=true), żeby wgrać nowy kod (np. /api/admin/export)
-bez nadpisywania kadrów i pack-*.json. Wymaga `npx wrangler login` albo CLOUDFLARE_API_TOKEN.
+--code-only używa Cloudflare API (keep_assets=true), żeby wgrać nowy kod Workera razem z bundlem
+interfejsu (game.js, style.css, i18n.js, index.html, admin…), bez nadpisywania kadrów, plakatów,
+zdjęć Filmrun i pack-*.json. Wymaga `npx wrangler login` albo CLOUDFLARE_API_TOKEN.
+Przed wrangler deploy --dry-run wywołaj --write-frontend-bundle (robi to też --code-only i build).
 """
 import argparse
 import json
@@ -33,6 +37,20 @@ from pathlib import Path
 BASE = Path(__file__).resolve().parent
 CF = BASE / "cloudflare"
 BUILD = CF / "build"
+FRONTEND_BUNDLE = CF / "src" / "frontend_bundle.js"
+# Ta sama lista co assets.run_worker_first w wrangler.jsonc. --code-only musi ją wysłać
+# w metadata.assets.config, bo keep_assets samo z siebie nie aktualizuje routingu.
+ASSETS_RUN_WORKER_FIRST = ["/", "/r/*", "/admin", "/api/*", "/data/*", "/poster/*", "/static/*"]
+FRONTEND_FILES = [
+    "index.html", "admin.html", "admin.css", "admin.js",
+    "game.js", "i18n.js", "style.css", "favicon.svg",
+]
+# Jak w build(): na Cloudflare transport pokoju to WebSocket, nie polling.
+FRONTEND_RT_JS = '"use strict";\nwindow.KADR_RT = "ws";\n'
+FRONTEND_CLOUD_ADMIN = (
+    "<!doctype html><meta http-equiv=refresh content='0;url=/admin'><title>admin</title>"
+)
+
 MAX_FILES = 20000          # limit plików Static Assets na planie Free
 MAX_FILE = 25 * 1024 * 1024
 
@@ -79,7 +97,46 @@ def write_actor_shards(con) -> tuple[int, int, int]:
     return len(index), shard, nbytes
 
 
+
+def write_frontend_bundle() -> Path:
+    """Zbuduj cloudflare/src/frontend_bundle.js z tekstowych plików static/ (bez zdjęć).
+
+    Nie czyta quiz.db. rt.js w bundlu jest wersją Cloudflare (KADR_RT=ws), tak jak w build().
+    """
+    import hashlib
+    files, etags = {}, {}
+    src = BASE / "static"
+    for name in FRONTEND_FILES:
+        path = src / name
+        if not path.is_file():
+            sys.exit(f"Brak pliku interfejsu: {path}")
+        files["/static/" + name] = path.read_text(encoding="utf-8")
+    files["/static/rt.js"] = FRONTEND_RT_JS
+    files["/static/cloud-admin.html"] = FRONTEND_CLOUD_ADMIN
+    for path, body in files.items():
+        digest = hashlib.sha256(body.encode("utf-8")).hexdigest()[:16]
+        etags[path] = f'"{digest}"'
+    FRONTEND_BUNDLE.write_text(
+        "/* Wygenerowane przez deploy_cloudflare.py — nie edytuj. */\n"
+        f"export const FRONTEND = {json.dumps(files, ensure_ascii=False, separators=(',', ':'))};\n"
+        f"export const FRONTEND_ETAG = {json.dumps(etags, separators=(',', ':'))};\n",
+        encoding="utf-8",
+    )
+    n = len(files)
+    kb = FRONTEND_BUNDLE.stat().st_size / 1024
+    print(f"Zapisano {FRONTEND_BUNDLE.relative_to(BASE)}: {n} plików interfejsu ({kb:.0f} KiB).")
+    return FRONTEND_BUNDLE
+
+
+def code_only_assets_config() -> dict:
+    return {
+        "not_found_handling": "none",
+        "run_worker_first": list(ASSETS_RUN_WORKER_FIRST),
+    }
+
+
 def build(db_path: Path) -> dict:
+    write_frontend_bundle()
     os.environ["QUIZ_DB"] = str(db_path)
     sys.path.insert(0, str(BASE))
     import db
@@ -353,11 +410,14 @@ def api(token, method, path, data=None, form=None):
 
 
 def deploy_code_only():
-    """Wgraj tylko kod Workera; Static Assets w chmurze zostają (keep_assets=true).
+    """Wgraj kod Workera + bundle interfejsu; kadry/plakaty/zdjęcia/dane zostają.
 
     Cloudflare docs: multipart metadata.keep_assets zatrzymuje poprzednie assety
-    zamiast wymagać nowego assets.jwt. PUT /workers/scripts/{name} wdraża od razu.
+    zamiast wymagać nowego assets.jwt. assets.config aktualizuje run_worker_first
+    (w tym /static/*), bez wgrywania plików assetów. PUT /workers/scripts/{name}
+    wdraża od razu.
     """
+    write_frontend_bundle()
     wrangler = CF / "wrangler.jsonc"
     conf_text = wrangler.read_text(encoding="utf-8")
     import re
@@ -373,14 +433,22 @@ def deploy_code_only():
     if outdir.exists():
         shutil.rmtree(outdir)
     # dry-run buduje bundle z lokalnego build/; NIE uploaduje assetów
+    placeholder_build = False
     if not BUILD.exists():
         (BUILD / "data").mkdir(parents=True)
         (BUILD / "static").mkdir(parents=True)
         (BUILD / "data" / "packs.json").write_text("[]", encoding="utf-8")
         (BUILD / "data" / "meta.json").write_text("{}", encoding="utf-8")
+        placeholder_build = True
         print("Uwaga: brak cloudflare/build - tworzę pusty placeholder tylko pod bundling kodu.")
         print("Assety NA LIVE nie są ruszane (keep_assets).")
-    code = npx("deploy", "--dry-run", f"--outdir={outdir}")
+    code = 1
+    try:
+        code = npx("deploy", "--dry-run", f"--outdir={outdir}")
+    finally:
+        if placeholder_build and BUILD.exists():
+            shutil.rmtree(BUILD)
+            print("Usunięto tymczasowy placeholder cloudflare/build.")
     if code != 0:
         sys.exit(code)
     bundle = outdir / "index.js"
@@ -395,12 +463,13 @@ def deploy_code_only():
         "compatibility_flags": ["nodejs_compat"],
         "keep_assets": True,
         "keep_bindings": ["secret_text", "durable_object_namespace", "assets"],
+        "assets": {"config": code_only_assets_config()},
         "bindings": [
             {"name": "ASSETS", "type": "assets"},
             {"name": "ROOMS", "type": "durable_object_namespace", "class_name": "Room"},
             {"name": "CONTENT", "type": "durable_object_namespace", "class_name": "Content"},
         ],
-        "annotations": {"workers/message": "code-only keep_assets + Content DO"},
+        "annotations": {"workers/message": "code-only keep_assets + UI bundle"},
     }
     boundary = "----kadrCodeOnly" + str(int(time.time()))
     parts = []
@@ -428,7 +497,7 @@ def deploy_code_only():
                  form=(boundary, body))
     if not result.get("success", True) and result.get("errors"):
         sys.exit(f"Upload nieudany: {result}")
-    print("Gotowe: kod Workera zaktualizowany, Static Assets (filmy, kadry, plakaty) bez zmian.")
+    print("Gotowe: kod Workera i interfejs zaktualizowane. Kadry, plakaty, zdjęcia Filmrun i dane pakietów bez zmian.")
     print("Teraz: python pull_from_cloudflare.py --url <adres>")
     print("Albo w /admin kliknij 'pobierz bazę' / 'download database'.")
     return 0
@@ -528,12 +597,18 @@ def main():
     ap.add_argument("--build-only", action="store_true")
     ap.add_argument("--dev", action="store_true", help="uruchom lokalnie wrangler dev")
     ap.add_argument("--code-only", action="store_true",
-                    help="wgraj tylko kod Workera; nie ruszaj Static Assets (keep_assets)")
+                    help="wgraj kod Workera i interfejs; nie ruszaj kadrów/zdjęć/danych (keep_assets)")
+    ap.add_argument("--write-frontend-bundle", action="store_true",
+                    help="tylko wygeneruj cloudflare/src/frontend_bundle.js (bez deployu, bez bazy)")
     ap.add_argument("--force", action="store_true", help="pomiń ostrzeżenie gdy lokalna baza jest mniejsza niż live")
     ap.add_argument("--url", default=os.environ.get("KADR_URL"),
                     help="adres live Workera do porównania liczby filmów przed deployem")
     a = ap.parse_args()
     db_path = Path(a.db).resolve()
+
+    if a.write_frontend_bundle and not a.code_only and not a.build_only and not a.dev:
+        write_frontend_bundle()
+        return
 
     if a.code_only:
         if not (CF / "node_modules").exists():

@@ -12,7 +12,7 @@
     "directory": "./build",
     "binding": "ASSETS",
     "not_found_handling": "none",
-    "run_worker_first": ["/", "/r/*", "/admin", "/api/*", "/data/*", "/poster/*", "/static/index.html", "/static/admin.html", "/static/cloud-admin.html"]
+    "run_worker_first": ["/", "/r/*", "/admin", "/api/*", "/data/*", "/poster/*", "/static/*"]
   },
   // Room = pokój gry; Content = singleton z nakładką edycji w chmurze (SQLite, plan Free)
   "durable_objects": {
