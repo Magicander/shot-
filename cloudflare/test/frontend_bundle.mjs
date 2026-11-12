@@ -30,11 +30,13 @@ const check = (c, msg) => {
 const read = name => readFileSync(join(ROOT, "static", name), "utf8");
 
 check(FRONTEND["/static/game.js"] === read("game.js"), "bundle game.js = static/game.js z repo");
-check(FRONTEND["/static/index.html"] === read("index.html"), "bundle index.html = static/index.html z repo");
+const toUi = (h) => h.replace(/"\/static\/(style\.css|admin\.css|admin\.js|game\.js|i18n\.js|rt\.js|favicon\.svg)"/g, '"/ui/$1"');
+check(FRONTEND["/static/index.html"] === toUi(read("index.html")), "bundle index.html = static/index.html z repo (linki na /ui/)");
+check(FRONTEND["/static/index.html"].includes('"/ui/game.js"') && !FRONTEND["/static/index.html"].includes('"/static/game.js"'), "index.html linkuje game.js przez /ui/");
 check(FRONTEND["/static/style.css"] === read("style.css"), "bundle style.css zgodny z repo");
 check(FRONTEND["/static/i18n.js"] === read("i18n.js"), "bundle i18n.js zgodny z repo");
 check(FRONTEND["/static/admin.js"] === read("admin.js"), "bundle admin.js zgodny z repo");
-check(FRONTEND["/static/admin.html"] === read("admin.html"), "bundle admin.html zgodny z repo");
+check(FRONTEND["/static/admin.html"] === toUi(read("admin.html")), "bundle admin.html zgodny z repo");
 check(FRONTEND["/static/admin.css"] === read("admin.css"), "bundle admin.css zgodny z repo");
 check(FRONTEND["/static/favicon.svg"] === read("favicon.svg"), "bundle favicon.svg zgodny z repo");
 check(FRONTEND["/static/rt.js"].includes('KADR_RT = "ws"'), "rt.js w bundlu to wersja Cloudflare (ws)");

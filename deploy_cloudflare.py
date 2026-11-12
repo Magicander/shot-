@@ -112,6 +112,14 @@ def write_frontend_bundle() -> Path:
             sys.exit(f"Brak pliku interfejsu: {path}")
         files["/static/" + name] = path.read_text(encoding="utf-8")
     files["/static/rt.js"] = FRONTEND_RT_JS
+    # HTML z bundla wskazuje na /ui/<plik>: tej ścieżki nie ma w assetach, więc Worker
+    # oddaje nowy interfejs nawet gdy routing assetów jest stary (code-only, keep_assets).
+    bundled = [n for n in FRONTEND_FILES if not n.endswith(".html")] + ["rt.js"]
+    for name in ("index.html", "admin.html"):
+        body = files["/static/" + name]
+        for b in bundled:
+            body = body.replace(f'"/static/{b}"', f'"/ui/{b}"')
+        files["/static/" + name] = body
     files["/static/cloud-admin.html"] = FRONTEND_CLOUD_ADMIN
     for path, body in files.items():
         digest = hashlib.sha256(body.encode("utf-8")).hexdigest()[:16]

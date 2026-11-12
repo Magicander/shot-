@@ -339,6 +339,13 @@ export default {
       }
       if (path.startsWith("/data/") || path === "/static/index.html" || path === "/static/admin.html")
         throw new ApiError(404, "Nie ma takiej strony");
+      // /ui/* nie istnieje w assetach, więc trafia do Workera nawet przy starym routingu
+      // (code-only z keep_assets nie zmienia run_worker_first). HTML z bundla linkuje tutaj.
+      if (req.method === "GET" && path.startsWith("/ui/")) {
+        const ui = frontendResponse(req, "/static/" + path.slice(4));
+        if (ui) return ui;
+        throw new ApiError(404, "Nie ma takiej strony");
+      }
       if (req.method === "GET" && path.startsWith("/static/")) {
         const ui = frontendResponse(req, path);
         if (ui) return ui;
