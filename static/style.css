@@ -121,8 +121,10 @@ textarea.input{padding:12px 16px;min-height:140px;resize:vertical;line-height:1.
 footer{padding:30px 0 50px;text-align:center;color:var(--muted);font-size:14px}
 
 /* modal */
-.modal{position:fixed;inset:0;background:rgba(27,23,18,.55);display:grid;place-items:center;padding:16px;z-index:50}
-.modal .box{background:var(--bone);border-radius:30px;padding:28px;max-width:440px;width:100%;box-shadow:var(--shadow)}
+/* okno trzyma się widocznej części ekranu (visualViewport), więc klawiatura go nie zasłania */
+.modal{position:fixed;left:0;right:0;top:var(--vvtop,0px);height:var(--vvh,100%);background:rgba(27,23,18,.55);display:grid;padding:16px;z-index:50;
+  overflow-y:auto;overscroll-behavior:contain}
+.modal .box{background:var(--bone);border-radius:30px;padding:28px;max-width:440px;width:100%;box-shadow:var(--shadow);margin:auto;align-self:center;justify-self:center}
 .modal h2{font-size:34px;margin-bottom:6px}
 .modal .actions{display:flex;gap:10px;justify-content:flex-end;margin-top:18px;flex-wrap:wrap}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:12px 22px;
@@ -138,7 +140,7 @@ footer{padding:30px 0 50px;text-align:center;color:var(--muted);font-size:14px}
 .lobby{display:grid;grid-template-columns:1.2fr 1fr;gap:24px;margin:10px 0 40px}
 .bigcode{font-family:var(--display);font-weight:700;font-size:clamp(76px,13vw,150px);letter-spacing:.06em;line-height:.9;color:var(--orange)}
 .share{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
-.share .input{flex:1;min-width:200px;font-size:15px;min-height:48px}
+.share .input{flex:1;min-width:200px;font-size:16px;min-height:48px}
 .plist{list-style:none;padding:0;margin:12px 0 0;display:flex;flex-direction:column;gap:8px}
 .plist li{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px 10px;background:var(--card);border-radius:16px;padding:10px 14px;font-weight:700;font-size:18px;min-width:0;overflow:hidden}
 .plist .who{display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0}
@@ -461,6 +463,14 @@ footer{padding:30px 0 50px;text-align:center;color:var(--muted);font-size:14px}
   .gmain > .dock{margin-top:auto}
   .kbopen{overflow:hidden}
   .kbopen .gmain{min-height:0;max-height:100%}
+  /* obraz w rundzie mieści się nad dokiem: skala proporcjonalna, bez ściskania (--stage-max liczy fitStage) */
+  .gmain > .stage:not(.textstage):not(.posterstage){width:100%;max-width:calc(var(--stage-max,9999px) * 16 / 9);margin-inline:auto;transition:max-width .15s}
+  .gmain > .stage.posterstage canvas{width:auto;height:auto;max-width:min(100%,340px);max-height:calc(var(--stage-max,9999px) - var(--pst-pad,74px));align-self:center;flex:none;transition:max-height .15s}
+  /* przy otwartej klawiaturze zostaje sam obraz i pole odpowiedzi */
+  .kbopen .gmain > .stage.posterstage{--pst-pad:16px;padding:8px 0}
+  .kbopen .gmain > .stage .lvl{display:none}
+  .kbopen .dock .hostbar{display:none}
+  .kbopen .dock .feedback:empty{min-height:0;margin:0}
 }
 @media (max-width:560px){
   .inround .roombar{display:none}
@@ -482,7 +492,6 @@ footer{padding:30px 0 50px;text-align:center;color:var(--muted);font-size:14px}
   .claimbtn{min-height:72px;font-size:26px}
   .curbid .bigbid{font-size:56px}
   .bigclock{font-size:84px}
-  .kbopen .stage:not(.textstage){max-height:28vh}
   .kbopen .timeline-labels{display:none}
   .lobby{gap:14px}
   .bigcode{font-size:84px}
@@ -497,8 +506,8 @@ footer{padding:30px 0 50px;text-align:center;color:var(--muted);font-size:14px}
   .packet-wrap{flex:0 0 80%;scroll-snap-align:center}
   .packet{transform:none}
   .packet:hover{transform:none}
-  .modal{align-items:end;padding:0}
-  .modal .box{border-radius:28px 28px 0 0;padding:22px 18px calc(22px + env(safe-area-inset-bottom))}
+  .modal{padding:0}
+  .modal .box{margin:auto 0 0;align-self:end;border-radius:28px 28px 0 0;padding:22px 18px calc(22px + env(safe-area-inset-bottom))}
   .toast{bottom:calc(110px + env(safe-area-inset-bottom))}
   .verdict .pill{min-width:72px;font-size:18px}
 }

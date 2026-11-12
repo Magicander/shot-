@@ -20,18 +20,23 @@ const savedName = () => localStorage.getItem("kadr_name") || "";
 const creds = code => JSON.parse(localStorage.getItem("kadr_room_" + code) || "null");
 const setCreds = (code, d) => localStorage.setItem("kadr_room_" + code, JSON.stringify({pid:d.pid, token:d.token}));
 
+function openModal() {
+  onVV();
+  const m = $("#modal"); m.classList.remove("hidden"); m.scrollTop = 0;
+}
 function askName(title, sub, onOk) {
   const f = $("#mform");
   f.innerHTML = `<h2>${esc(title)}</h2><p class="muted" style="margin:0 0 14px">${esc(sub)}</p>
-    <label class="field">${T("Twój nick")}<input class="input" name="n" maxlength="18" required value="${esc(savedName())}" placeholder="${T("np. Ola")}"></label>
+    <label class="field">${T("Twój nick")}<input class="input" name="n" maxlength="18" required value="${esc(savedName())}" placeholder="${T("np. Ola")}" enterkeyhint="go" autocomplete="nickname" autocapitalize="words"></label>
     <div class="actions"><button type="button" class="pill ghost" id="mcancel">${T("anuluj")}</button><button class="pill orange">${T("dalej")}</button></div>`;
-  $("#modal").classList.remove("hidden");
+  openModal();
   f.n.focus(); f.n.select();
   $("#mcancel").onclick = () => $("#modal").classList.add("hidden");
   f.onsubmit = async e => {
     e.preventDefault();
     const n = f.n.value.trim(); if (!n) return;
     localStorage.setItem("kadr_name", n);
+    f.n.blur();
     try { await onOk(n); $("#modal").classList.add("hidden"); } catch (err) { toast(err.message); }
   };
 }
@@ -90,9 +95,9 @@ function openCustom(packs, nrounds) {
   f.innerHTML = `<h2>${T("Custom")}</h2>
     <p class="muted" style="margin:0 0 14px">${T("Zaznacz pakiety, które chcesz złożyć w jedną pulę. Potem jak zwykle dobierzesz tryby w lobby.")}</p>
     <div class="packpicks">${packs.map(p => `<label class="check"><input type="checkbox" name="pk" value="${p.id}"><span class="dot" style="background:${esc(p.color)}"></span>${esc(packName(p))} <small class="muted">${p.total}</small></label>`).join("") || `<p class="muted">${T("Brak pakietów do złożenia.")}</p>`}</div>
-    <label class="field" style="margin-top:12px">${T("Twój nick")}<input class="input" name="n" maxlength="18" required value="${esc(savedName())}" placeholder="${T("np. Ola")}"></label>
+    <label class="field" style="margin-top:12px">${T("Twój nick")}<input class="input" name="n" maxlength="18" required value="${esc(savedName())}" placeholder="${T("np. Ola")}" enterkeyhint="go" autocomplete="nickname" autocapitalize="words"></label>
     <div class="actions"><button type="button" class="pill ghost" id="mcancel">${T("anuluj")}</button><button class="pill orange">${T("dalej")}</button></div>`;
-  $("#modal").classList.remove("hidden");
+  openModal();
   $("#mcancel").onclick = () => $("#modal").classList.add("hidden");
   f.onsubmit = async e => {
     e.preventDefault();
@@ -101,6 +106,7 @@ function openCustom(packs, nrounds) {
     if (!ids.length) return toast(T("Wybierz przynajmniej jeden pakiet"));
     if (!name) return;
     localStorage.setItem("kadr_name", name);
+    f.n.blur();
     try {
       const d = await api("/api/rooms", {kind:"custom", pack_id:"custom", pack_ids:ids, rounds:nrounds, name});
       setCreds(d.code, d); location.href = "/r/" + d.code;
@@ -673,6 +679,7 @@ function renderRound(v, keepInput) {
   v.innerHTML = `<div class="game"><div class="gmain">${hud()}${stage}<div class="dock" id="dock">${input}${hostDock()}</div></div>${board()}</div><div class="sheetbg" id="sheetbg"></div>`;
   wireCommon();
   updateClock(true);
+  fitStage();
   const fine = matchMedia("(pointer:fine)").matches;
   if ($("#gf")) setupGuess(prev, hadFocus || (!keepInput && fine), mode === "licytacja");
   if ($("#yf")) {
@@ -844,19 +851,49 @@ function drawPoster(f, force) {
   }
 }
 tickT = setInterval(updateClock, 200);
-/* klawiatura na telefonie: dok z polem odpowiedzi trzyma się nad klawiaturą */
-if (window.visualViewport) {
-  const vv = window.visualViewport;
-  const onVV = () => {
-    const layoutH = document.documentElement.clientHeight;
+/* klawiatura na telefonie: dok z polem odpowiedzi trzyma się nad klawiaturą,
+   okno z nickiem siedzi w widocznej części ekranu, a obraz w rundzie skaluje się proporcjonalnie */
+const MOBILE = matchMedia("(max-width:900px)");
+function fitStage() {
+  const root = document.documentElement, st = document.querySelector(".gmain > .stage:not(.textstage)");
+  if (!st || !MOBILE.matches) { root.style.removeProperty("--stage-max"); return; }
+  const gm = st.parentElement, vv = window.visualViewport;
+  const vh = vv ? vv.height : window.innerHeight;
+  let other = gm.getBoundingClientRect().top + window.scrollY;
+  for (const el of gm.children) {
+    if (el === st) continue;
+    const cs = getComputedStyle(el);
+    if (cs.display === "none" || cs.position === "fixed") continue;
+    other += el.getBoundingClientRect().height + parseFloat(cs.marginTop) + parseFloat(cs.marginBottom);
+  }
+  const cs = getComputedStyle(st);
+  other += parseFloat(cs.marginTop) + parseFloat(cs.marginBottom) + 6;
+  root.style.setProperty("--stage-max", Math.max(140, Math.floor(vh - other)) + "px");
+}
+let vvTall = {w: 0, h: 0};
+const onVV = () => {
+  const vv = window.visualViewport, root = document.documentElement;
+  if (vv) {
+    const layoutH = root.clientHeight;
     const already = layoutH <= vv.height + 48;
     const raw = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
-    const kb = already ? 0 : raw;
-    document.documentElement.style.setProperty("--kb", kb + "px");
-    document.body.classList.toggle("kbopen", raw > 80 || (layoutH - vv.height) > 80);
-  };
-  vv.addEventListener("resize", onVV); vv.addEventListener("scroll", onVV);
-}
+    root.style.setProperty("--kb", (already ? 0 : raw) + "px");
+    root.style.setProperty("--vvh", Math.round(vv.height) + "px");
+    root.style.setProperty("--vvtop", Math.round(vv.offsetTop) + "px");
+    // Android z resizes-content zmniejsza cały layout, więc porównujemy z najwyższą wysokością przy tej szerokości
+    if (vvTall.w !== window.innerWidth) vvTall = {w: window.innerWidth, h: 0};
+    vvTall.h = Math.max(vvTall.h, vv.height);
+    const a = document.activeElement;
+    const typing = !!a && (a.tagName === "TEXTAREA" || (a.tagName === "INPUT" && !["checkbox", "radio", "button", "submit"].includes(a.type)));
+    document.body.classList.toggle("kbopen", raw > 80 || (layoutH - vv.height) > 80 || (typing && vvTall.h - vv.height > 120));
+  }
+  fitStage();
+  const a = document.activeElement;
+  if (a && a.closest && a.closest("#modal") && !$("#modal").classList.contains("hidden")) a.scrollIntoView({block: "nearest"});
+};
+if (window.visualViewport) { visualViewport.addEventListener("resize", onVV); visualViewport.addEventListener("scroll", onVV); }
+window.addEventListener("resize", onVV);
+onVV();
 
 function fold(s) { return String(s || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/ł/g, "l").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
 
