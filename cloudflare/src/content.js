@@ -70,6 +70,14 @@ export class Content extends DurableObject {
         deleted INTEGER NOT NULL DEFAULT 0,
         updated_at REAL NOT NULL
       );
+      -- pamięć podręczna dla lobby (/api/packs): które tryby mają dane po edycjach w chmurze.
+      -- Osobna tabela, poza dump(), żeby synchronizacja z lokalną bazą jej nie dotykała.
+      CREATE TABLE IF NOT EXISTS pack_ready (
+        pack_id INTEGER PRIMARY KEY,
+        ready TEXT NOT NULL DEFAULT '',
+        base_off TEXT NOT NULL DEFAULT '',
+        updated_at REAL NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS seq (name TEXT PRIMARY KEY, n INTEGER NOT NULL);
       INSERT OR IGNORE INTO seq(name, n) VALUES ('quotes', ${NEW_ID_BASE});
       INSERT OR IGNORE INTO seq(name, n) VALUES ('questions', ${NEW_ID_BASE});
@@ -121,6 +129,7 @@ export class Content extends DurableObject {
     this.ctx.storage.sql.exec("DELETE FROM questions");
     this.ctx.storage.sql.exec("DELETE FROM packs");
     this.ctx.storage.sql.exec("DELETE FROM posters");
+    this.ctx.storage.sql.exec("DELETE FROM pack_ready");
     this.ctx.storage.sql.exec("DELETE FROM actor_photos");
     this.ctx.storage.sql.exec("DELETE FROM frames");
     this.ctx.storage.sql.exec("DELETE FROM movie_zoom");
@@ -357,6 +366,7 @@ export class Content extends DurableObject {
         if (fields.has("cast_json")) {
           try { out.cast = JSON.parse(o.cast_json || "[]"); } catch { out.cast = []; }
         }
+        if (fields.has("cast_source")) out.cast_source = o.cast_source || "";
       }
     const zoomOv = Object.fromEntries(
       [...this.ctx.storage.sql.exec("SELECT movie_id, frame_id, deleted, updated_at FROM movie_zoom")].map(r => [r.movie_id, r])
@@ -388,7 +398,7 @@ export class Content extends DurableObject {
       const po = postersOv[m.id];
       if (po) {
         if (po.deleted) out.poster = false;
-        else if (po.bytes > 0) out.poster = true;
+        else if (po.bytes > 0) { out.poster = true; out.poster_source = po.source || ""; out.poster_updated = po.updated_at || 0; }
       }
       const zo = zoomOv[m.id];
       if (zo) {
@@ -426,7 +436,10 @@ export class Content extends DurableObject {
       return q;
     }).filter(Boolean).concat(qAdded);
 
-    let modesOff = packOv ? (packOv.modes_off || "") : (data.pack.modes_off || "");
+    // tryby wyłączone lokalnie: pack-N.json nie ma modes_off, ale avail ma reason "disabled"
+    const baseOff = data.pack.modes_off || Object.entries(data.avail || {})
+      .filter(([, v]) => v && v.reason === "disabled").map(([k]) => k).join(",");
+    let modesOff = packOv ? (packOv.modes_off || "") : baseOff;
     const pack = { ...data.pack, questions, modes_off: modesOff };
     const off = new Set(String(modesOff || "").split(",").filter(Boolean));
     const framed = movies.filter(m => (m.frames || []).length).length;
@@ -452,7 +465,22 @@ export class Content extends DurableObject {
       const ok = have >= needN && !off.has(k);
       avail[k] = { ok, have, need: needN, reason: ok ? null : (off.has(k) ? "disabled" : what) };
     }
+    if (packId > 0) this.cacheReady(packId, MODES.filter(k => avail[k].have >= avail[k].need).join(","), baseOff);
     return { pack, movies, avail, modes_off: modesOff };
+  }
+
+  cacheReady(packId, ready, baseOff) {
+    const cur = [...this.ctx.storage.sql.exec("SELECT ready, base_off FROM pack_ready WHERE pack_id=?", +packId)][0];
+    if (cur && cur.ready === ready && cur.base_off === baseOff) return;
+    this.ctx.storage.sql.exec(
+      `INSERT INTO pack_ready(pack_id, ready, base_off, updated_at) VALUES (?,?,?,?)
+       ON CONFLICT(pack_id) DO UPDATE SET ready=excluded.ready, base_off=excluded.base_off, updated_at=excluded.updated_at`,
+      +packId, ready, baseOff, this.now());
+  }
+
+  getReady(packId) {
+    const row = [...this.ctx.storage.sql.exec("SELECT ready, base_off FROM pack_ready WHERE pack_id=?", +packId)][0];
+    return row ? { ready: row.ready, base_off: row.base_off } : null;
   }
 
   setActorPhoto(id, imageBytes, meta = {}) {
@@ -571,7 +599,7 @@ export class Content extends DurableObject {
       if (op === "stats") return Response.json(this.stats());
       if (op === "clear") return Response.json(this.clear());
       if (op === "mergePack") return Response.json(this.mergePack(d.data));
-      if (op === "getModesOff") return Response.json({ modes_off: this.getModesOff(d.pack_id) });
+      if (op === "getModesOff") return Response.json({ modes_off: this.getModesOff(d.pack_id), ready: this.getReady(d.pack_id) });
       if (op === "upsertMovie") return Response.json(this.upsertMovie(d.movie_id, d.patch || {}));
       if (op === "addQuote") return Response.json(this.addQuote(d.movie_id, d.text, d.lang));
       if (op === "editQuote") return Response.json(this.editQuoteFull(d.id, d.movie_id, d.text, d.lang));

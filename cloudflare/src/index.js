@@ -2,7 +2,7 @@
 // Kadry/plakaty/pakiety bazowe = Workers Static Assets. Edycje w chmurze = overlay w Content DO.
 import { errText } from "./i18n.js";
 import { frontendBody, frontendResponse } from "./frontend.js";
-import { handleAdmin, ApiError as AdminApiError, loadMergedPack, contentOp } from "./admin_api.js";
+import { handleAdmin, ApiError as AdminApiError, loadMergedPack, contentOp, isBasePack } from "./admin_api.js";
 import { contentStub } from "./content.js";
 import { tmdbPersonMovies, tmdbMovieCast, tmdbPersonDetail, localGraph, extLinks } from "./most.js";
 export { Room } from "./room.js";
@@ -90,7 +90,7 @@ async function adminApi(req, env, path) {
   if (!env.ADMIN_PASSWORD) throw new ApiError(503, "Panel admina w chmurze jest wyłączony (brak sekretu ADMIN_PASSWORD)");
   if (path === "/api/admin/login" && req.method === "POST") {
     const d = await body(req);
-    if (!await sameSecret(d.password || "", env.ADMIN_PASSWORD)) throw new ApiError(403, "Złe hasło");
+    if (!await sameSecret(d.password || "", env.ADMIN_PASSWORD)) throw new ApiError(401, "Złe hasło");
     const v = await hmac(env.ADMIN_PASSWORD, "kadr-admin-v1");
     const secure = new URL(req.url).protocol === "https:" ? "; Secure" : "";
     return json({ ok: true }, 200, { "Set-Cookie": `kadr_admin=${v}; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000${secure}` });
@@ -99,7 +99,7 @@ async function adminApi(req, env, path) {
     return json({ ok: true }, 200, { "Set-Cookie": "kadr_admin=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0" });
 
   if (path === "/api/admin/export" && req.method === "GET") {
-    if (!await isAdmin(req, env)) throw new ApiError(403, "Zaloguj się");
+    if (!await isAdmin(req, env)) throw new ApiError(401, "Zaloguj się");
     return exportDb(env, req);
   }
 
@@ -112,7 +112,7 @@ async function exportDb(env, req) {
   const packsRes = await asset(env, req, "/data/packs.json");
   const metaRes = await asset(env, req, "/data/meta.json");
   if (!packsRes.ok || !metaRes.ok) throw new ApiError(500, "Nie ma takiego adresu");
-  const packsList = await packsRes.json();
+  const packsList = (await packsRes.json()).filter(isBasePack);
   const meta = await metaRes.json();
   const overlay = await contentOp(env, { op: "dump" });
   const packs = [];
@@ -168,10 +168,14 @@ async function gameApi(req, env, path, url) {
     // apply modes_off from overlay so lobby hides disabled modes
     const out = [];
     for (const p of packsList) {
-      const offCsv = (await contentOp(env, { op: "getModesOff", pack_id: p.id })).modes_off;
-      if (offCsv == null) { out.push(p); continue; }
-      const off = new Set(String(offCsv).split(",").filter(Boolean));
-      out.push({ ...p, modes: (p.modes || []).filter(k => !off.has(k)) });
+      if (!isBasePack(p)) { out.push(p); continue; }
+      const ov = await contentOp(env, { op: "getModesOff", pack_id: p.id });
+      const offCsv = ov.modes_off, ready = ov.ready;
+      if (offCsv == null && !ready) { out.push(p); continue; }
+      const off = new Set(String(offCsv != null ? offCsv : (ready ? ready.base_off : "")).split(",").filter(Boolean));
+      // ready = tryby z danymi po edycjach w chmurze (np. pobrane plakaty), inaczej lista z builda
+      const base = ready ? String(ready.ready).split(",").filter(Boolean) : (p.modes || []);
+      out.push({ ...p, modes: base.filter(k => !off.has(k)) });
     }
     if (!out.some(p => p.id === "custom" || p.custom)) {
       const thumbs = [];

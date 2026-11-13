@@ -192,3 +192,12 @@ input[type=color]{width:100%;height:44px;border:2px solid var(--ink);border-radi
 .fcard.zoom{box-shadow:0 0 0 3px var(--orange)}
 .fcard .role.zoom, .rb.zoom.on{background:var(--orange);color:#fff}
 .rb.zoom{font-size:13px}
+
+/* chmura: postęp pobierania film po filmie */
+.cloudlog{max-height:260px;overflow:auto;font-size:13px;line-height:1.4;display:flex;flex-direction:column;gap:3px}
+.cloudlog:empty{display:none}
+.cloudlog div{padding:4px 8px;border-radius:8px;background:var(--paper, #F8F3EA);overflow-wrap:anywhere}
+.cloudlog .ok{border-left:4px solid var(--ok, #2F8F55)}
+.cloudlog .err{border-left:4px solid var(--err, #C8392B)}
+.cloudlog .sum{font-weight:700}
+.cloudnote .row{gap:8px;flex-wrap:wrap}

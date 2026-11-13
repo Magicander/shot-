@@ -302,6 +302,11 @@ footer{padding:30px 0 50px;text-align:center;color:var(--muted);font-size:14px}
 .orderlist .ot{min-width:0;overflow-wrap:break-word;word-break:normal}
 .hostbar{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;width:100%}
 .hostbar .pill{flex:1;min-height:48px}
+.fr-host{display:flex;flex-direction:column;align-items:center;gap:6px;margin:14px 0 0;padding:12px 14px;border:2px dashed var(--line);border-radius:18px;text-align:center}
+.fr-host .fr-reroll{min-height:44px;padding:0 22px;border-color:var(--orange-d);color:var(--orange-d)}
+.fr-host .fr-reroll:hover{background:var(--orange);border-color:var(--orange);color:var(--bone)}
+.fr-host .fr-reroll:disabled{opacity:.5;cursor:wait}
+.fr-host .muted{font-size:13px;line-height:1.35}
 .fr-open{display:block;text-align:center;margin:8px 0 0;font-weight:700;color:var(--orange-d);text-decoration:underline;text-underline-offset:3px}
 .fr-bust.photo{padding:0;overflow:hidden;background:var(--ink);display:flex;flex-direction:column;align-items:center;width:140px;height:auto;border-radius:22px;box-shadow:var(--shadow);transform:rotate(-4deg)}
 .fr-bust.photo.goal{transform:rotate(5deg);background:var(--orange)}

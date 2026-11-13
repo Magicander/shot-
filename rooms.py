@@ -10,6 +10,7 @@ import db
 
 STAGE_SECONDS = 15          # Kadry: trudny -> średni -> łatwy, co 15 s
 REVEAL_SECONDS = 9
+MANUAL_REVEAL = ("top", "kolejnosc")   # wyniki tych trybów zawsze czekają na gospodarza
 STAGE_POINTS = [1000, 600, 300]
 FIRST_BONUS = 100
 MAX_PLAYERS = 16
@@ -613,6 +614,16 @@ class Room:
         d = self.task.get("dur") if self.task else None
         return d is not None and d > 0
 
+    def reveal_manual(self):
+        """Czy ekran wyników czeka na gospodarza (bez automatycznego przejścia).
+        Topka i Ułóż po kolei zawsze: dwie kolumny wyników trzeba spokojnie przeczytać.
+        Pozostałe tryby: gdy runda była bez limitu czasu (Filmrun i licytacja mają własny rytm)."""
+        if not self.task:
+            return False
+        if self.mode in MANUAL_REVEAL:
+            return True
+        return self.task.get("dur") is None and self.mode not in ("most", "licytacja")
+
     def mult(self):
         return self.cfg["final_x"] if self.plan and self.round == len(self.plan) - 1 else 1
 
@@ -790,8 +801,7 @@ class Room:
             elif self.has_timer() and (el >= self.duration() or (act and all(p["ans"] is not None or p["got"] for p in act))):
                 self.end_round()
         elif self.phase == "reveal":
-            auto = not (self.task and self.task.get("dur") is None and self.mode not in ("most", "licytacja"))
-            if auto and now - self.t0 >= REVEAL_SECONDS + (6 if self.mode in ("kolejnosc", "licytacja", "top", "most") else 0):
+            if not self.reveal_manual() and now - self.t0 >= REVEAL_SECONDS + (6 if self.mode in ("kolejnosc", "licytacja", "top", "most") else 0):
                 self.next()
 
     # --- licytacja po kolei
@@ -1009,6 +1019,23 @@ class Room:
         self.version += 1
         self.end_round()
         return {"ok": True, "winner": True}
+
+    def most_reroll(self, p, lang="pl"):
+        """Gospodarz losuje nową parę aktorów w trwającej rundzie Filmrun (inną niż obecna)."""
+        t = self.task
+        if not p or p["id"] != self.host:
+            raise PermissionError("host")
+        if self.phase != "round" or not t or t.get("mode") != "most" or t.get("winner"):
+            return {"ok": False}
+        import filmrun_pool
+        skip = [x.get("imdb_id") or x.get("id") for x in (t.get("start") or {}, t.get("goal") or {})]
+        pair = filmrun_pool.pick_pair(lang=lang, exclude=[x for x in skip if x])
+        t.update(start=pair["start"], goal=pair["goal"], started={}, stopped={}, winner=None,
+                 rerolls=int(t.get("rerolls") or 0) + 1)
+        self.t0 = time.time()
+        self.event("reroll", p["name"])
+        self.version += 1
+        return {"ok": True, "start": pair["start"], "goal": pair["goal"]}
 
     def most_answer(self, p, d):
         if d.get("start") or d.get("go"):
@@ -1248,6 +1275,8 @@ class Room:
                 started = bool(me and me["id"] in (t.get("started") or {}))
                 out.update(start=t["start"], goal=t["goal"],
                            started=started,
+                           can_reroll=bool(me and me["id"] == self.host and not t.get("winner")),
+                           rerolls=int(t.get("rerolls") or 0),
                            can_start=bool(me and not started and not t.get("winner")),
                            can_stop=bool(me and started and not t.get("winner")),
                            winner=t.get("winner"),
@@ -1324,7 +1353,7 @@ class Room:
             return out
         # reveal
         out["left"] = round(REVEAL_SECONDS - el, 1)
-        out["untimed"] = bool(t and t.get("dur") is None and mode not in ("most", "licytacja"))
+        out["untimed"] = self.reveal_manual()
         ans = {"mode": mode}
         if "movie" in t:
             m = t["movie"]

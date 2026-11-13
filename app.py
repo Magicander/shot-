@@ -394,6 +394,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json(r.state(p, self.lang))
             if method == "POST" and action == "guess":
                 return self.json(r.answer(p, d, self.lang))
+            if method == "POST" and action == "reroll":
+                if not is_host:
+                    raise ApiError(403, "Tylko gospodarz może to zrobić")
+                try:
+                    r.most_reroll(p, self.lang)
+                except LookupError:
+                    raise ApiError(400, "Nie udało się dobrać pary aktorów")
+                return self.json(r.state(p, self.lang))
             if method == "POST" and action in ("start", "next", "again", "kick", "setup", "advance"):
                 if not is_host:
                     raise ApiError(403, "Tylko gospodarz może to zrobić")

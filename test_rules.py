@@ -458,6 +458,69 @@ check([m["id"] for m in mine["guess"]] == guess, "lewa: układ gracza")
 check([m["id"] for m in mine["truth"]] == truth, "prawa: poprawna topka")
 check(mine["marks"] == rooms.place_marks(guess, truth), "top marks ok/bad")
 
+print("wyniki Top i Ułóż po kolei czekają na gospodarza")
+for cfg in ({"time": -1}, {"time": 30}, {"time": -1, "top_own": 30, "top_guess": 30}):
+    r, (A, B) = room(2, dict(cfg, top_n=3), modes=["top"])
+    r.start()
+    ids = [m["id"] for m in r.task["items"]]
+    r.answer(A, {"order": ids}, "pl"); r.answer(B, {"order": list(reversed(ids))}, "pl")
+    adv(r, 1)
+    if r.task.get("sub") == "own":
+        r.advance(A)
+    for P in (A, B):
+        r.answer(P, {"order": ids}, "pl")
+    adv(r, 1)
+    if r.phase == "round":
+        r.next()
+    check(r.phase == "reveal" and r.state(A).get("untimed"), f"Top {cfg}: odsłona oznaczona jako ręczna")
+    adv(r, rooms.REVEAL_SECONDS + 60)
+    check(r.phase == "reveal" and r.round == 0, f"Top {cfg}: wyniki nie przeskakują same")
+for cfg in ({"time": -1}, {"time": 30}):
+    r, (A,) = room(1, cfg, modes=["kolejnosc"])
+    r.configure(rounds=2); r.start()
+    r.answer(A, {"order": [m["id"] for m in r.task["items"]]}, "pl")
+    adv(r, 1)
+    if r.phase == "round":
+        r.next()
+    adv(r, rooms.REVEAL_SECONDS + 60)
+    check(r.phase == "reveal" and r.round == 0, f"Ułóż po kolei {cfg}: wyniki czekają na gospodarza")
+    r.next()
+    check(r.phase == "round" and r.round == 1, "gospodarz puszcza kolejną rundę")
+r, (A,) = room(1, {"time": 20}, modes=["zoom"])
+r.start(); r.next()
+check(r.phase == "reveal" and not r.state(A).get("untimed"), "Zoom z czasem: odsłona dalej automatyczna")
+adv(r, rooms.REVEAL_SECONDS + 1)
+check(r.phase != "reveal" or r.round == 1, "Zoom z czasem: po odsłonie sam przechodzi dalej")
+
+print("Filmrun: Wylosuj jeszcze raz")
+import filmrun_pool as _fp
+r = rooms.Room("FR02", {"id": "most", "name": "Filmrun", "name_en": "Filmrun", "slug": "filmrun", "color": "#F26B1D", "questions": [], "modes_off": ""},
+               FX["movies"], 1, {"most": {"ok": True, "have": 1, "need": 1, "reason": None}}, kind="filmrun")
+A = r.add_player("A"); B = r.add_player("B")
+p0 = _fp.pick_pair(lang="pl")
+r.plan = [{"mode": "most", "start": p0["start"], "goal": p0["goal"], "started": {}, "stopped": {}, "winner": None, "dur": None, "step": None}]
+r.round = 0; r.begin_round()
+check(r.state(A)["can_reroll"] and not r.state(B)["can_reroll"], "przycisk losowania tylko u gospodarza")
+r.answer(B, {"start": True}, "pl")
+try:
+    r.most_reroll(B, "pl"); check(False, "nie-gospodarz nie może losować")
+except PermissionError:
+    check(True, "nie-gospodarz nie może losować (odrzucone)")
+check(r.task["start"]["id"] == p0["start"]["id"], "po odrzuconym losowaniu para bez zmian")
+old = {p0["start"]["id"], p0["goal"]["id"]}
+for i in range(15):
+    prev = {r.task["start"]["id"], r.task["goal"]["id"]}
+    out = r.most_reroll(A, "pl")
+    now_ids = {r.task["start"]["id"], r.task["goal"]["id"]}
+    if not (out["ok"] and not (now_ids & prev) and len(now_ids) == 2):
+        check(False, "losowanie daje dwie nowe osoby, różne od obecnej pary")
+check(True, "15 losowań: zawsze dwie nowe osoby, różne od poprzedniej pary")
+s = r.state(B)
+check(s["start"]["id"] == r.task["start"]["id"] and s["rerolls"] == 15, "wszyscy gracze widzą nową parę")
+check(not s["started_names"] and s["can_start"], "losowanie zeruje Start graczy")
+r.answer(A, {"start": True}, "pl"); r.answer(A, {"stop": True}, "pl")
+check(not r.most_reroll(A, "pl")["ok"], "po zwycięstwie nie da się losować")
+
 # składnia frontendu — zepsuty i18n.js wyłącza całą stronę
 import subprocess, pathlib
 for name in ("static/i18n.js", "static/game.js", "static/admin.js", "static/rt.js"):

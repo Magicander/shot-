@@ -1,6 +1,7 @@
 // Testy zasad portu (bez wranglera): node cloudflare/test/rules.mjs - te same scenariusze co test_rules.py
 import { readFileSync } from "node:fs";
-import { Game, newRoom, normSettings, JUDGE_GRACE, LIC_DONE_DELAY, LIC_BID_CAP, licTotal, topScore, topAssign, availability, mergePackData, MODES, remakeTags, placeMarks, timeOpt } from "../src/game.js";
+import { Game, newRoom, normSettings, JUDGE_GRACE, LIC_DONE_DELAY, LIC_BID_CAP, licTotal, topScore, topAssign, availability, mergePackData, MODES, remakeTags, placeMarks, timeOpt, REVEAL_SECONDS, GameError } from "../src/game.js";
+import { scrapeCtx, fetchOne, parseFilmwebCast, parseImdbPage, absFwPhoto, isPlaceholderUrl, chain as scrapeChain, fetchActorImage } from "../src/webscrape.js";
 import { mostScore, pathMovies, pickPairFromGraph, localGraph, pickFilmrunPair, poolPeople } from "../src/most.js";
 
 const FX = JSON.parse(readFileSync(new URL("./fixture.json", import.meta.url)));
@@ -394,6 +395,128 @@ check(mine.guess && mine.truth && mine.marks, "odsłona top: twój układ, popra
 check(eq(mine.guess.map(m => m.id), guess), "lewa: układ gracza");
 check(eq(mine.truth.map(m => m.id), truth), "prawa: poprawna topka");
 check(eq(mine.marks, placeMarks(guess, truth)), "top marks ok/bad");
+
+console.log("wyniki Top i Ułóż po kolei czekają na gospodarza");
+for (const cfg of [{ time: -1 }, { time: 30 }, { time: -1, top_own: 30, top_guess: 30 }]) {
+  [g, [A, B]] = room(2, { ...cfg, top_n: 3 }, ["top"]);
+  g.start();
+  const tids = g.r.task.items.map(m => m.id);
+  g.answer(A, { order: tids }, "pl"); g.answer(B, { order: tids.slice().reverse() }, "pl");
+  adv(g, 1);
+  if (g.r.task.sub === "own") g.advance(A);
+  for (const P of [A, B]) g.answer(P, { order: tids }, "pl");
+  adv(g, 1);
+  if (g.r.phase === "round") g.next();
+  check(g.r.phase === "reveal" && st(g, A).untimed && g.nextWake() === null, `Top ${JSON.stringify(cfg)}: odsłona ręczna, bez alarmu`);
+  adv(g, REVEAL_SECONDS + 60);
+  check(g.r.phase === "reveal" && g.r.round === 0, `Top ${JSON.stringify(cfg)}: wyniki nie przeskakują same`);
+}
+for (const cfg of [{ time: -1 }, { time: 30 }]) {
+  [g, [A]] = room(1, cfg, ["kolejnosc"]);
+  g.configure(null, 2, null); g.start();
+  g.answer(A, { order: g.r.task.items.map(m => m.id) }, "pl");
+  adv(g, 1);
+  if (g.r.phase === "round") g.next();
+  adv(g, REVEAL_SECONDS + 60);
+  check(g.r.phase === "reveal" && g.r.round === 0, `Ułóż po kolei ${JSON.stringify(cfg)}: wyniki czekają na gospodarza`);
+  g.next();
+  check(g.r.phase === "round" && g.r.round === 1, "gospodarz puszcza kolejną rundę");
+}
+[g, [A]] = room(1, { time: 20 }, ["zoom"]);
+g.start(); g.next();
+check(g.r.phase === "reveal" && !st(g, A).untimed && g.nextWake() !== null, "Zoom z czasem: odsłona dalej automatyczna");
+
+console.log("Filmrun: Wylosuj jeszcze raz");
+{
+  const r = newRoom("FR02", { pack: { id: "most", name: "Filmrun", name_en: "Filmrun", slug: "filmrun", color: "#F26B1D", questions: [], modes_off: "" }, avail: { most: { ok: true, have: 1, need: 1, reason: null } } }, 1, "filmrun");
+  const g2 = new Game(r, clone(FX.movies));
+  const A2 = g2.addPlayer("A"), B2 = g2.addPlayer("B");
+  const p0 = await pickFilmrunPair([], null, "pl");
+  r.plan = [{ mode: "most", start: p0.start, goal: p0.goal, started: {}, stopped: {}, winner: null, dur: null, step: null }];
+  r.round = 0; g2.beginRound();
+  check(g2.state(A2, "pl").can_reroll && !g2.state(B2, "pl").can_reroll, "przycisk losowania tylko u gospodarza");
+  g2.answer(B2, { start: true }, "pl");
+  const p1 = await pickFilmrunPair([], null, "pl", Math.random, [p0.start.imdb_id, p0.goal.imdb_id]);
+  let threw = false;
+  try { g2.mostReroll(B2, p1); } catch (e) { threw = e instanceof GameError && e.code === 403; }
+  check(threw && r.task.start.id === p0.start.id, "nie-gospodarz nie może losować (403), para bez zmian");
+  let fine = true;
+  for (let i = 0; i < 15; i++) {
+    const prev = [r.task.start.imdb_id, r.task.goal.imdb_id];
+    const np = await pickFilmrunPair([], null, "pl", Math.random, prev);
+    const out = g2.mostReroll(A2, np);
+    const ids = [r.task.start.imdb_id, r.task.goal.imdb_id];
+    if (!out.ok || ids[0] === ids[1] || ids.some(x => prev.includes(x))) fine = false;
+  }
+  check(fine, "15 losowań: zawsze dwie nowe osoby, różne od poprzedniej pary");
+  const sB = g2.state(B2, "pl");
+  check(sB.start.id === r.task.start.id && sB.rerolls === 15, "wszyscy gracze widzą nową parę");
+  check(!sB.started_names.length && sB.can_start, "losowanie zeruje Start graczy");
+  g2.answer(A2, { start: true }, "pl"); g2.answer(A2, { stop: true }, "pl");
+  check(!g2.mostReroll(A2, p1).ok, "po zwycięstwie nie da się losować");
+  const roomJs = readFileSync(new URL("../src/room.js", import.meta.url), "utf8");
+  check(/ACTIONS_HOST = new Set\([^)]*"reroll"/.test(roomJs), "DO: reroll jest akcją tylko dla gospodarza");
+}
+
+console.log("panel w chmurze: pobieranie plakatów i obsady (atrapa HTTP)");
+{
+  const JPG = new Uint8Array(2000); JPG.set([0xFF, 0xD8, 0xFF, 0xE0]);
+  const fwPage = `<div class="filmFullCastSection__item castRoleListElement"><a href="/person/Bruce+Willis-121"><img class="simplePoster__image" src="https://fwcdn.pl/ppo/01/21/121/449.1.jpg" alt="x"></a>
+    <a href="/person/Bruce+Willis-121" data-person-source>Bruce Willis</a><a href="/character/John+McClane-1">John McClane</a></div>
+    <div class="filmFullCastSection__item castRoleListElement"><a href="/person/Alan+Rickman-58">x</a><a href="/person/Alan+Rickman-58" data-person-source>Alan Rickman</a>
+    <img src="https://fwcdn.pl/front/assets/images/t.gif"><a href="/character/Hans-2">Hans Gruber</a></div>`;
+  const cast = parseFilmwebCast(fwPage, 6);
+  check(cast.length === 2 && cast[0].name === "Bruce Willis" && cast[0].character === "John McClane" && cast[0].source_id === "121", "Filmweb: imię, rola i id osoby");
+  check(cast[0].photo_url && cast[0].photo_url.includes("/ppo/") && !cast[1].photo_url, "Filmweb: zdjęcie z /ppo/, placeholder t.gif pominięty");
+  check(isPlaceholderUrl("https://fwcdn.pl/front/assets/images/t.gif") && absFwPhoto("/ppo/1/2.$.jpg") === "https://fwcdn.pl/ppo/1/2.2.jpg", "Filmweb: placeholdery i adresy zdjęć");
+  const ld = parseImdbPage('<script type="application/ld+json">{"image":"https://m.media-amazon.com/images/M/x._V1_.jpg","actor":[{"name":"Keanu Reeves","url":"/name/nm0000206/"}]}</script>');
+  check(ld.ld.image.includes("media-amazon") && ld.ld.actor[0].name === "Keanu Reeves", "IMDb: JSON-LD ze strony tytułu");
+  check(eq(scrapeChain("poster", "auto", false), ["imdb", "filmweb"]) && eq(scrapeChain("cast", "auto", true), ["filmweb", "imdb", "tmdb"]), "kolejność źródeł jak lokalnie (TMDB tylko z kluczem)");
+  const calls = [];
+  const fake = async (url) => {
+    calls.push(url);
+    const ok = (body, type = "application/json") => new Response(typeof body === "string" ? body : body, { status: 200, headers: { "Content-Type": type } });
+    if (url.includes("v3.sg.media-imdb.com")) return ok(JSON.stringify({ d: [{ id: "tt0095016", l: "Die Hard", y: 1988, qid: "movie", s: "Bruce Willis, Alan Rickman", i: { imageUrl: "https://m.media-amazon.com/images/M/die._V1_.jpg" } }] }));
+    if (url.includes("www.imdb.com/title/")) return new Response("<html>awsWafChallenge</html>", { status: 202 });
+    if (url.includes("media-amazon.com") || url.includes("fwcdn.pl")) return ok(JPG, "image/jpeg");
+    if (url.includes("/api/v1/live/search")) return ok(JSON.stringify({ searchHits: [{ type: "film", id: 1234 }] }));
+    if (url.includes("/api/v1/title/1234/info")) return ok(JSON.stringify({ title: "Szklana pułapka", originalTitle: "Die Hard", year: 1988, posterPath: "/12/34/1234/7.$.jpg" }));
+    if (url.includes("/cast/actors")) return ok(fwPage, "text/html");
+    return new Response("nope", { status: 404 });
+  };
+  const movie = { title: "Die Hard", year: 1988, pl_title: "Szklana pułapka" };
+  let ctx = scrapeCtx({}, fake);
+  const [img, meta, used] = await fetchOne(ctx, "poster", "auto", movie);
+  check(used === "imdb" && img.byteLength === 2000 && meta.url.endsWith("._V1_SX600.jpg") && meta.note.includes("WAF"), "plakat: IMDb z obrazkiem z podpowiedzi, gdy strona tytułu ma WAF");
+  ctx = scrapeCtx({}, fake);
+  const [img2, meta2, used2] = await fetchOne(ctx, "poster", "filmweb", movie);
+  check(used2 === "filmweb" && meta2.url === "https://fwcdn.pl/fpo/12/34/1234/7.3.jpg" && img2.byteLength === 2000, "plakat: Filmweb, rozmiar $ -> 3");
+  ctx = scrapeCtx({}, fake);
+  const [c3, , used3] = await fetchOne(ctx, "cast", "auto", movie, 6);
+  check(used3 === "filmweb" && c3.length === 2 && c3[0].name === "Bruce Willis", "obsada: auto zaczyna od Filmwebu");
+  ctx = scrapeCtx({}, fake);
+  let err = null;
+  try { await fetchOne(ctx, "cast", "imdb", movie, 6); } catch (e) { err = e; }
+  check(err && /blocked/.test(err.message) && /2 stars/.test(err.message), "obsada IMDb: WAF + tylko 2 gwiazdy = czytelny błąd");
+  ctx = scrapeCtx({}, fake); ctx.budget = 1;
+  err = null;
+  try { await fetchOne(ctx, "poster", "imdb", movie); } catch (e) { err = e; }
+  check(err && /limit/.test(err.message), "limit zapytań na kliknięcie (plan Free) zatrzymuje pobieranie");
+  ctx = scrapeCtx({}, fake);
+  const why = [];
+  check(await fetchActorImage(ctx, "https://fwcdn.pl/front/assets/images/t.gif", why) === null && why[0] === "placeholder", "zdjęcie: placeholder odrzucony bez pobierania");
+}
+{
+  const adminJs = readFileSync(new URL("../src/admin_api.js", import.meta.url), "utf8");
+  const indexJs = readFileSync(new URL("../src/index.js", import.meta.url), "utf8");
+  check(!/ApiError\(403, "Zaloguj się"\)/.test(adminJs + indexJs) && /ApiError\(401, "Zaloguj się"\)/.test(adminJs), "brak sesji = 401 (panel pokazuje logowanie zamiast pustej strony)");
+  check(!adminJs.includes("Pobieranie plakatów z IMDb/Filmweb/TMDB działa tylko lokalnie") && adminJs.includes("webPoster") && adminJs.includes("webCast"), "chmura: POST plakat/obsada pobiera, nie 405");
+  const { isBasePack } = await import("../src/admin_api.js").catch(() => ({}));
+  if (isBasePack) check(isBasePack({ id: 3 }) && !isBasePack({ id: "custom", custom: true }), "panel pomija wpis custom z packs.json");
+  else check(/filter\(isBasePack\)/.test(adminJs), "panel pomija wpis custom z packs.json");
+  const ui = readFileSync(new URL("../../static/admin.js", import.meta.url), "utf8");
+  check(ui.includes("bindWebCloud") && ui.includes("CLOUD_FRAMES_PL") && /status === 403 && d\.key === "Zaloguj się"/.test(ui), "panel: pobieranie film po filmie, komunikat o kadrach, logowanie przy 401/403");
+}
 
 }
 console.log(`\nOK: ${OK} sprawdzeń`);

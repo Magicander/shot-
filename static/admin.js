@@ -2,6 +2,14 @@
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 Object.assign(EN, {
+  "Auto: najpierw IMDb, potem Filmweb, potem TMDB (jeśli Worker ma klucz). W chmurze pobieram film po filmie, zapis trafia do nakładki w chmurze.": "Auto: IMDb first, then Filmweb, then TMDB (if the Worker has a key). In the cloud I fetch movie by movie and save to the cloud overlay.",
+  "Auto: najpierw Filmweb, potem IMDb, potem TMDB (jeśli Worker ma klucz). Zapisuję aktorów w kolejności z napisów, razem ze zdjęciami.": "Auto: Filmweb first, then IMDb, then TMDB (if the Worker has a key). I save actors in billing order, with photos.",
+  "zatrzymaj": "stop",
+  "Kadry z trailerów pobiera tylko lokalny panel (python app.py).": "Trailer frames are fetched only by the local panel (python app.py).",
+  "Nic do pobrania": "Nothing to fetch",
+  "zdjęcia {a}, brak {b}": "photos {a}, missing {b}",
+  "OK, {x}": "OK, {x}",
+  "Koniec: {a} pobranych, {b} błędów": "Done: {a} fetched, {b} errors",
   "Ustawienia": "Settings",
   "polskie tytuły": "Polish titles",
   "PL: {x}": "PL: {x}",
@@ -113,8 +121,10 @@ Object.assign(EN, {
 const ROLES = [["hard",T("trudny")],["medium",T("średni")],["easy",T("łatwy")]];
 const KEYS_PL = "Klawisze: <span class=\"kbd\">&larr;</span> <span class=\"kbd\">&rarr;</span> filmy, <span class=\"kbd\">N</span> nast\u0119pny bez wyboru, najed\u017a na kadr i <span class=\"kbd\">1</span> trudny <span class=\"kbd\">2</span> \u015bredni <span class=\"kbd\">3</span> \u0142atwy <span class=\"kbd\">4</span> zoom.";
 const CLOUD = !!window.KADR_CLOUD;
-const CLOUD_NOTE_PL = "Chmura: edytujesz cytaty, licytację, polskie tytuły, tryby, plakaty (link/plik do 1,5 MB) i obsadę. Scraper, nowe pakiety i kadry z YouTube działają tylko lokalnie (python app.py), a potem deploy_cloudflare.py.";
-const CLOUD_NOTE_EN = "Cloud: edit quotes, auction questions, Polish titles, mode toggles, posters (URL/file up to 1.5 MB) and cast. Scraper, new packs and YouTube frames stay local (python app.py), then deploy_cloudflare.py.";
+const CLOUD_NOTE_PL = "Chmura: pobierasz plakaty i obsadę ze zdjęciami (IMDb, Filmweb, TMDB), edytujesz cytaty, licytację, polskie tytuły, tryby, plakaty (link/plik do 1,5 MB) i obsadę. Kadry z trailerów (YouTube), nowe pakiety i nowe filmy działają tylko lokalnie (python app.py), a potem deploy_cloudflare.py.";
+const CLOUD_NOTE_EN = "Cloud: fetch posters and cast with photos (IMDb, Filmweb, TMDB), edit quotes, auction questions, Polish titles, mode toggles, posters (URL/file up to 1.5 MB) and cast. Trailer frames (YouTube), new packs and new movies stay local (python app.py), then deploy_cloudflare.py.";
+const CLOUD_FRAMES_PL = "Kadry z trailerów pobiera tylko lokalny panel (python app.py): potrzebuje yt-dlp i OpenCV, których nie da się uruchomić w Workerze Cloudflare. Pobierz je lokalnie i wgraj przez deploy_cloudflare.py. Plakaty i obsadę pobierzesz tutaj, w edytorach plakatów i aktorów.";
+const CLOUD_FRAMES_EN = "Trailer frames are fetched only by the local panel (python app.py): it needs yt-dlp and OpenCV, which cannot run in a Cloudflare Worker. Fetch them locally and upload with deploy_cloudflare.py. Posters and cast can be fetched here, in the poster and actor editors.";
 
 function errText(e) {
   if (!e) return "";
@@ -135,7 +145,8 @@ let packs = [], logTimer = null;
 async function api(url, method = "GET", body) {
   const r = await fetch(url, {method, headers: body ? {"Content-Type":"application/json", "X-Lang": LANG} : {"X-Lang": LANG}, body: body ? JSON.stringify(body) : undefined});
   const d = await r.json().catch(() => ({}));
-  if (r.status === 401 && !url.endsWith("/login")) { showLogin(); throw new Error(T("Zaloguj się")); }
+  // 401 = brak sesji (lokalnie i w chmurze); starszy Worker odpowiadał 403 "Zaloguj się"
+  if ((r.status === 401 || (r.status === 403 && d.key === "Zaloguj się")) && !url.endsWith("/login")) { showLogin(); throw new Error(T("Zaloguj się")); }
   if (!r.ok) { const err = new Error(d.error || T("Błąd")); err.data = d; throw err; }
   return d;
 }
@@ -152,21 +163,15 @@ const closeModal = () => $("#modal").classList.add("hidden");
 function showLogin() { $("#app").classList.add("hidden"); $("#login").classList.remove("hidden"); $("#pw").focus(); }
 $("#lf").onsubmit = async e => {
   e.preventDefault(); $("#lerr").textContent = "";
-  try { await api("/api/admin/login", "POST", {password: $("#pw").value}); $("#pw").value = ""; function bulkReport(r) {
-  const head = r.skipped ? T("Dodano {a}, pominięto {b} duplikatów", {a: r.added, b: r.skipped}) : T("Dodano {a}", {a: r.added});
-  if (!r.skipped) return toast(head);
-  setTimeout(() => modal(`<h2>${T("Wynik dodawania")}</h2><p style="margin:0 0 8px"><b>${esc(head)}</b></p>
-    <p class="muted" style="margin:0 0 6px">${T("Pominięte duplikaty:")}</p>
-    <ul class="duplist">${r.skipped_items.map(x => `<li><b>${esc(x.title)}${x.year ? ` (${x.year})` : ""}</b> <span class="muted">${T("już jest: {x}", {x: esc(x.existing)})}</span></li>`).join("")}</ul>
-    <div class="actions"><button class="pill orange">${T("ok")}</button></div>`, async () => {}), 0);
-}
-boot(); }
+  try { await api("/api/admin/login", "POST", {password: $("#pw").value}); $("#pw").value = ""; boot(); }
   catch (err) { $("#lerr").textContent = err.message; $("#pw").select(); }
 };
 $("#logout").onclick = async () => { await api("/api/admin/logout", "POST"); showLogin(); };
 
 async function boot() {
-  const me = await api("/api/admin/me");
+  let me;
+  try { me = await api("/api/admin/me"); }
+  catch (e) { return showLogin(); }
   if (!(me.admin || (CLOUD && me.ok))) return showLogin();
   $("#login").classList.add("hidden"); $("#app").classList.remove("hidden");
   route();
@@ -310,7 +315,7 @@ async function packPage(id) {
   const p = packs.find(x => x.id === id); if (!p) return (location.hash = "#/");
   const movies = await api(`/api/admin/packs/${id}/movies`);
   $("#main").innerHTML = `<div class="ph1"><div class="pk-head"><span class="pk-swatch" style="background:${p.color}"></span><div><h1>${esc(packName(p))}</h1><div class="muted">${esc(packDesc(p))}</div></div></div>
-      <div class="row"><button class="pill light" id="editp">${T("edytuj")}</button><button class="pill ghost" id="delp">${T("usuń pakiet")}</button></div></div>
+      <div class="row"><button class="pill light" id="editp">${T("edytuj")}</button>${CLOUD ? "" : `<button class="pill ghost" id="delp">${T("usuń pakiet")}</button>`}</div></div>
     <div class="stats">
       <div class="stat"><b>${p.total}</b><span>${T("filmów na liście")}</span></div>
       <div class="stat hl"><b>${p.ok || 0}</b><span>${T("pobrane (w grze)")}</span></div>
@@ -320,8 +325,8 @@ async function packPage(id) {
     <div class="grid2">
       <div class="panel">
         <div class="row" style="justify-content:space-between;margin-bottom:10px"><h2 style="margin:0">${T("filmy")}</h2>
-          <div class="row"><button class="pill small orange" id="add">${T("dodaj film")}</button><button class="pill small light" id="bulk">${T("wklej listę")}</button><a class="pill small light" href="#/pl/${id}">${T("polskie tytuły")}</a><a class="pill small orange" href="#/modes/${id}">${T("edytor trybów")}</a>
-          ${movies.some(m => m.status === "ok") ? `<a class="pill small" href="#/pick/${id}/${(movies.find(m => m.status === "ok" && !(m.easy && m.medium && m.hard)) || movies.find(m => m.status === "ok")).id}">${T("wybieraj kadry")}</a>` : ""}</div></div>
+          <div class="row">${CLOUD ? "" : `<button class="pill small orange" id="add">${T("dodaj film")}</button><button class="pill small light" id="bulk">${T("wklej listę")}</button>`}<a class="pill small light" href="#/pl/${id}">${T("polskie tytuły")}</a><a class="pill small orange" href="#/modes/${id}">${T("edytor trybów")}</a>
+          ${!CLOUD && movies.some(m => m.status === "ok") ? `<a class="pill small" href="#/pick/${id}/${(movies.find(m => m.status === "ok" && !(m.easy && m.medium && m.hard)) || movies.find(m => m.status === "ok")).id}">${T("wybieraj kadry")}</a>` : ""}</div></div>
         <div style="overflow-x:auto"><table class="ptable"><thead><tr><th><input type="checkbox" id="all" aria-label="${T("zaznacz wszystkie")}"></th><th>${T("Film")}</th><th>${T("Status")}</th><th class="hide-m">${T("Kadry")}</th><th></th></tr></thead><tbody>
         ${movies.map(m => `<tr data-id="${m.id}"><td><input type="checkbox" class="sel" value="${m.id}" aria-label="${T("zaznacz")}"></td>
           <td><div class="t">${esc(m.title)} <span class="muted">(${m.year || "?"})</span></div>
@@ -333,29 +338,32 @@ async function packPage(id) {
           <td><span class="badge ${m.status}">${{ok:T("gotowe"), error:T("błąd"), pending:T("czeka")}[m.status] || m.status}</span></td>
           <td class="hide-m"><span class="picks">${ROLES.map(([r]) => `<i class="${r} ${m[r] ? "on" : ""}" title="${r}"></i>`).join("")}</span> <span class="sub">${m.nframes}</span></td>
           <td><div class="acts">
-            ${m.status === "ok" ? `<a class="ibtn" title="${T("wybierz kadry")}" href="#/pick/${id}/${m.id}">${ICON.pick}</a>` : ""}
-            <button class="ibtn" data-a="run" title="${T("pobierz kadry (od nowa)")}">${ICON.run}</button>
+            ${m.status === "ok" && !CLOUD ? `<a class="ibtn" title="${T("wybierz kadry")}" href="#/pick/${id}/${m.id}">${ICON.pick}</a>` : ""}
+            ${CLOUD ? "" : `<button class="ibtn" data-a="run" title="${T("pobierz kadry (od nowa)")}">${ICON.run}</button>`}
             <button class="ibtn" data-a="edit" title="${T("edytuj")}">${ICON.edit}</button>
-            <button class="ibtn danger" data-a="del" title="${T("usuń")}">${ICON.del}</button></div></td></tr>`).join("") || `<tr><td colspan="5" class="empty">${T("Brak filmów. Dodaj pierwszy albo wklej listę.")}</td></tr>`}
+            ${CLOUD ? "" : `<button class="ibtn danger" data-a="del" title="${T("usuń")}">${ICON.del}</button>`}</div></td></tr>`).join("") || `<tr><td colspan="5" class="empty">${T("Brak filmów. Dodaj pierwszy albo wklej listę.")}</td></tr>`}
         </tbody></table></div>
       </div>
       <div style="display:flex;flex-direction:column;gap:20px">
         <div class="panel" id="modespanel"><h2>${T("tryby gry")}</h2><div class="muted">${T("Wczytuję...")}</div></div>
-        ${CLOUD ? `<div class="panel"><h2>${T("scraper")}</h2><p class="muted" style="font-size:14px;margin:0">${document.documentElement.lang === "en" ? CLOUD_NOTE_EN : CLOUD_NOTE_PL}</p></div>` : `<div class="panel"><h2>${T("pobierz kadry")}</h2>${scrapeForm(false)}<p class="muted" style="font-size:14px;margin:10px 0 0" id="selinfo">${T("Zaznacz filmy w tabeli, żeby pobrać tylko je (od nowa).")}</p></div>
+        ${CLOUD ? `<div class="panel cloudnote"><h2>${T("pobierz kadry")}</h2><p class="muted" style="font-size:14px;margin:0 0 12px">${document.documentElement.lang === "en" ? CLOUD_FRAMES_EN : CLOUD_FRAMES_PL}</p>
+          <div class="row"><a class="pill small orange" href="#/posters/${id}">${T("pobierz plakaty")}</a><a class="pill small orange" href="#/cast/${id}">${T("pobierz obsadę")}</a></div></div>` : `<div class="panel"><h2>${T("pobierz kadry")}</h2>${scrapeForm(false)}<p class="muted" style="font-size:14px;margin:10px 0 0" id="selinfo">${T("Zaznacz filmy w tabeli, żeby pobrać tylko je (od nowa).")}</p></div>
         <div class="panel"><h2>${T("na żywo")}</h2><div id="scrapebox"></div></div>`}
       </div>
     </div>`;
   const selected = () => [...document.querySelectorAll(".sel:checked")].map(c => +c.value);
-  const updSel = () => { const n = selected().length; $("#selinfo").textContent = n ? T("Zaznaczone: {n}. Uruchom pobierze tylko je, od nowa.", {n}) : T("Zaznacz filmy w tabeli, żeby pobrać tylko je (od nowa)."); };
+  const updSel = () => { const n = selected().length; if (!$("#selinfo")) return; $("#selinfo").textContent = n ? T("Zaznaczone: {n}. Uruchom pobierze tylko je, od nowa.", {n}) : T("Zaznacz filmy w tabeli, żeby pobrać tylko je (od nowa)."); };
   document.querySelectorAll(".sel").forEach(c => c.onchange = updSel);
   $("#all").onchange = e => { document.querySelectorAll(".sel").forEach(c => c.checked = e.target.checked); updSel(); };
-  bindScrapeForm(id, selected); startLog();
-  $("#scrapebox").dataset.reload = "1";
+  if (!CLOUD) {           // w chmurze nie ma formularza kadrów ani logu scrapera
+    bindScrapeForm(id, selected); startLog();
+    $("#scrapebox").dataset.reload = "1";
+  }
   modesPanel(id);
   $("#editp").onclick = () => packForm(p);
-  $("#delp").onclick = async () => { if (confirm(T("Usunąć pakiet \"{name}\" razem z {n} filmami i kadrami?", {name: packName(p), n: p.total}))) { await api(`/api/admin/packs/${id}`, "DELETE"); location.hash = "#/"; } };
-  $("#add").onclick = () => movieModal(id, null);
-  $("#bulk").onclick = () => modal(`<h2>${T("wklej listę")}</h2><p class="muted" style="margin:0 0 10px">${T("Jeden film w linii, np. <b>Heat (1995)</b> albo <b>Heat, 1995</b>. Duplikaty pominę.")}</p>
+  if ($("#delp")) $("#delp").onclick = async () => { if (confirm(T("Usunąć pakiet \"{name}\" razem z {n} filmami i kadrami?", {name: packName(p), n: p.total}))) { await api(`/api/admin/packs/${id}`, "DELETE"); location.hash = "#/"; } };
+  if ($("#add")) $("#add").onclick = () => movieModal(id, null);
+  if ($("#bulk")) $("#bulk").onclick = () => modal(`<h2>${T("wklej listę")}</h2><p class="muted" style="margin:0 0 10px">${T("Jeden film w linii, np. <b>Heat (1995)</b> albo <b>Heat, 1995</b>. Duplikaty pominę.")}</p>
       <textarea class="input" name="text" required placeholder="Heat (1995)\nRonin (1998)"></textarea>
       <div class="actions"><button type="button" class="pill ghost" data-close>${T("anuluj")}</button><button class="pill orange">${T("dodaj")}</button></div>`,
     async fd => { const r = await api(`/api/admin/packs/${id}/movies`, "POST", {text: fd.get("text")}); await route(); bulkReport(r); });
@@ -598,8 +606,20 @@ function srcSelect(id, kind) {
 }
 function webPanel(id, kind) {
   if (CLOUD) {
-    const note = document.documentElement.lang === "en" ? CLOUD_NOTE_EN : CLOUD_NOTE_PL;
-    return `<div class="panel webpanel"><h2>${T("scraper")}</h2><p class="muted" style="font-size:14px;margin:0">${note}</p></div>`;
+    return `<div class="panel webpanel"><h2>${kind === "poster" ? T("pobierz plakaty") : T("pobierz obsadę")}</h2>
+    <p class="muted" style="font-size:14px;margin:0 0 10px">${kind === "poster"
+      ? T("Auto: najpierw IMDb, potem Filmweb, potem TMDB (jeśli Worker ma klucz). W chmurze pobieram film po filmie, zapis trafia do nakładki w chmurze.")
+      : T("Auto: najpierw Filmweb, potem IMDb, potem TMDB (jeśli Worker ma klucz). Zapisuję aktorów w kolejności z napisów, razem ze zdjęciami.")}</p>
+    <div class="form-grid">
+      <label class="field">${T("Źródło")}${srcSelect("wsrc", kind)}</label>
+      ${kind === "cast" ? `<label class="field">${T("Ilu aktorów")}<input class="input sm" type="number" id="wn" min="3" max="15" value="6"></label>` : "<span></span>"}
+      <label class="check full"><input type="checkbox" id="wredo">${T("pobierz od nowa także filmy, które już mają dane")}</label>
+      <div class="full row"><button class="pill orange" id="wgo">${T("pobierz dla pakietu")}</button>
+        ${kind === "cast" ? `<button class="pill light" id="wphotos">${T("dociągnij brakujące zdjęcia (imiona zostają)")}</button>` : ""}
+        <button class="pill ghost hidden" id="wstop">${T("zatrzymaj")}</button></div>
+    </div>
+    <p class="muted" style="font-size:13px;margin:10px 0 0">${T("Kadry z trailerów pobiera tylko lokalny panel (python app.py).")}</p>
+    <div id="cloudlog" class="cloudlog" style="margin-top:12px"></div></div>`;
   }
   return `<div class="panel webpanel"><h2>${kind === "poster" ? T("pobierz plakaty") : T("pobierz obsadę")}</h2>
     <p class="muted" style="font-size:14px;margin:0 0 10px">${kind === "poster"
@@ -614,6 +634,44 @@ function webPanel(id, kind) {
         ${kind === "cast" ? `<button class="pill light" id="wphotos">${T("dociągnij brakujące zdjęcia (imiona zostają)")}</button>` : ""}</div>
     </div>
     <div id="scrapebox" style="margin-top:14px"></div></div>`;
+}
+// chmura: bez kolejki w tle - panel woła endpoint pojedynczego filmu, jeden po drugim
+function bindWebCloud(id, kind, movies, reload) {
+  if (!$("#wgo")) return;
+  let stop = false;
+  const logBox = $("#cloudlog");
+  const line = (txt, cls = "") => { const d = document.createElement("div"); d.className = cls; d.textContent = txt; logBox.prepend(d); };
+  const has = m => kind === "poster" ? !!m.poster : parseCast(m).length >= 3;
+  const missingPhoto = m => parseCast(m).some(c => !c.photo_id);
+  const run = async photosOnly => {
+    const redo = $("#wredo").checked;
+    const list = movies.filter(m => photosOnly ? (parseCast(m).length && missingPhoto(m)) : (redo || !has(m)));
+    if (!list.length) return toast(T("Nic do pobrania"));
+    stop = false; logBox.innerHTML = "";
+    const btns = ["#wgo", "#wphotos"].map(x => $(x)).filter(Boolean);
+    btns.forEach(b => b.disabled = true); $("#wstop").classList.remove("hidden");
+    let ok = 0, bad = 0;
+    for (let i = 0; i < list.length && !stop; i++) {
+      const m = list[i];
+      const head = `${i + 1}/${list.length} ${m.title}${m.year ? " (" + m.year + ")" : ""}`;
+      try {
+        const body = kind === "poster" ? {source: $("#wsrc").value} : {source: $("#wsrc").value, n: +($("#wn")?.value || 6), ...(photosOnly ? {photos_only: true} : {})};
+        const r = await api(`/api/admin/movies/${m.id}/${kind}`, "POST", body);
+        ok++;
+        line(head + ": " + (photosOnly ? T("zdjęcia {a}, brak {b}", {a: r.photos?.ok || 0, b: r.photos?.miss || 0}) : T("OK, {x}", {x: T(SRC_NAMES[r.source] || r.source || "?")})), "ok");
+      } catch (e) {
+        bad++;
+        line(head + ": " + e.message + ((e.data && e.data.log && e.data.log.length) ? " | " + e.data.log.join(" ").trim() : ""), "err");
+      }
+    }
+    line(T("Koniec: {a} pobranych, {b} błędów", {a: ok, b: bad}), "sum");
+    btns.forEach(b => b.disabled = false); $("#wstop").classList.add("hidden");
+    toast(T("Koniec: {a} pobranych, {b} błędów", {a: ok, b: bad}));
+    if (ok) setTimeout(reload, 1500);
+  };
+  $("#wgo").onclick = () => run(false);
+  if ($("#wphotos")) $("#wphotos").onclick = () => run(true);
+  $("#wstop").onclick = () => { stop = true; toast(T("Zatrzymuję...")); };
 }
 function bindWeb(id, kind) {
   if (CLOUD || !$("#wgo")) return;
@@ -662,19 +720,19 @@ async function postersPage(id) {
   $("#main").innerHTML = edHead(p, T("plakaty"), `<span class="tag">${T("{a} z {b} ma plakat", {a: n, b: movies.length})}</span>`) + `
     <div class="ed-grid">${webPanel(id, "poster")}
       <div class="panel"><h2>${T("filmy")}</h2>
-        ${CLOUD ? "" : `<div class="row" style="margin-bottom:12px"><span class="muted" style="font-size:14px">${T("Źródło dla przycisku pobierz:")}</span>${srcSelect("psrc", "poster")}</div>`}
+        <div class="row" style="margin-bottom:12px"><span class="muted" style="font-size:14px">${T("Źródło dla przycisku pobierz:")}</span>${srcSelect("psrc", "poster")}</div>
         <div class="pgrid">${movies.map(m => { const [src, upd] = (m.poster_meta || "|").split("|");
           return `<div class="pcard" data-id="${m.id}">
             <div class="pimg">${m.poster ? `<img src="/poster/${m.id}.jpg?v=${Math.round(+upd || 0)}" alt="${esc(m.title)}" loading="lazy">` : `<span>${T("brak plakatu")}</span>`}</div>
             <div class="t">${esc(m.title)} <span class="muted">${m.year || ""}</span></div>
             ${m.pl_title ? `<div class="sub">${esc(m.pl_title)}</div>` : ""}
             <div class="sub">${m.poster ? T("źródło: {x}", {x: T(SRC_NAMES[src] || src || "?")}) : "&nbsp;"}</div>
-            <div class="pacts">${CLOUD ? "" : `<button class="pill small orange" data-a="fetch">${m.poster ? T("pobierz ponownie") : T("pobierz")}</button>`}
+            <div class="pacts"><button class="pill small orange" data-a="fetch">${m.poster ? T("pobierz ponownie") : T("pobierz")}</button>
               <button class="pill small light" data-a="url">${T("link")}</button>
               <label class="pill small light">${T("plik")}<input type="file" accept="image/jpeg,image/png,image/webp" hidden></label>
               ${m.poster ? `<button class="pill small ghost" data-a="del">${T("usuń")}</button>` : ""}</div></div>`; }).join("") || `<p class="empty">${T("Brak filmów.")}</p>`}</div>
       </div></div>`;
-  bindWeb(id, "poster");
+  if (CLOUD) bindWebCloud(id, "poster", movies, () => postersPage(id)); else bindWeb(id, "poster");
   document.querySelectorAll(".pcard").forEach(c => {
     const mid = +c.dataset.id, m = movies.find(x => x.id === mid);
     const busy = on => c.classList.toggle("busy", on);
@@ -709,17 +767,17 @@ async function castPage(id) {
     <div class="ed-grid">${webPanel(id, "cast")}
       <div class="panel"><h2>${T("filmy")}</h2>
         <p class="muted" style="font-size:14px;margin:0 0 10px">${T("Lista w kolejności odsłaniania w grze: pierwszy pojawia się na początku, ostatni (zwykle gwiazda) na końcu.")}</p>
-        ${CLOUD ? "" : `<div class="row" style="margin-bottom:12px"><span class="muted" style="font-size:14px">${T("Źródło dla przycisku pobierz:")}</span>${srcSelect("csrc", "cast")}</div>`}
+        <div class="row" style="margin-bottom:12px"><span class="muted" style="font-size:14px">${T("Źródło dla przycisku pobierz:")}</span>${srcSelect("csrc", "cast")}</div>
         <div class="clist">${movies.map(m => { const c = parseCast(m);
           return `<div class="ccard" data-id="${m.id}"><div class="row" style="justify-content:space-between;flex-wrap:nowrap;align-items:flex-start">
               <div><div class="t">${esc(m.title)} <span class="muted">${m.year || ""}</span></div>
               <div class="sub">${c.length ? T("{n} aktorów · {x}", {n: c.length, x: T(SRC_NAMES[m.cast_source] || m.cast_source || "?")}) : T("brak obsady")}</div></div>
-              <div class="row" style="gap:6px;flex-wrap:nowrap"><button class="pill small light" data-a="edit">${T("edytuj")}</button>${CLOUD ? "" : `<button class="pill small orange" data-a="fetch">${T("pobierz")}</button>`}${!CLOUD && c.length ? `<button class="pill small light" data-a="photos">${T("dociągnij zdjęcia")}</button>` : ""}</div></div>
+              <div class="row" style="gap:6px;flex-wrap:nowrap"><button class="pill small light" data-a="edit">${T("edytuj")}</button><button class="pill small orange" data-a="fetch">${T("pobierz")}</button>${c.length ? `<button class="pill small light" data-a="photos">${T("dociągnij zdjęcia")}</button>` : ""}</div></div>
             ${(() => { const miss = c.filter(a => !a.photo_id || a.photo_ok === false); const missN = miss.length;
               const note = missN ? `<p class="muted photostatus">${T("brak zdjęcia")}: ${missN}/${c.length}${miss.slice(0, 8).map(a => ` — ${esc(a.name)}${a.photo_reason ? " (" + esc(a.photo_reason) + ")" : ""}`).join("")}${miss.length > 8 ? "…" : ""}</p>` : (c.length ? `<p class="muted photostatus">${T("wszystkie zdjęcia zapisane")}</p>` : "");
               return note + (c.length ? `<ol class="castol">${c.map(a => `<li>${a.photo_id && a.photo_ok !== false ? `<img class="athumb" src="/actor/${a.photo_id}.jpg" alt="">` : `<span class="athumb empty" title="${esc(a.photo_reason || T("brak zdjęcia"))}"></span>`}<span><b>${esc(a.name)}</b>${a.character ? ` <span class="muted">${esc(a.character)}</span>` : ""}${!a.photo_id || a.photo_ok === false ? ` <span class="muted">${esc(a.photo_reason || T("brak zdjęcia"))}</span>` : ""}</span></li>`).join("")}</ol>` : ""); })()}</div>`; }).join("") || `<p class="empty">${T("Brak filmów.")}</p>`}</div>
       </div></div>`;
-  bindWeb(id, "cast");
+  if (CLOUD) bindWebCloud(id, "cast", movies, () => castPage(id)); else bindWeb(id, "cast");
   document.querySelectorAll(".ccard").forEach(c => {
     const mid = +c.dataset.id, m = movies.find(x => x.id === mid);
     const fetchBtn = c.querySelector("[data-a=fetch]");

@@ -2,6 +2,7 @@
 // All writes go to the Content Durable Object overlay. Reads merge ASSETS + overlay.
 import { contentStub, MAX_POSTER, MAX_TEXT_BODY } from "./content.js";
 import { normTitle } from "./game.js";
+import { scrapeCtx, fetchOne, fetchActorImage, tmdbPersonPhoto, SOURCES, DEFAULT_N } from "./webscrape.js";
 
 class ApiError extends Error {
   constructor(code, key) { super(key); this.code = code; this.key = key; }
@@ -30,6 +31,15 @@ async function contentOp(env, body) {
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new ApiError(r.status, data.error || "Błąd zapisu");
   return data;
+}
+
+// packs.json ma też wpis "custom" (zbiorczy pakiet dla lobby) - nie ma on pliku pack-custom.json,
+// więc panel admina pomija go wszędzie, gdzie czyta dane pakietów
+export function isBasePack(p) {
+  return !!p && !p.custom && p.id !== "custom" && /^\d+$/.test(String(p.id));
+}
+async function basePacks(env, req) {
+  return (await assetJson(env, req, "/data/packs.json")).filter(isBasePack);
 }
 
 async function loadMergedPack(env, req, packId) {
@@ -96,7 +106,9 @@ function modesOffList(csv) {
   return String(csv || "").split(",").map(s => s.trim()).filter(Boolean);
 }
 
-async function packModesOff(env, req, packId, packListEntry) {
+async function packModesOff(env, req, packId, packListEntry, merged = null) {
+  // mergePack zna prawdziwe wyłączenia (nakładka albo reason "disabled" z builda)
+  if (merged && merged.modes_off != null) return modesOffList(merged.modes_off);
   const ov = await contentOp(env, { op: "getModesOff", pack_id: packId });
   if (ov.modes_off != null) return modesOffList(ov.modes_off);
   // base: modes present in packs.json means enabled; missing = off? Local uses modes_off CSV.
@@ -234,7 +246,7 @@ function parsePlTitles(movies, text) {
 
 async function movieIndex(env, req) {
   // map movie_id -> {pack_id, ...} from all packs
-  const packs = await assetJson(env, req, "/data/packs.json");
+  const packs = await basePacks(env, req);
   const idx = {};
   for (const p of packs) {
     const data = await loadMergedPack(env, req, p.id);
@@ -243,11 +255,100 @@ async function movieIndex(env, req) {
   return { packs, idx };
 }
 
+// ---------------------------------------------------------------- pobieranie z IMDb / Filmwebu / TMDB
+async function webMovie(env, req, mid, d) {
+  const src = d.source || "auto";
+  if (!SOURCES.includes(src)) throw new ApiError(400, "Nieznane źródło");
+  const { idx } = await movieIndex(env, req);
+  const mv = idx[mid];
+  if (!mv) throw new ApiError(404, "Nie ma filmu");
+  return [mv, src];
+}
+
+async function webPoster(env, req, mid, d) {
+  const [mv, src] = await webMovie(env, req, mid, d);
+  const ctx = scrapeCtx(env), log = [];
+  let data, meta, used;
+  try { [data, meta, used] = await fetchOne(ctx, "poster", src, mv, DEFAULT_N, log); }
+  catch (e) { return [{ ok: false, error: e.message, log }, 502]; }
+  await contentOp(env, { op: "setPoster", movie_id: mid, image_b64: b64FromBytes(data), source: used, url: meta.url || "" });
+  return [{ ok: true, source: used, log, note: meta.note || "", requests: ctx.used }];
+}
+
+// zdjęcie do jednej osoby z obsady: najpierw URL ze źródła, potem TMDB po imieniu; zapis w nakładce
+async function attachPhoto(env, ctx, actor, source, log) {
+  const name = String(actor.name || "").trim();
+  const reasons = [];
+  let url = actor.photo_url || "", src = source, sid = actor.source_id || "";
+  let img = url ? await fetchActorImage(ctx, url, reasons) : null;
+  if (!url) reasons.push("brak fotki u źródła");
+  if (!img) {
+    const fb = await tmdbPersonPhoto(ctx, name);
+    if (fb) {
+      const why = [];
+      img = await fetchActorImage(ctx, fb.photo_url, why);
+      if (img) { url = fb.photo_url; src = fb.source; sid = fb.source_id; }
+      else reasons.push("TMDB: " + (why[why.length - 1] || "nie pobrano"));
+    } else if (!ctx.key) reasons.push("brak klucza TMDB (nie było zapasu)");
+  }
+  if (!img) { log.push(`    photo ${name || "?"}: ${reasons.join("; ") || "nie zapisano"}`); return null; }
+  const r = await contentOp(env, { op: "setActorPhoto", id: 0, image_b64: b64FromBytes(img),
+    meta: { name, source: src, source_id: sid, url, key: sid ? `${src}:${sid}` : `name:${normTitle(name)}` } });
+  return r.id || null;
+}
+
+async function webCast(env, req, mid, d) {
+  const [mv, src] = await webMovie(env, req, mid, d);
+  const n = Math.max(3, Math.min(15, parseInt(d.n, 10) || DEFAULT_N));
+  const ctx = scrapeCtx(env), log = [];
+  const had = new Map((mv.cast || []).filter(c => c && c.photo_id).map(c => [normTitle(c.name), +c.photo_id]));
+  if (d.photos_only) {
+    const rows = (mv.cast || []).map(c => (typeof c === "string" ? { name: c } : { ...c }));
+    if (!rows.length) return [{ ok: true, photos: { ok: 0, miss: 0, changed: false }, log }];
+    const lookup = new Map();
+    let used = src;
+    try {
+      const [data, , s] = await fetchOne(ctx, "cast", src, mv, Math.max(n, rows.length), log);
+      used = s;
+      for (const c of data) lookup.set(normTitle(c.name), c);
+    } catch (e) { log.push("    " + e.message); }
+    let ok = 0, miss = 0, changed = false;
+    for (const c of rows) {
+      if (c.photo_id) { ok++; continue; }
+      const hit = lookup.get(normTitle(c.name));
+      const pid = await attachPhoto(env, ctx, { ...(hit || {}), name: c.name }, hit ? used : "auto", log);
+      if (pid) { c.photo_id = pid; ok++; changed = true; } else miss++;
+    }
+    if (changed) await contentOp(env, { op: "upsertMovie", movie_id: mid,
+      patch: { cast_json: JSON.stringify(rows.map(storeCastRow)), cast_source: mv.cast_source || "manual" } });
+    return [{ ok: true, photos: { ok, miss, changed }, log, requests: ctx.used }];
+  }
+  let data, used;
+  try { [data, , used] = await fetchOne(ctx, "cast", src, mv, n, log); }
+  catch (e) { return [{ ok: false, error: e.message, log }, 502]; }
+  const rows = data.map((c, i) => ({ ...c, billing: i + 1 }));
+  for (const c of rows) {
+    const known = had.get(normTitle(c.name));
+    c.photo_id = known || await attachPhoto(env, ctx, c, used, log);
+  }
+  // kolejność odsłaniania: od najmniej znanego do gwiazdy (odwrotna do napisów), jak lokalnie
+  const stored = rows.map(storeCastRow).reverse();
+  await contentOp(env, { op: "upsertMovie", movie_id: mid, patch: { cast_json: JSON.stringify(stored), cast_source: used } });
+  return [{ ok: true, source: used, log, photos: rows.filter(c => c.photo_id).length, requests: ctx.used }];
+}
+
+function storeCastRow(c) {
+  const row = { name: String(c.name || "").slice(0, 80), character: String(c.character || "").slice(0, 80) };
+  if (c.billing) row.billing = +c.billing;
+  if (c.photo_id) row.photo_id = +c.photo_id;
+  return row;
+}
+
 export async function handleAdmin(req, env, path, { isAdmin, body, detectLang }) {
   await csrfCheck(req);
 
   // login/logout/me handled by caller before this for cookie set; we handle the rest
-  if (!await isAdmin(req, env)) throw new ApiError(403, "Zaloguj się");
+  if (!await isAdmin(req, env)) throw new ApiError(401, "Zaloguj się");
 
   // --- me / overlay / clear / export helpers
   if (path === "/api/admin/me") return json({ admin: true, cloud: true });
@@ -257,7 +358,7 @@ export async function handleAdmin(req, env, path, { isAdmin, body, detectLang })
 
   if (path === "/api/admin/overview" || path === "/api/admin/stats") {
     const meta = await assetJson(env, req, "/data/meta.json");
-    const packsList = await assetJson(env, req, "/data/packs.json");
+    const packsList = await basePacks(env, req);
     const ov = await contentOp(env, { op: "stats" });
     // rebuild pack stats with merge
     const packs = [];
@@ -270,7 +371,7 @@ export async function handleAdmin(req, env, path, { isAdmin, body, detectLang })
       const cast = movies.filter(m => (m.cast || []).length >= 3).length;
       const quotes = movies.reduce((s, m) => s + (m.quotes || []).length, 0);
       const avail = recomputeAvail(data.pack, movies);
-      const off = await packModesOff(env, req, p.id, p);
+      const off = await packModesOff(env, req, p.id, p, data);
       packs.push({
         id: p.id, name: p.name, name_en: p.name_en, color: p.color,
         movies: movies.length, framed, posters, cast, quotes,
@@ -286,13 +387,13 @@ export async function handleAdmin(req, env, path, { isAdmin, body, detectLang })
   }
 
   if (path === "/api/admin/packs" && req.method === "GET") {
-    const packsList = await assetJson(env, req, "/data/packs.json");
+    const packsList = await basePacks(env, req);
     const out = [];
     for (const p of packsList) {
       const data = await loadMergedPack(env, req, p.id);
       const movies = data.movies;
       const framed = movies.filter(m => m.frames && m.frames.length).length;
-      const off = await packModesOff(env, req, p.id, p);
+      const off = await packModesOff(env, req, p.id, p, data);
       out.push({
         id: p.id, slug: p.slug, name: p.name, name_en: p.name_en, description: p.description,
         description_en: p.description_en, color: p.color,
@@ -310,7 +411,7 @@ export async function handleAdmin(req, env, path, { isAdmin, body, detectLang })
   }
 
   if (path === "/api/admin/scrape" || path === "/api/admin/scrape/stop") {
-    throw new ApiError(405, "Scraper działa tylko lokalnie (python app.py). W chmurze edytujesz cytaty, pytania, tytuły, tryby, plakaty i obsadę.");
+    throw new ApiError(405, "Kadry z trailerów (YouTube) pobiera się tylko lokalnie (python app.py). W chmurze pobierzesz plakaty i obsadę ze zdjęciami.");
   }
 
   // /api/admin/packs/:id
@@ -318,11 +419,11 @@ export async function handleAdmin(req, env, path, { isAdmin, body, detectLang })
   if (m) {
     const pid = +m[1];
     if (req.method === "GET") {
-      const packsList = await assetJson(env, req, "/data/packs.json");
+      const packsList = await basePacks(env, req);
       const p = packsList.find(x => x.id === pid);
       if (!p) throw new ApiError(404, "Nie ma takiego pakietu");
       const data = await loadMergedPack(env, req, pid);
-      const off = await packModesOff(env, req, pid, p);
+      const off = await packModesOff(env, req, pid, p, data);
       return json({ ...p, modes_off: off, questions: (data.pack.questions || []).length, total: data.movies.length, ok: data.movies.filter(x => x.frames).length });
     }
     if (req.method === "PUT") {
@@ -344,7 +445,8 @@ export async function handleAdmin(req, env, path, { isAdmin, body, detectLang })
     const data = await loadMergedPack(env, req, pid);
     const movies = data.movies;
 
-    if (sub === "web") throw new ApiError(405, "Pobieranie z IMDb/Filmweb/TMDB działa tylko lokalnie. W chmurze wklej link do plakatu, wgraj plik (do 1,5 MB) albo edytuj obsadę ręcznie.");
+    // w chmurze nie ma kolejki w tle: panel pobiera film po filmie przez /api/admin/movies/:id/(poster|cast)
+    if (sub === "web") throw new ApiError(405, "W chmurze pakiet pobiera się film po filmie z panelu (przycisk pobierz dla pakietu).");
 
     if (sub === "movies" && req.method === "GET") {
       const out = movies.map(mv => {
@@ -353,9 +455,10 @@ export async function handleAdmin(req, env, path, { isAdmin, body, detectLang })
           id: mv.id, title: mv.title, year: mv.year, pl_title: mv.pl_title || "",
           aliases, cast_json: JSON.stringify(mv.cast || []), cast_source: mv.cast_source || "",
           nquotes: (mv.quotes || []).length, poster: !!mv.poster,
-          poster_meta: mv.poster ? `overlay|${Math.round(Date.now()/1000)}` : "|",
+          poster_meta: mv.poster ? `${mv.poster_source || "overlay"}|${Math.round(mv.poster_updated || Date.now() / 1000)}` : "|",
           zoom: mv.zoom_frame || null, medium: (mv.frames && mv.frames[1]) || null,
           easy: (mv.frames && mv.frames[2]) || null, hard: (mv.frames && mv.frames[0]) || null,
+          nframes: (mv.frames || []).length,
           status: mv.frames ? "ok" : "pending",
         };
       });
@@ -373,9 +476,9 @@ export async function handleAdmin(req, env, path, { isAdmin, body, detectLang })
     }
 
     if (sub === "modes" && req.method === "GET") {
-      const packsList = await assetJson(env, req, "/data/packs.json");
+      const packsList = await basePacks(env, req);
       const p = packsList.find(x => x.id === pid);
-      const off = await packModesOff(env, req, pid, p);
+      const off = await packModesOff(env, req, pid, p, data);
       const avail = recomputeAvail(data.pack, movies);
       return json({ modes: MODES, modes_off: off, avail, questions: (data.pack.questions || []).length });
     }
@@ -530,8 +633,7 @@ export async function handleAdmin(req, env, path, { isAdmin, body, detectLang })
       return json({ id: r.id });
     }
     if (what === "cast") {
-      if (req.method === "POST")
-        throw new ApiError(405, "Pobieranie obsady działa tylko lokalnie. Edytuj ręcznie.");
+      if (req.method === "POST") return json(...await webCast(env, req, mid, await body(req)));
       if (req.method === "PUT") {
         const d = await body(req);
         const cast = [];
@@ -555,8 +657,7 @@ export async function handleAdmin(req, env, path, { isAdmin, body, detectLang })
         await contentOp(env, { op: "deletePoster", movie_id: mid });
         return json({ ok: true });
       }
-      if (req.method === "POST")
-        throw new ApiError(405, "Pobieranie plakatów z IMDb/Filmweb/TMDB działa tylko lokalnie. Użyj linku albo pliku.");
+      if (req.method === "POST") return json(...await webPoster(env, req, mid, await body(req)));
       if (req.method === "PUT") {
         const d = await body(req);
         let bytes, source = "url", url = "";
@@ -647,7 +748,7 @@ export async function handleAdmin(req, env, path, { isAdmin, body, detectLang })
         const d = await body(req);
         let packId = d.pack_id || 0, existing = null;
         if (!packId || !("answers_text" in d || "answers" in d)) {
-          const packsList = await assetJson(env, req, "/data/packs.json");
+          const packsList = await basePacks(env, req);
           for (const p of packsList) {
             const data = await loadMergedPack(env, req, p.id);
             const hit = (data.pack.questions || []).find(x => x.id === iid);

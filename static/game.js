@@ -358,7 +358,7 @@ function roundKey() {
   return [S.mode, S.stage, (S.cast || []).length, S.hint_year, S.sub, (S.found || []).length, JSON.stringify(S.mine ?? null),
     claims, S.can_claim, S.can_peek, !!S.solution, S.judge, S.turn, S.bid, (S.history || []).length, S.can_count, S.closing === null ? "" : "c",
     S.bidder, S.untimed, !!S.can_advance, S.timer_started, S.can_start_timer, S.can_verdict,
-    S.can_start, S.can_stop, S.winner, (S.started_names || []).join(), (S.back_names || S.stopped_names || []).join()].join(",");
+    S.can_start, S.can_stop, S.winner, S.rerolls || 0, !!S.can_reroll, (S.start && S.start.id) || "", (S.goal && S.goal.id) || "", (S.started_names || []).join(), (S.back_names || S.stopped_names || []).join()].join(",");
 }
 function shellKey() {
   if (S.phase === "lobby")
@@ -555,7 +555,7 @@ function feedText(f) {
   if (f.text) return f.text;
   return T({join:"{name} dołącza", guess:"{name} zgaduje (+{pts})", leave:"{name} wychodzi", bid:"{name} licytuje: {pts}",
     bidwin:"{name} wygrywa licytację: {pts}", answered:"{name} odpowiada", claim:"{name}: Mam!", wrong:"{name}: pudło",
-    pass:"{name} pasuje"}[f.k] || "{name}", {name:f.name, pts:f.pts});
+    pass:"{name} pasuje", reroll:"{name} losuje nową parę aktorów"}[f.k] || "{name}", {name:f.name, pts:f.pts});
 }
 function me() { return S.players.find(p => p.id === S.me) || {}; }
 
@@ -1079,6 +1079,7 @@ function renderMost() {
     input = `<button type="button" class="pill orange big" id="frstart">${T("Start")}</button>${href ? `<a class="fr-open" href="${esc(href)}" target="_blank" rel="noopener">${T("otwórz profil {src}", {src: (S.link && S.link.label) || (LANG === "pl" ? "Filmweb" : "IMDb")})}</a>` : ""}`;
   }
   else input = waitBox(T("Runda w toku"), T("Czekamy, aż ktoś wróci i wciśnie Stop."));
+  if (S.can_reroll && isHost()) input += `<div class="fr-host"><button type="button" class="pill ghost fr-reroll" id="frreroll">${T("Wylosuj jeszcze raz")}</button><span class="muted">${T("Tylko ty to widzisz. Wszyscy dostaną nową parę aktorów.")}</span></div>`;
   return [stage, input];
 }
 
@@ -1108,6 +1109,11 @@ function wireMost() {
     }
   };
   if ($("#frstop")) $("#frstop").onclick = () => guessAct({stop: true});
+  if ($("#frreroll")) $("#frreroll").onclick = ev => {
+    if ((S.started_names || []).length && !confirm(T("Ktoś już wystartował. Wylosować nową parę aktorów?"))) return;
+    ev.currentTarget.disabled = true;
+    act("reroll");
+  };
   const open = document.querySelector(".fr-open");
   if (open) open.addEventListener("click", () => { roomCall("guess", {start: true}).catch(() => {}); });
 }

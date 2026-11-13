@@ -513,4 +513,8 @@ Object.assign(EN, {
   "brak układu": "no order submitted",
   "otwórz profil {src}": "open the {src} profile",
   "ogólny (bez limitu)": "shared (no limit)",
+  "Wylosuj jeszcze raz": "Reroll",
+  "Tylko ty to widzisz. Wszyscy dostaną nową parę aktorów.": "Only you can see this. Everyone gets a new pair of actors.",
+  "Ktoś już wystartował. Wylosować nową parę aktorów?": "Someone has already started. Draw a new pair of actors?",
+  "{name} losuje nową parę aktorów": "{name} rerolled the actor pair",
 });

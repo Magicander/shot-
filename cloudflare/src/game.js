@@ -3,6 +3,7 @@
 
 export const STAGE_SECONDS = 15;
 export const REVEAL_SECONDS = 9;
+export const MANUAL_REVEAL = ["top", "kolejnosc"];   // wyniki tych trybów zawsze czekają na gospodarza
 export const STAGE_POINTS = [1000, 600, 300];
 export const FIRST_BONUS = 100;
 export const MAX_PLAYERS = 16;
@@ -654,8 +655,7 @@ export class Game {
         if (t.winner) this.endRound();
       } else if (this.hasTimer() && (el >= this.duration() || (act.length && act.every(p => p.ans !== null || p.got)))) this.endRound();
     } else if (r.phase === "reveal") {
-      const auto = !(r.task && r.task.dur == null && !["most", "licytacja"].includes(this.mode));
-      if (auto && n - r.t0 >= REVEAL_SECONDS + (["kolejnosc", "licytacja", "top", "most"].includes(this.mode) ? 6 : 0)) this.next();
+      if (!this.revealManual() && n - r.t0 >= REVEAL_SECONDS + (["kolejnosc", "licytacja", "top", "most"].includes(this.mode) ? 6 : 0)) this.next();
     }
   }
 
@@ -663,8 +663,7 @@ export class Game {
   nextWake() {
     const r = this.r;
     if (r.phase === "reveal") {
-      const auto = !(r.task && r.task.dur == null && !["most", "licytacja"].includes(this.mode));
-      if (!auto) return null;
+      if (this.revealManual()) return null;
       return r.t0 + REVEAL_SECONDS + (["kolejnosc", "licytacja", "top", "most"].includes(this.mode) ? 6 : 0);
     }
     if (r.phase !== "round") return null;
@@ -862,6 +861,26 @@ export class Game {
       this.endRound();
     } else this.r.version++;
     return { ok: true };
+  }
+  // Topka i Ułóż po kolei: wyniki zawsze czekają na gospodarza; reszta tylko po rundzie bez limitu
+  revealManual() {
+    const t = this.r.task;
+    if (!t) return false;
+    if (MANUAL_REVEAL.includes(t.mode)) return true;
+    return t.dur == null && !["most", "licytacja"].includes(t.mode);
+  }
+
+  // gospodarz losuje nową parę aktorów w trwającej rundzie Filmrun (para podana z zewnątrz)
+  mostReroll(p, pair) {
+    const r = this.r, t = r.task;
+    if (!p || p.id !== r.host) throw new GameError(403, "Tylko gospodarz może to zrobić");
+    if (r.phase !== "round" || !t || t.mode !== "most" || t.winner || !pair) return { ok: false };
+    Object.assign(t, { start: pair.start, goal: pair.goal, started: {}, stopped: {}, winner: null,
+      rerolls: (t.rerolls || 0) + 1 });
+    r.t0 = now();
+    this.event("reroll", p.name);
+    r.version++;
+    return { ok: true, start: pair.start, goal: pair.goal };
   }
   mostStart(p) {
     const t = this.r.task;
@@ -1098,6 +1117,8 @@ export class Game {
         const started = !!(me && (t.started || {})[me.id]);
         Object.assign(out, {
           start: t.start, goal: t.goal, started,
+          can_reroll: !!(me && me.id === r.host && !t.winner),
+          rerolls: t.rerolls || 0,
           can_start: !!(me && !started && !t.winner),
           can_stop: !!(me && started && !t.winner),
           winner: t.winner || null,
@@ -1178,7 +1199,7 @@ export class Game {
       return out;
     }
     out.left = r1(REVEAL_SECONDS - el);
-    out.untimed = !!(t && t.dur == null && !["most", "licytacja"].includes(mode));
+    out.untimed = this.revealManual();
 
     const ans = { mode };
     if (t.movie) {

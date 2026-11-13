@@ -437,8 +437,9 @@ export function personFromPool(p, lang = "pl") {
   return out;
 }
 
-export async function pickFilmrunPair(movies, key, lang = "pl", rng = Math.random) {
-  const cands = poolPeople();
+export async function pickFilmrunPair(movies, key, lang = "pl", rng = Math.random, exclude = []) {
+  const skip = new Set((exclude || []).map(String));
+  const cands = poolPeople().filter(p => !skip.has(String(p.imdb_id)));
   if (cands.length < 2) {
     const err = new Error("most_no_pair");
     err.code = "LookupError";

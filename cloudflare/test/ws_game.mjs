@@ -21,7 +21,8 @@ function client(code, me, lang) {
 }
 async function until(c, f, ms = 15000) { const t = Date.now(); while (!f(c.s)) { if (Date.now() - t > ms) throw new Error("timeout " + JSON.stringify(c.s && [c.s.phase, c.s.mode, c.s.sub])); await sleep(50); } }
 
-const modes = ["kadry", "licytacja", "rok", "kolejnosc", "aktorzy", "zoom", "plakat", "top"].filter(k => data.avail[k].ok);
+// licytacja ma teraz timer od przeciwnika i werdykt - jej przebieg sprawdza test/rules.mjs
+const modes = ["kadry", "rok", "kolejnosc", "aktorzy", "zoom", "plakat", "top"].filter(k => data.avail[k].ok);
 const cr = await post("/api/rooms", { pack_id: PACK, rounds: modes.length, modes, name: "Ala" });
 check(cr.code && cr.pid, `create room ${cr.code}`);
 const jn = await post(`/api/rooms/${cr.code}/join`, { name: "Bob" });
@@ -51,6 +52,11 @@ for (;;) {
   } else if (mode === "kolejnosc") {
     const ids = s.items.map(i => i.id).sort((x, y) => byId.get(x).year - byId.get(y).year);
     await A.rpc("guess", { order: ids }); await B.rpc("guess", { order: ids.slice().reverse() });
+  } else if (mode === "top") {
+    const ids = s.items.map(i => i.id);
+    await A.rpc("guess", { order: ids }); await B.rpc("guess", { order: ids.slice().reverse() });
+    await until(A, s => s.sub === "guess" || s.phase !== "round");
+    if (A.s.phase === "round") { await A.rpc("guess", { order: ids }); await B.rpc("guess", { order: ids }); }
   } else if (mode === "licytacja") {
     const q = data.pack.questions.find(q => q.prompt_pl === s.prompt || q.prompt_en === s.prompt);
     check(s.sub === "bid" && [cr.pid, jn.pid].includes(s.turn) && s.starter, `licytacja: random starter ${s.starter}`);
@@ -68,6 +74,11 @@ for (;;) {
   if (A.s.phase === "reveal") {
     await until(B, s => s.phase === "reveal");
     if (mode === "licytacja") check(A.s.answer.success, "licytacja: bid fulfilled");
+    if (mode === "top" || mode === "kolejnosc") {
+      check(A.s.untimed, `${mode}: wyniki czekają na gospodarza (untimed)`);
+      await sleep(16000);
+      check(A.s.phase === "reveal" && A.s.round === round, `${mode}: po 16 s dalej ekran wyników`);
+    }
     const sc = Object.fromEntries(A.s.players.map(p => [p.name, p.score]));
     log.push(`     round ${round} ${mode}: scores ${JSON.stringify(sc)}`);
     await A.rpc("next");
@@ -85,43 +96,26 @@ const closeCode = await new Promise(r => bogus.on("close", c => r(c)));
 check(closeCode === 4403, "bad token closed with 4403");
 A.ws.close(); B2.ws.close();
 
-// druga gra: odpowiedzi na głos, ocenia gospodarz
+// (odpowiedzi na głos zostały usunięte z gry, więc nie ma już drugiej gry "voice")
+
+// Filmrun: "Wylosuj jeszcze raz" tylko dla gospodarza, nowa para trafia do wszystkich
 {
-  const vm = ["kadry", "licytacja"].filter(k => data.avail[k].ok);
-  const c2 = await post("/api/rooms", { pack_id: PACK, rounds: vm.length, modes: vm, name: "Ala", settings: { answer: "voice", judge: "host", order: "fixed" } });
-  const j2 = await post(`/api/rooms/${c2.code}/join`, { name: "Bob" });
-  const VA = client(c2.code, c2, "pl"), VB = client(c2.code, j2, "pl");
-  await Promise.all([VA.open, VB.open]);
-  await until(VA, s => s && s.players.length === 2);
-  check(VA.s.settings.answer === "voice" && VA.s.settings.judge === "host", "voice room: settings applied at create");
-  await VA.rpc("start");
-  for (;;) {
-    await until(VA, s => ["round", "final"].includes(s.phase));
-    const s = VA.s; if (s.phase === "final") break;
-    const round = s.round;
-    if (s.mode === "kadry") {
-      await until(VB, s => s.phase === "round");
-      check(VA.s.voice && VA.s.judge === c2.pid && VA.s.solution && VA.s.solution.title, "voice: host is judge and sees the solution");
-      check(!VB.s.solution && VB.s.can_claim, "voice: player sees no solution and can claim");
-      const self = await VA.rpc("guess", { claim: true }); check(!(self.d && self.d.ok), "voice: judge cannot claim");
-      await VB.rpc("guess", { claim: true });
-      await until(VA, s => (s.claims || []).some(c => c.pid === j2.pid && c.can));
-      check(true, "voice: claim visible to judge");
-      await VA.rpc("guess", { judge: j2.pid, verdict: true });
-    } else {
-      if (s.turn === c2.pid) { await VA.rpc("guess", { pass: true }); await VB.rpc("guess", { bid: 1 }); }
-      else { await VB.rpc("guess", { bid: 1 }); await VA.rpc("guess", { pass: true }); }
-      await until(VA, s => s.sub === "type");
-      check(VA.s.can_count && VA.s.bidder === j2.pid, "voice licytacja: host counts Bob's answers");
-      await VA.rpc("guess", { count: 1 });
-    }
-    await until(VA, s => s.phase === "reveal" || s.round !== round, 8000);
-    if (VA.s.phase === "reveal") {
-      const bob = VA.s.players.find(p => p.name === "Bob").score;
-      check(bob > 0, `voice ${s.mode}: Bob scored (${bob})`);
-      await VA.rpc("next");
-    }
-  }
-  VA.ws.close(); VB.ws.close();
+  const c3 = await post("/api/rooms", { kind: "filmrun", pack_id: "most", rounds: 1, name: "Ala" });
+  const j3 = await post(`/api/rooms/${c3.code}/join`, { name: "Bob" });
+  const FA = client(c3.code, c3, "pl"), FB = client(c3.code, j3, "pl");
+  await Promise.all([FA.open, FB.open]);
+  await until(FA, s => s && s.players.length === 2);
+  await FA.rpc("start");
+  await until(FB, s => s.phase === "round" && s.mode === "most");
+  check(FA.s.can_reroll && !FB.s.can_reroll, "filmrun: przycisk losowania tylko u gospodarza");
+  const before = [FB.s.start.id, FB.s.goal.id];
+  const no = await FB.rpc("reroll"); check(!no.ok && no.code === 403, "filmrun: losowanie od gracza odrzucone (403)");
+  await FB.rpc("guess", { start: true });
+  const yes = await FA.rpc("reroll"); check(yes.ok && yes.d.ok, "filmrun: gospodarz losuje nową parę");
+  await until(FB, s => s.start && s.start.id !== before[0] && s.goal.id !== before[1]);
+  const after = [FB.s.start.id, FB.s.goal.id];
+  check(!after.some(x => before.includes(x)) && after[0] !== after[1], `filmrun: Bob widzi nową parę ${after.join(" -> ")}`);
+  check(FB.s.can_start && !(FB.s.started_names || []).length && FB.s.rerolls === 1, "filmrun: Start wyzerowany po losowaniu");
+  FA.ws.close(); FB.ws.close();
 }
 console.log(log.join("\n"));
