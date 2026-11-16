@@ -36,6 +36,24 @@ python scraper.py --movie 12 --redo
 
 YouTube czasem wymaga JS runtime: zainstaluj Deno albo Node, jeśli yt-dlp o to poprosi.
 
+## Bomba i Hot buzz
+
+**Bomba.** Na ekranie kategoria (np. "Horrory z duchami"). Gospodarz zapala lont, gracz z bombą mówi tytuł na głos, gospodarz klika "dobra" (bomba idzie dalej, +100 pkt) albo "zła" (ten sam gracz próbuje dalej, lont się pali). Lont jest losowy (krótki 15-30 s, normalny 20-45 s, długi 35-60 s), nikt nie widzi czasu, tykanie tylko przyspiesza. Kto trzyma bombę przy wybuchu, dostaje 0, reszta +500. Na komputerze: strzałka w prawo / Enter = dobra, w lewo / Backspace = zła. Kategorie edytujesz w Pakiet → edytor trybów → "kategorie Bomby" (każdy pakiet dostaje na start kilka domyślnych). Tryb działa od 1 kategorii.
+
+**Hot buzz.** Wszyscy słyszą ten sam fragment motywu muzycznego (~25 s). Pierwszy, kto wciśnie buzzer (spacja na komputerze), ma kilka sekund na wpisanie tytułu. Dobrze: 1000 pkt, mniej im później (do 500). Źle albo za wolno: buzzer zablokowany do końca rundy, muzyka gra dalej. Na telefonie dźwięk włącza pierwsze dotknięcie ("gotowe, włącz dźwięk"). Tryb działa od 5 filmów z muzyką.
+
+Muzykę pobiera się tylko lokalnie (yt-dlp + ffmpeg): Pakiet → edytor trybów → "muzyka do Hot buzz", zaznacz filmy, "pobierz muzykę". Albo z konsoli:
+
+```
+pip install -U "yt-dlp[default]"      # ffmpeg: winget install ffmpeg  albo  pip install imageio-ffmpeg
+python music.py --list
+python music.py --pack horrory         # zaznaczone filmy bez muzyki
+python music.py --pack horrory --redo  # od nowa
+python music.py --movie 12
+```
+
+Skrypt szuka "<tytuł> <rok> main theme soundtrack" (plus zapytania zapasowe), odrzuca reakcje, covery, pętle 10 h itp., wybiera najgłośniejsze ~25 s i zapisuje mp3 (mono, 80 kb/s, ok. 250 KB) w bazie (tabela `music`). Własny link YouTube z `&t=73` w panelu ustawia też początek fragmentu. Do chmury muzyka i domyślne kategorie trafiają tylko z pełnym wgraniem danych (`python deploy_cloudflare.py`), samo `--code-only` nie wystarczy.
+
 ## Języki (kadr* / shot*)
 
 Polska przeglądarka (navigator.language / Accept-Language = pl) dostaje **kadr*** po polsku, każda inna **shot*** po angielsku - gra i panel admina.

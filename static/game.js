@@ -251,6 +251,8 @@ const MODE_INFO = {
   plakat: ["Plakat", "Plakat odsłania się stopniowo. Im wcześniej zgadniesz, tym więcej punktów."],
   aktorzy: ["Aktorzy", "Obsada pojawia się po kolei, od najmniej znanych nazwisk. Mniej nazwisk na ekranie to więcej punktów."],
   top: ["Top", "Najpierw układacie własną topkę tych samych filmów, od najlepszego do najgorszego (przeciągnij kafelki). Potem odtwarzacie topkę wylosowanego gracza. Za każdy film: pełne punkty za dokładne miejsce, o 1 mniej za każde miejsce pomyłki."],
+  bomba: ["Bomba", "Kategoria na ekranie, bomba krąży między graczami. Kto ją ma, mówi na głos pasujący tytuł, a gospodarz klika dobra albo zła. Dobra: +100 pkt i bomba idzie dalej. Lont jest ukryty i losowy. Kto ją trzyma przy wybuchu, przegrywa rundę, reszta dostaje po 500 pkt."],
+  hotbuzz: ["Hot buzz", "Leci muzyka z filmu, u wszystkich naraz. Kto pierwszy wciśnie buzzer (spacja na komputerze), wpisuje tytuł. Dobrze: do 1000 pkt, im wcześniej, tym więcej. Źle: buzzer blokuje się do końca rundy, a muzyka gra dalej dla reszty."],
   most: ["Filmrun", "Dostajecie dwóch znanych aktorów. Start otwiera profil pierwszego (Filmweb po polsku, IMDb po angielsku). Na tamtej stronie szukacie drugiego aktora, chodząc po filmach i obsadzie. Kto pierwszy wróci i wciśnie Stop, wygrywa rundę. Ruchy na Filmwebie/IMDb są poza naszą stroną — nie śledzimy ścieżki."],
 };
 const modeName = k => T((MODE_INFO[k] && MODE_INFO[k][0]) || k);
@@ -258,6 +260,8 @@ function modeHint(k, a) {
   const v = {need: a.need, have: a.have};
   return T({disabled: "Wyłączony przez admina dla tego pakietu.",
     questions: "Brak pytań do licytacji. Admin dodaje je w edytorze trybów.",
+    bombs: "Brak kategorii do Bomby. Admin dodaje je w edytorze trybów.",
+    music: "Potrzeba {need} filmów z muzyką (jest {have}). Admin pobiera muzykę lokalnie w edytorze trybów.",
     frames: "Potrzebny co najmniej {need} film z kadrami (jest {have}).",
     movies: "Potrzeba co najmniej {need} filmów w pakiecie (jest {have}).",
     years: k === "kolejnosc" ? "Potrzeba {need} filmów z różnymi latami premiery (jest {have})." : "Potrzeba {need} filmów z rokiem premiery (jest {have}).",
@@ -357,7 +361,7 @@ function roundKey() {
   const claims = (S.claims || []).map(c => c.pid + c.st + c.vote + c.can).join(";");
   return [S.mode, S.stage, (S.cast || []).length, S.hint_year, S.sub, (S.found || []).length, JSON.stringify(S.mine ?? null),
     claims, S.can_claim, S.can_peek, !!S.solution, S.judge, S.turn, S.bid, (S.history || []).length, S.can_count, S.closing === null ? "" : "c",
-    S.bidder, S.untimed, !!S.can_advance, S.timer_started, S.can_start_timer, S.can_verdict,
+    S.bidder, S.untimed, !!S.can_advance, S.holder, S.passes, S.misses, S.can_judge, S.buzzer, (S.locked || []).join(), (S.ready || []).length, (S.tries || []).length, S.timer_started, S.can_start_timer, S.can_verdict,
     S.can_start, S.can_stop, S.winner, S.rerolls || 0, !!S.can_reroll, (S.start && S.start.id) || "", (S.goal && S.goal.id) || "", (S.started_names || []).join(), (S.back_names || S.stopped_names || []).join()].join(",");
 }
 function shellKey() {
@@ -397,7 +401,7 @@ function render() {
 const SKEY = "kadr_settings";
 const VOICE_OK = ["kadry", "zoom", "plakat", "aktorzy", "licytacja"];
 const DEF_TIME = {kadry: 45, zoom: 30, plakat: 30, top: 45, rok: 25, kolejnosc: 40, most: 90};
-const NUM_KEYS = new Set(["time", "lic_answer", "lic_bid", "final_x", "top_n", "top_own", "top_guess", "most_time"]);
+const NUM_KEYS = new Set(["time", "lic_answer", "lic_bid", "final_x", "top_n", "top_own", "top_guess", "most_time", "buzz_answer"]);
 let ADV_OPEN = false;
 
 function saveSettings() {
@@ -442,7 +446,7 @@ function settingsPanel() {
   const c = S.settings, host = isHost(), dis = !host, d = dis ? "disabled" : "";
   const sec = n => T("{n} s", {n});
   const timeOpts = [[0, T("domyślny")], ...[15, 20, 30, 45, 60].map(n => [n, sec(n)])];
-  const titleModes = S.modes.filter(k => k !== "licytacja");
+  const titleModes = S.modes.filter(k => !["licytacja", "bomba", "hotbuzz"].includes(k));
   const voiceModes = S.modes.filter(k => VOICE_OK.includes(k));
   const judgeDesc = {rotate: T("Co rundę ocenia kolejny gracz. Sędzia widzi odpowiedź i nie zgaduje."),
     host: T("Zawsze ocenia gospodarz. Gospodarz widzi odpowiedź i nie zgaduje."),
@@ -459,6 +463,10 @@ function settingsPanel() {
     S.modes.includes("licytacja") ? grp(T("licytacja"), T("Gracze licytują po kolei. Timer puszcza przeciwnik, a po czasie pozostali oceniają, czy zadanie zostało zaliczone. Czas odpowiedzi: {n} s.", {n: c.lic_answer}),
       `<div class="sub2"><span>${T("czas na odpowiedź")}</span>${seg("lic_answer", [20, 30, 45, 60].map(n => [n, sec(n)]), c.lic_answer, dis)}</div>
        <div class="sub2"><span>${T("czas na turę")}</span>${seg("lic_bid", [5, 10, 15, 20].map(n => [n, sec(n)]), c.lic_bid, dis)}</div>`) : "",
+    S.modes.includes("bomba") ? grp(T("Bomba"), T("Lont jest ukryty i losowy w każdej rundzie. Tykanie przyspiesza pod koniec, ale nikt nie zna dokładnego czasu."),
+      seg("bomb_fuse", [["short", T("krótki (15-30 s)")], ["normal", T("normalny (20-45 s)")], ["long", T("długi (35-60 s)")]], c.bomb_fuse || "normal", dis)) : "",
+    S.modes.includes("hotbuzz") ? grp(T("Hot buzz"), T("Ile czasu ma na wpisanie tytułu ten, kto pierwszy wcisnął buzzer."),
+      seg("buzz_answer", [5, 8, 12, 15].map(n => [n, sec(n)]), c.buzz_answer || 8, dis)) : "",
     S.modes.includes("top") ? grp(T("Top"), T("Za każdy film: {n} pkt za dokładne miejsce, o 1 mniej za każde miejsce pomyłki (minimum 0). Przy {n} filmach maksimum to {m}.", {n: c.top_n || 5, m: (c.top_n || 5) * (c.top_n || 5)}),
       `<div class="sub2"><span>${T("liczba filmów")}</span>${seg("top_n", [3,4,5,6,7,8].map(n => [n, String(n)]), c.top_n || 5, dis)}</div>
        <div class="sub2"><span>${T("czas na własną topkę")}</span>${seg("top_own", [[-1, T("bez limitu")], ...[30,45,60,90].map(n => [n, sec(n)])], c.top_own ?? 45, dis)}</div>
@@ -555,7 +563,8 @@ function feedText(f) {
   if (f.text) return f.text;
   return T({join:"{name} dołącza", guess:"{name} zgaduje (+{pts})", leave:"{name} wychodzi", bid:"{name} licytuje: {pts}",
     bidwin:"{name} wygrywa licytację: {pts}", answered:"{name} odpowiada", claim:"{name}: Mam!", wrong:"{name}: pudło",
-    pass:"{name} pasuje", reroll:"{name} losuje nową parę aktorów"}[f.k] || "{name}", {name:f.name, pts:f.pts});
+    pass:"{name} pasuje", reroll:"{name} losuje nową parę aktorów", bomb:"{name} trzyma bombę", bombpass:"{name} zalicza",
+    boom:"{name}: bomba wybuchła", buzz:"{name}: buzz!"}[f.k] || "{name}", {name:f.name, pts:f.pts});
 }
 function me() { return S.players.find(p => p.id === S.me) || {}; }
 
@@ -578,7 +587,8 @@ function hostDock() {
   if (S.can_advance && S.mode === "kadry") bits.push(`<button type="button" class="pill ghost big" id="adv">${T("kolejny kadr")}</button>`);
   else if (S.can_advance && S.mode === "aktorzy") bits.push(`<button type="button" class="pill ghost big" id="adv">${T("kolejna osoba")}</button>`);
   else if (S.can_advance && S.mode === "top") bits.push(`<button type="button" class="pill ghost big" id="adv">${T("przejdź do zgadywania")}</button>`);
-  bits.push(`<button type="button" class="pill ${S.untimed ? "orange" : "ghost"} ${bits.length ? "" : "big"}" id="endround">${S.untimed ? T("zakończ rundę") : T("pomiń rundę")}</button>`);
+  const own = S.mode === "bomba" || S.mode === "hotbuzz";      // własny rytm: gospodarz tylko pomija rundę
+  bits.push(`<button type="button" class="pill ${S.untimed && !own ? "orange" : "ghost"} ${bits.length || own ? "" : "big"}" id="endround">${S.untimed && !own ? T("zakończ rundę") : T("pomiń rundę")}</button>`);
   return `<div class="hostbar">${bits.join("")}</div>`;
 }
 const guessForm = ph => `<form class="guess" id="gf" autocomplete="off"><ul class="ac hidden" id="ac"></ul>
@@ -675,6 +685,10 @@ function renderRound(v, keepInput) {
     input = S.mine ? waitBox(T("Kolejność wysłana")) : `<button class="pill orange big" id="osend" style="width:100%">${T("zatwierdzam kolejność")}</button>`;
   } else if (mode === "licytacja") {
     [stage, input] = renderAuction(m);
+  } else if (mode === "bomba") {
+    [stage, input] = renderBomb(m);
+  } else if (mode === "hotbuzz") {
+    [stage, input] = renderBuzz(m);
   }
   v.innerHTML = `<div class="game"><div class="gmain">${hud()}${stage}<div class="dock" id="dock">${input}${hostDock()}</div></div>${board()}</div><div class="sheetbg" id="sheetbg"></div>`;
   wireCommon();
@@ -709,6 +723,8 @@ function renderRound(v, keepInput) {
   if ($("#ltimer")) $("#ltimer").onclick = () => guessAct({start_timer: true});
   if ($("#vyes")) $("#vyes").onclick = () => guessAct({verdict: true});
   if ($("#vno")) $("#vno").onclick = () => guessAct({verdict: false});
+  if (mode === "bomba") wireBomb();
+  if (mode === "hotbuzz") wireBuzz(prev);
 }
 function wireCommon() {
   if ($("#skip")) $("#skip").onclick = () => act("next");
@@ -777,6 +793,250 @@ function renderAuction(m) {
   return [stage, dock];
 }
 
+/* ---------------- dźwięk (WebAudio): jeden kontekst, odblokowany pierwszym dotknięciem ---------------- */
+const AUD = {ctx: null, buf: {}, loading: {}, src: null, gain: null, key: "", t0: 0, tick: null, nextTick: 0, boom: "", replay: null};
+function audioCtx() {
+  if (!AUD.ctx) {
+    const C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return null;
+    try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch {}
+    AUD.ctx = new C();
+    AUD.ctx.onstatechange = () => { const b = $("#snd"); if (b) b.classList.toggle("hidden", audioOk()); };
+  }
+  return AUD.ctx;
+}
+const audioOk = () => !!(AUD.ctx && AUD.ctx.state === "running");
+function unlockAudio() {
+  const c = audioCtx(); if (!c) return;
+  if (c.state !== "running") c.resume().catch(() => {});
+  try { const b = c.createBuffer(1, 1, 22050), s = c.createBufferSource(); s.buffer = b; s.connect(c.destination); s.start(0); } catch {}
+  const b = $("#snd"); if (b) b.classList.toggle("hidden", audioOk());
+}
+// odblokowanie dźwięku na "click" (nie pointerdown): iOS wymaga końca dotyku, a chowanie przycisku
+// "włącz dźwięk" na pointerdown przesuwało układ i klik trafiał obok przycisku
+document.addEventListener("click", () => { if (S && (S.mode === "hotbuzz" || S.mode === "bomba")) unlockAudio(); }, {passive: true, capture: true});
+document.addEventListener("keydown", e => {
+  if (!S || S.phase !== "round") return;
+  if (S.mode === "hotbuzz" || S.mode === "bomba") unlockAudio();
+  const typing = ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement && document.activeElement.tagName);
+  if (S.mode === "hotbuzz" && e.code === "Space" && !typing && !e.repeat) { e.preventDefault(); buzzNow(); }
+  const onButton = document.activeElement && document.activeElement.tagName === "BUTTON";
+  if (S.mode === "bomba" && S.can_judge && S.sub === "live" && !typing && !e.repeat && !(onButton && (e.key === "Enter" || e.key === " "))) {
+    if (e.key === "ArrowRight" || e.key === "Enter") { e.preventDefault(); guessAct({verdict: true}); }
+    else if (e.key === "ArrowLeft" || e.key === "Backspace") { e.preventDefault(); guessAct({verdict: false}); }
+  }
+});
+function decode(c, ab) {
+  return new Promise((ok, fail) => { const p = c.decodeAudioData(ab, ok, fail); if (p && p.then) p.then(ok, fail); });
+}
+function loadClip(url) {
+  if (AUD.buf[url]) return Promise.resolve(AUD.buf[url]);
+  if (AUD.loading[url]) return AUD.loading[url];
+  const c = audioCtx(); if (!c) return Promise.reject(new Error("audio"));
+  // cały plik naraz (ok. 250 KB): bez zapytań Range, działa tak samo lokalnie i w chmurze
+  return AUD.loading[url] = fetch(url).then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
+    .then(ab => decode(c, ab)).then(b => { AUD.buf[url] = b; delete AUD.loading[url]; return b; })
+    .catch(e => { delete AUD.loading[url]; throw e; });
+}
+function stopMusic() {
+  if (AUD.src) { try { AUD.src.stop(); } catch {} AUD.src.disconnect(); AUD.src = null; }
+  AUD.key = "";
+}
+function playAt(buf, pos, key, vol = 1) {
+  const c = AUD.ctx;
+  stopMusic();
+  const src = c.createBufferSource(), g = c.createGain();
+  src.buffer = buf; g.gain.value = vol; src.connect(g); g.connect(c.destination);
+  if (pos < 0) src.start(c.currentTime - pos, 0);
+  else if (pos < buf.duration) src.start(0, pos);
+  else return;
+  AUD.src = src; AUD.key = key; AUD.t0 = c.currentTime - pos;
+}
+/* Hot buzz: muzyka podąża za pozycją z serwera (gra u wszystkich równo, pauza na czas odpowiedzi) */
+function syncMusic() {
+  if (!S || S.phase !== "round" || S.mode !== "hotbuzz") { if (AUD.key.startsWith("hb|")) stopMusic(); return; }
+  if (S.clip && audioCtx()) loadClip(S.clip).catch(() => {});
+  if (!S.playing) { if (AUD.key.startsWith("hb|")) stopMusic(); return; }
+  const pos = S.music_pos + (performance.now() - localT0) / 1000;
+  const buf = AUD.buf[S.clip];
+  if (!audioOk() || !buf) return;
+  const key = "hb|" + S.round + "|" + S.clip;
+  if (AUD.src && AUD.key === key && Math.abs((AUD.ctx.currentTime - AUD.t0) - pos) < 0.35) return;
+  playAt(buf, pos, key);
+}
+function replayClip(url) {
+  unlockAudio();
+  loadClip(url).then(b => { if (AUD.key === "replay") return stopMusic(); playAt(b, 0, "replay", 0.9); }).catch(() => toast(T("Nie udało się odtworzyć muzyki")));
+}
+function buzzFrame() {
+  syncMusic();
+  const pos = S.music_pos + (S.playing ? (performance.now() - localT0) / 1000 : 0);
+  const f = Math.max(0, Math.min(1, pos / (S.clip_len || 25)));
+  const b = $("#mbar"); if (b) b.style.width = (f * 100) + "%";
+  const eq = $("#eq"); if (eq) eq.classList.toggle("on", !!S.playing && pos >= 0 && audioOk());
+  const bc = $("#bigclock");
+  if (bc && S.sub === "answer" && S.answer_left != null) {
+    const t = S.answer_left - (performance.now() - localT0) / 1000;
+    bc.textContent = Math.max(0, Math.ceil(t)) + " s"; bc.classList.toggle("low", t <= 3);
+  }
+  const cd = $("#hbcount");
+  if (cd) { const t = -pos; cd.textContent = S.playing && t > 0 ? T("muzyka za chwilę...") : ""; }
+}
+async function buzzNow() {
+  if (!S || S.mode !== "hotbuzz" || S.sub !== "play" || (S.locked || []).includes(S.me)) return;
+  unlockAudio();
+  const g = $("#g"), f = $("#gf");
+  if (f && g) { f.classList.remove("hidden"); g.focus({preventScroll: true}); }   // klawiatura na telefonie otwiera się w geście dotyku
+  const b = $("#buzz"); if (b) b.classList.add("hit");
+  try {
+    const r = await roomCall("guess", {buzz: true});
+    if (!r.ok) { if (f) f.classList.add("hidden"); if (g) g.blur(); if (b) b.classList.remove("hit"); toast(r.early ? T("Poczekaj na muzykę") : T("Ktoś był szybszy")); }
+    lastKey = ""; if (!WS_MODE) poll();
+  } catch (e) { toast(e.message); if (f) f.classList.add("hidden"); }
+}
+function soundBtn() {
+  return `<button type="button" class="pill small soundbtn ${audioOk() ? "hidden" : ""}" id="snd">${T("włącz dźwięk")}</button>`;
+}
+function renderBuzz(m) {
+  const locked = (S.locked || []).includes(S.me), mineAns = S.buzzer === S.me;
+  const tries = (S.tries || []).length ? `<ul class="tries">${S.tries.map(t => `<li class="${t.ok ? "ok" : "miss"}">${esc(t.name)}: ${t.timeout ? T("nie zdążył") : (t.ok ? T("dobrze") : T("pudło"))}</li>`).join("")}</ul>` : "";
+  const lockedNames = S.players.filter(p => (S.locked || []).includes(p.id)).map(p => esc(p.name));
+  const status = S.sub === "ready" ? T("Gospodarz zaraz puści muzykę. Kliknij gotowe, żeby włączyć dźwięk.")
+    : S.sub === "answer" ? (mineAns ? T("Wpisz tytuł!") : T("{name} odpowiada...", {name: esc(S.buzzer_name || "?")}))
+    : T("Kto pierwszy wciśnie buzzer, ten odpowiada.");
+  const stage = `<div class="stage textstage buzzstage ${S.sub}"><span class="lvl">${T("hot buzz · zgadnij film po muzyce")}</span>${soundBtn()}
+    <div class="eq" id="eq" aria-hidden="true">${Array.from({length: 14}, (_, i) => `<i style="--d:${(i * 37) % 9}"></i>`).join("")}</div>
+    <div class="mtrack"><i id="mbar"></i></div>
+    <p class="bstatus">${status}</p><p class="muted small-note" id="hbcount"></p>
+    ${S.sub === "answer" ? `<div class="bigclock" id="bigclock"></div>` : ""}
+    ${lockedNames.length ? `<p class="muted small-note">${T("Zablokowani: {list}", {list: lockedNames.join(", ")})}</p>` : ""}${tries}</div>`;
+  let dock;
+  if (S.sub === "ready") {
+    const rd = (S.ready || []).includes(S.me);
+    dock = isHost()
+      ? `<button type="button" class="pill orange big" id="hbstart" style="width:100%">${T("puść muzykę")}</button><p class="muted small-note center">${T("Gotowych: {n} z {m}", {n: (S.ready || []).length, m: S.players.filter(p => p.online).length})}</p>`
+      : rd ? waitBox(T("Gotowe, dźwięk włączony"), T("Czekamy, aż gospodarz puści muzykę."))
+      : `<button type="button" class="pill orange big" id="hbready" style="width:100%">${T("gotowe, włącz dźwięk")}</button>`;
+  } else if (S.sub === "answer") {
+    dock = mineAns ? guessForm(T("Jaki to film?")) : waitBox(T("{name} odpowiada", {name: esc(S.buzzer_name || "?")}), locked ? T("Masz blokadę do końca rundy.") : T("Jeśli się pomyli, muzyka gra dalej."));
+  } else if (locked) {
+    dock = waitBox(T("Buzzer zablokowany"), T("Pomyłka blokuje buzzer do końca rundy. Słuchaj dalej."));
+  } else {
+    const fine = matchMedia("(pointer:fine)").matches;
+    dock = `<button type="button" class="buzzer" id="buzz" aria-label="${T("buzzer")}"><span>${T("buzz")}</span>${fine ? `<small>${T("spacja")}</small>` : ""}</button>
+      <div class="hidden" id="gfwrap">${guessForm(T("Jaki to film?"))}</div>`;
+  }
+  return [stage, dock];
+}
+function wireBuzz(prev) {
+  if ($("#snd")) $("#snd").onclick = () => { unlockAudio(); guessAct({ready: true}); };
+  if ($("#hbready")) $("#hbready").onclick = () => { unlockAudio(); guessAct({ready: true}); };
+  if ($("#hbstart")) $("#hbstart").onclick = () => { unlockAudio(); guessAct({start: true}); };
+  if ($("#buzz")) {
+    const w = $("#gfwrap"); if (w) { w.classList.remove("hidden"); $("#gf").classList.add("hidden"); }
+    // mysz: od razu na wciśnięcie; dotyk: na click (gest, w którym iOS pozwala otworzyć klawiaturę)
+    let viaMouse = false;
+    $("#buzz").addEventListener("pointerdown", e => { if (e.pointerType === "mouse") { e.preventDefault(); viaMouse = true; buzzNow(); } });
+    $("#buzz").onclick = () => { if (viaMouse) { viaMouse = false; return; } buzzNow(); };
+  }
+  if (S.sub === "answer" && S.buzzer === S.me && $("#g")) {
+    const g = $("#g"); if (document.activeElement !== g) g.focus({preventScroll: true});
+  }
+  if (S.clip) loadClip(S.clip).catch(() => {});
+}
+function renderBuzzReveal(a) {
+  stopMusic();
+  const tries = (a.tries || []).map(t => `<li class="${t.ok ? "ok" : "miss"}"><b>${esc(t.name)}</b>${t.timeout ? T("nie zdążył") : `"${esc(t.text)}"`}</li>`).join("");
+  return `<h2>${showTitle(a)}</h2><div class="year">${a.year || ""}</div>
+    ${a.img ? `<div class="revimg"><img src="${a.img}" alt=""></div>` : ""}
+    <p class="muted">${a.winner_name ? T("{name} zgadł po {s} s: +{pts} pkt", {name: esc(a.winner_name), s: a.buzz_at, pts: a.points}) : T("Nikt nie zgadł.")}</p>
+    ${tries ? `<ul class="tries">${tries}</ul>` : ""}
+    <button type="button" class="pill ghost" id="replay">${T("posłuchaj jeszcze raz")}</button>`;
+}
+
+/* Bomba: tykanie przyspiesza wraz z "heat" (0-3); dokładnego czasu nie zna nikt, nawet klient */
+const TICK_MS = [1000, 600, 330, 160];
+function tickSound(when, heat) {
+  const c = AUD.ctx, o = c.createOscillator(), g = c.createGain();
+  o.type = "square"; o.frequency.value = heat >= 3 ? 1400 : heat >= 2 ? 1150 : 950;
+  g.gain.setValueAtTime(0.0001, when); g.gain.exponentialRampToValueAtTime(0.25, when + 0.004);
+  g.gain.exponentialRampToValueAtTime(0.0001, when + 0.05);
+  o.connect(g); g.connect(c.destination); o.start(when); o.stop(when + 0.06);
+}
+function bombFrame() {
+  const live = S.phase === "round" && S.mode === "bomba" && S.sub === "live";
+  const el = $("#bomb"); if (el) el.dataset.heat = live ? S.heat : "x";
+  if (!live || !audioOk()) { AUD.nextTick = 0; return; }
+  if (!AUD.tick) AUD.tick = setInterval(() => {
+    if (!S || S.mode !== "bomba" || S.phase !== "round" || S.sub !== "live" || !audioOk()) { AUD.nextTick = 0; return; }
+    const c = AUD.ctx, gap = TICK_MS[Math.min(3, S.heat || 0)] / 1000;
+    if (!AUD.nextTick || AUD.nextTick < c.currentTime) AUD.nextTick = c.currentTime + 0.02;
+    while (AUD.nextTick < c.currentTime + 0.12) { tickSound(AUD.nextTick, S.heat || 0); AUD.nextTick += gap; }
+  }, 40);
+}
+function boomOnce() {
+  const key = S.code + "|" + S.round;
+  const panel = $(".bombrev"); if (panel) panel.classList.add("boom");
+  if (AUD.boom === key || !audioOk()) return;
+  AUD.boom = key;
+  const c = AUD.ctx, n = c.sampleRate * 1.4, b = c.createBuffer(1, n, c.sampleRate), d = b.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 2.5);
+  const s = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain();
+  f.type = "lowpass"; f.frequency.setValueAtTime(1800, c.currentTime); f.frequency.exponentialRampToValueAtTime(120, c.currentTime + 1.2);
+  g.gain.value = 0.9; s.buffer = b; s.connect(f); f.connect(g); g.connect(c.destination); s.start();
+}
+const BOMB_SVG = `<svg viewBox="0 0 200 200" class="bombsvg" aria-hidden="true">
+  <path class="fuse" d="M128 52 C 140 30, 160 34, 168 18" fill="none" stroke="#1B1712" stroke-width="7" stroke-linecap="round"/>
+  <circle class="spark" cx="168" cy="18" r="11"/>
+  <rect x="104" y="40" width="34" height="26" rx="6" transform="rotate(35 121 53)" fill="#1B1712"/>
+  <circle cx="92" cy="118" r="66" fill="#1B1712"/>
+  <ellipse cx="66" cy="92" rx="16" ry="10" fill="#FCFAF5" opacity=".22" transform="rotate(-35 66 92)"/></svg>`;
+function renderBomb(m) {
+  const mine = S.holder === S.me, judge = S.can_judge;
+  const bad = S.last === "bad" && S.last_at != null && S.last_at < 2;
+  const order = `<ol class="border bomborder">${(S.order || []).map(o => `<li class="${o.id === S.holder ? "cur" : ""} ${o.online ? "" : "off"}">${esc(o.name)}${o.ok ? ` <b>${o.ok}</b>` : ""}</li>`).join("")}</ol>`;
+  const who = S.sub === "ready" ? T("Bomba zaczyna u: {name}", {name: esc(S.holder_name || "?")})
+    : mine ? T("Masz bombę! Mów tytuł na głos.") : T("Bomba u: {name}", {name: esc(S.holder_name || "?")});
+  const stage = `<div class="stage textstage bombstage ${S.sub} ${mine ? "mine" : ""} ${bad ? "bad" : ""}"><span class="lvl">${T("bomba · kategoria")}</span>${soundBtn()}
+    <h2 class="ytitle qprompt">${esc(S.prompt)}</h2>
+    <div class="bomb" id="bomb" data-heat="${S.sub === "live" ? S.heat : "x"}">${BOMB_SVG}</div>
+    <p class="bholder">${who}</p>
+    ${bad ? `<p class="bflash">${T("Zła odpowiedź, próbuj dalej!")}</p>` : ""}
+    ${order}
+    ${judge && S.examples && S.examples.length ? `<details class="rules"><summary>${T("przykładowe odpowiedzi (widzisz tylko ty)")}</summary><p class="muted small-note">${S.examples.map(esc).join(", ")}</p></details>` : ""}
+    </div>`;
+  let dock;
+  if (S.sub === "ready") {
+    dock = judge ? `<button type="button" class="pill orange big" id="blight" style="width:100%">${T("zapal lont")}</button><p class="muted small-note center">${T("Lont jest losowy, nikt nie zna czasu. Ty oceniasz odpowiedzi.")}</p>`
+      : waitBox(T("Za chwilę start"), T("{name} zapala lont i ocenia odpowiedzi.", {name: esc(S.judge_name || "?")}));
+  } else if (judge) {
+    dock = `<p class="judgehint">${T("{name} mówi tytuł. Pasuje do kategorii?", {name: esc(S.holder_name || "?")})}</p>
+      <div class="verdict-row bombjudge"><button type="button" class="pill ghost big" id="bbad">${T("zła")}</button><button type="button" class="pill orange big" id="bok">${T("dobra")}</button></div>
+      ${matchMedia("(pointer:fine)").matches ? `<p class="muted small-note center">${T("Klawiatura: strzałka w prawo = dobra, w lewo = zła")}</p>` : ""}`;
+  } else {
+    dock = mine ? waitBox(T("Mów tytuł na głos!"), T("Gospodarz zaliczy odpowiedź i bomba pójdzie dalej."))
+      : waitBox(T("Nie masz bomby"), T("Przygotuj tytuł, zanim do ciebie trafi."));
+  }
+  return [stage, dock];
+}
+function wireBomb() {
+  if ($("#snd")) $("#snd").onclick = () => unlockAudio();
+  if ($("#blight")) $("#blight").onclick = () => { unlockAudio(); guessAct({light: true}); };
+  if ($("#bok")) $("#bok").onclick = () => guessAct({verdict: true});
+  if ($("#bbad")) $("#bbad").onclick = () => guessAct({verdict: false});
+  if (S.last === "bad" && S.last_at != null && S.last_at < 2) setTimeout(() => { const st = $(".bombstage"); if (st) st.classList.remove("bad"); const f = $(".bflash"); if (f) f.remove(); }, Math.max(300, (2 - S.last_at) * 1000));
+  bombFrame();
+}
+function renderBombReveal(a) {
+  const rows = (a.results || []).slice().sort((x, y) => y.points - x.points).map(r => `<li class="${r.lost ? "miss" : ""}"><b>${esc(r.name)}</b><span>${r.lost ? T("bomba wybuchła w rękach") : T("dobre odpowiedzi: {n}", {n: r.ok})}</span><span class="sc">+${r.points}</span></li>`).join("");
+  return `<div class="bombrev"><p class="muted qprompt-r">${esc(a.prompt || "")}</p>
+    <h2>${a.exploded ? T("bum!") : T("runda pominięta")}</h2>
+    ${a.exploded ? `<p class="bloser">${T("Bomba wybuchła u: {name}", {name: `<b>${esc(a.loser_name || "?")}</b>`})}</p>` : ""}
+    <div class="year">${T("podania: {n}", {n: a.passes || 0})}</div>
+    <ul class="guesses">${rows}</ul>
+    ${(a.examples || []).length ? `<p class="muted small-note">${T("Przykłady: {list}", {list: a.examples.map(esc).join(", ")})}</p>` : ""}</div>`;
+}
+
 async function guessAct(body) {
   try { await roomCall("guess", body); lastKey = ""; if (!WS_MODE) poll(); }
   catch (e) { toast(e.message); }
@@ -791,6 +1051,12 @@ function updateClock(force) {
   const auctionTick = S.mode === "licytacja" && (S.sub === "bid" || S.sub === "timed");
   const timed = auctionTick || (!(S.untimed || S.duration == null) && S.mode !== "most");
   const visual = S.mode === "zoom" || S.mode === "plakat";
+  if (S.mode === "bomba" || S.mode === "hotbuzz") {
+    if (c) c.textContent = "";
+    if (hc) hc.textContent = "";
+    if (S.mode === "hotbuzz") buzzFrame(); else bombFrame();
+    return;
+  }
   if (S.mode === "most" || (S.mode === "licytacja" && !auctionTick)) {
     if (c) c.textContent = "";
     if (hc) hc.textContent = "";
@@ -1196,6 +1462,8 @@ function renderReveal(v) {
         <div class="cmp-col"><h3>${T("poprawna kolejność")}</h3>${orderWrap(yearList(a.correct || a.items, (a.correct || a.items || []).map(() => "ok")), T("najstarszy"), T("najnowszy"))}</div>
       </div>`;
   }
+  else if (mode === "bomba") body = renderBombReveal(a);
+  else if (mode === "hotbuzz") body = renderBuzzReveal(a);
   else if (mode === "licytacja") {
     body = (a.prompt ? `<p class="muted qprompt-r">${esc(a.prompt)}</p>` : "") + (a.bidder_name ? `<h2>${a.success ? T("{name} zaliczył zadanie", {name: esc(a.bidder_name)}) : T("{name} nie zaliczył zadania", {name: esc(a.bidder_name)})}</h2>
       <div class="year">${T("deklaracja: {n}", {n: a.bid})}</div>
@@ -1214,6 +1482,8 @@ function renderReveal(v) {
       </div></div>${board()}</div><div class="sheetbg" id="sheetbg"></div>`;
   wireCommon();
   if (isHost()) $("#nx").onclick = () => act("next");
+  if (mode === "bomba" && a.exploded) boomOnce();
+  if (mode === "hotbuzz" && $("#replay")) $("#replay").onclick = () => replayClip(a.clip);
 }
 
 function renderFinal(v) {

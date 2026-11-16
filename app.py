@@ -76,6 +76,8 @@ MIME = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
 
 
 EN_ERRORS = {
+    "Brak muzyki": "No music",
+    "Zły link": "Bad link",
     "Nie udało się pobrać": "Could not fetch",
     "To nie jest obraz (JPEG, PNG albo WebP)": "This is not an image (JPEG, PNG or WebP)",
     "Podaj treść cytatu": "Enter the quote text",
@@ -237,6 +239,12 @@ class Handler(BaseHTTPRequestHandler):
                 img = bytes(row["image"])
                 ctype = "image/png" if img[:4] == b"\x89PNG" else "image/webp" if img[8:12] == b"WEBP" else "image/jpeg"
                 return self.send(200, img, ctype, {"Cache-Control": "max-age=300"})
+            m = re.fullmatch(r"/music/(\d+)\.mp3", path)
+            if m and method == "GET":
+                row = con.execute("SELECT audio, mime FROM music WHERE movie_id=?", (int(m[1]),)).fetchone()
+                if not row:
+                    raise ApiError(404, "Brak muzyki")
+                return self.send(200, bytes(row["audio"]), row["mime"] or "audio/mpeg", {"Cache-Control": "max-age=300"})
             m = re.fullmatch(r"/actor/(\d+)\.jpg", path)
             if m and method == "GET":
                 row = con.execute("SELECT image FROM actor_photos WHERE id=?", (int(m[1]),)).fetchone()
@@ -494,6 +502,7 @@ class Handler(BaseHTTPRequestHandler):
                                       (slug, name, str(d.get("description") or "")[:300],
                                        valid_color(d.get("color")), str(d.get("name_en") or "").strip()[:40],
                                        str(d.get("description_en") or "")[:300])).lastrowid
+                    db.seed_bombs(con)        # domyślne kategorie Bomby dla nowego pakietu
                 return self.json({"id": pid, "slug": slug})
         m = re.fullmatch(r"/api/admin/packs/(\d+)(?:/(\w+))?", path)
         if m:
@@ -524,8 +533,12 @@ class Handler(BaseHTTPRequestHandler):
                 pack = con.execute("SELECT * FROM packs WHERE id=?", (pid,)).fetchone()
                 _, avail = pack_avail(con, pack)
                 return self.json({"avail": avail, "modes": MODES, "tmdb_key": bool(db.tmdb_key()),
-                                  "questions": con.execute("SELECT COUNT(*) FROM questions WHERE pack_id=?",
-                                                           (pid,)).fetchone()[0],
+                                  "questions": con.execute("SELECT COUNT(*) FROM questions WHERE pack_id=? AND "
+                                                           "kind='licytacja'", (pid,)).fetchone()[0],
+                                  "bombs": con.execute("SELECT COUNT(*) FROM questions WHERE pack_id=? AND kind='bomba'",
+                                                       (pid,)).fetchone()[0],
+                                  "music": con.execute("SELECT COUNT(*) FROM music mu JOIN movies m ON m.id=mu.movie_id "
+                                                       "WHERE m.pack_id=?", (pid,)).fetchone()[0],
                                   "modes_off": [k for k in (pack["modes_off"] or "").split(",") if k]})
             if sub == "pl_titles" and method == "POST":
                 d = self.body()
@@ -613,6 +626,9 @@ class Handler(BaseHTTPRequestHandler):
         m = re.fullmatch(r"/api/admin/actors(?:/(\d+))?", path)
         if m:
             return self.actor_photo_api(method, int(m[1]) if m[1] else None, con)
+        m = re.fullmatch(r"/api/admin/movies/(\d+)/music", path)
+        if m:
+            return self.movie_music_api(method, int(m[1]), con)
         m = re.fullmatch(r"/api/admin/movies/(\d+)/(poster|cast|quotes|zoom)", path)
         if m:
             return self.movie_data_api(method, int(m[1]), m[2], con)
@@ -807,13 +823,48 @@ class Handler(BaseHTTPRequestHandler):
                             saved += 1
             return self.json({"rows": rows, "saved": saved, "matched": sum(r["status"] == "matched" for r in rows),
                               "unmatched": sum(r["status"] != "matched" for r in rows)})
-        if sub == "questions" and method == "GET":
+        if sub == "music" and method == "GET":
+            rows = con.execute("""SELECT m.id, m.title, m.year, m.pl_title, m.music_on, m.music_url, m.music_error,
+                mu.dur, mu.start_s, mu.video_title, mu.url, mu.updated, length(mu.audio) bytes
+                FROM movies m LEFT JOIN music mu ON mu.movie_id=m.id WHERE m.pack_id=?
+                ORDER BY m.title COLLATE NOCASE""", (pid,)).fetchall()
+            out = [dict(r, have=r["bytes"] is not None) for r in rows]
+            return self.json({"movies": out, "need": rooms_lib.BUZZ_MIN_MUSIC,
+                              "have": sum(1 for r in out if r["have"]), "on": sum(1 for r in out if r["music_on"])})
+        if sub == "music" and method == "PUT":
+            d = self.body()
+            ids = [int(x) for x in d.get("ids") or []]
+            with con:
+                if d.get("all") is not None:
+                    con.execute("UPDATE movies SET music_on=? WHERE pack_id=?", (1 if d.get("all") else 0, pid))
+                for mid in ids:
+                    con.execute("UPDATE movies SET music_on=? WHERE id=? AND pack_id=?", (1 if d.get("on") else 0, mid, pid))
+            return self.json({"ok": True})
+        if sub == "music" and method == "POST":
+            try:
+                import yt_dlp  # noqa: F401
+                import music as musiclib
+                musiclib.ffmpeg_bin()
+            except ImportError as e:
+                raise ApiError(500, (f"Missing library ({e.name}). Run" if self.lang == "en" else
+                                     f"Brak biblioteki ({e.name}). Uruchom") + ': pip install -U "yt-dlp[default]"')
+            except RuntimeError as e:
+                raise ApiError(500, str(e))
+            if job_busy():
+                raise ApiError(409, "Scraper już działa")
+            d = self.body()
+            rows = musiclib.select_rows(con, pid, d.get("movie_ids") or None, bool(d.get("redo")))
+            self.start_music_job(rows)
+            return self.json({"ok": True, "count": len(rows)})
+        if sub in ("questions", "bombs") and method == "GET":
+            kind = "bomba" if sub == "bombs" else "licytacja"
             out = []
-            for r in con.execute("SELECT * FROM questions WHERE pack_id=? ORDER BY id", (pid,)):
+            for r in con.execute("SELECT * FROM questions WHERE pack_id=? AND kind=? ORDER BY id", (pid, kind)):
                 out.append({"id": r["id"], "prompt_pl": r["prompt_pl"], "prompt_en": r["prompt_en"],
-                            "answers": json.loads(r["answers"] or "[]")})
+                            "answers": json.loads(r["answers"] or "[]"), "kind": kind})
             return self.json(out)
-        if sub == "questions" and method == "POST":
+        if sub in ("questions", "bombs") and method == "POST":
+            kind = "bomba" if sub == "bombs" else "licytacja"
             d = self.body()
             if "bulk" in d:
                 rows = parse_questions(d["bulk"])
@@ -822,12 +873,12 @@ class Handler(BaseHTTPRequestHandler):
                     with con:
                         for r in rows:
                             if r["status"] == "ok":
-                                self.insert_question(con, pid, r)
+                                self.insert_question(con, pid, r, kind)
                                 saved += 1
                 return self.json({"rows": rows, "saved": saved, "ok": sum(r["status"] == "ok" for r in rows)})
             q = self.question_from(d)
             with con:
-                qid = self.insert_question(con, pid, q)
+                qid = self.insert_question(con, pid, q, kind)
             return self.json({"id": qid})
         if sub == "answers_auto" and method == "GET":
             lines = []
@@ -853,10 +904,40 @@ class Handler(BaseHTTPRequestHandler):
         return {"prompt_pl": pl, "prompt_en": en, "answers": ans}
 
     @staticmethod
-    def insert_question(con, pid, q):
-        return con.execute("INSERT INTO questions (pack_id, prompt_pl, prompt_en, answers, created) VALUES (?,?,?,?,?)",
+    def insert_question(con, pid, q, kind="licytacja"):
+        return con.execute("INSERT INTO questions (pack_id, prompt_pl, prompt_en, answers, created, kind) "
+                           "VALUES (?,?,?,?,?,?)",
                            (pid, q["prompt_pl"], q["prompt_en"], json.dumps(q["answers"], ensure_ascii=False),
-                            time.time())).lastrowid
+                            time.time(), "bomba" if kind == "bomba" else "licytacja")).lastrowid
+
+    def start_music_job(self, rows):
+        global scrape_progress, tmdb_thread
+        import scraper
+        import music as musiclib
+        scrape_progress = scraper.Progress(self.lang)
+        tmdb_thread = threading.Thread(target=musiclib.run, args=(rows, scrape_progress), daemon=True)
+        tmdb_thread.start()
+
+    def movie_music_api(self, method, mid, con):
+        if not con.execute("SELECT 1 FROM movies WHERE id=?", (mid,)).fetchone():
+            raise ApiError(404, "Nie ma filmu")
+        if method == "PUT":
+            d = self.body()
+            with con:
+                if "music_on" in d:
+                    con.execute("UPDATE movies SET music_on=? WHERE id=?", (1 if d.get("music_on") else 0, mid))
+                if "music_url" in d:
+                    url = str(d.get("music_url") or "").strip()[:300]
+                    if url and not re.match(r"https?://", url):
+                        raise ApiError(400, "Zły link")
+                    con.execute("UPDATE movies SET music_url=? WHERE id=?", (url, mid))
+            return self.json({"ok": True})
+        if method == "DELETE":
+            with con:
+                con.execute("DELETE FROM music WHERE movie_id=?", (mid,))
+                con.execute("UPDATE movies SET music_error='' WHERE id=?", (mid,))
+            return self.json({"ok": True})
+        raise ApiError(404, "Nie ma takiego adresu")
 
     def actor_photo_api(self, method, aid, con):
         import base64

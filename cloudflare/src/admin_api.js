@@ -8,8 +8,9 @@ class ApiError extends Error {
   constructor(code, key) { super(key); this.code = code; this.key = key; }
 }
 
-const MODES = ["kadry", "zoom", "licytacja", "rok", "kolejnosc", "plakat", "aktorzy", "top"];
-const MIN = { frames: 1, zoom: 1, movies: 5, years: 3, posters: 3, cast: 3, questions: 1 };
+const MODES = ["kadry", "zoom", "licytacja", "rok", "kolejnosc", "plakat", "aktorzy", "top", "bomba", "hotbuzz"];
+const MIN = { frames: 1, zoom: 1, movies: 5, years: 3, posters: 3, cast: 3, questions: 1, bombs: 1, music: 5 };
+const MUSIC_LOCAL = "Muzykę do Hot buzz pobiera się tylko lokalnie (python music.py), a do chmury trafia z wgraniem danych.";
 
 function json(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data), {
@@ -88,8 +89,9 @@ function recomputeAvail(pack, movies) {
   const quotes = movies.reduce((s, m) => s + (m.quotes || []).length, 0);
   const questions = (pack.questions || []).length;
   const zoomed = movies.filter(m => m.zoom_frame || (m.frames && m.frames.length)).length;
-  const have = { frames: framed, zoom: zoomed, movies: movies.length, years, posters, cast, quotes, questions };
-  const needKey = { kadry: "frames", zoom: "zoom", licytacja: "questions", rok: "years", kolejnosc: "years", plakat: "posters", aktorzy: "cast", top: "movies" };
+  const bombs = (pack.bombs || []).length, music = movies.filter(m => m.music).length;
+  const have = { frames: framed, zoom: zoomed, movies: movies.length, years, posters, cast, quotes, questions, bombs, music };
+  const needKey = { kadry: "frames", zoom: "zoom", licytacja: "questions", rok: "years", kolejnosc: "years", plakat: "posters", aktorzy: "cast", top: "movies", bomba: "bombs", hotbuzz: "music" };
   // licytacja can fall back to pack films, so questions need can be 0 effectively for "ok" if movies exist - match local rooms.availability
   const avail = {};
   for (const k of MODES) {
@@ -439,7 +441,7 @@ export async function handleAdmin(req, env, path, { isAdmin, body, detectLang })
       throw new ApiError(405, "W chmurze nie dodajesz ani nie usuwasz pakietów. Zrób to lokalnie.");
   }
 
-  m = path.match(/^\/api\/admin\/packs\/(\d+)\/(movies|modes|quotes|questions|pl_titles|answers_auto|web)$/);
+  m = path.match(/^\/api\/admin\/packs\/(\d+)\/(movies|modes|quotes|questions|bombs|music|pl_titles|answers_auto|web)$/);
   if (m) {
     const pid = +m[1], sub = m[2];
     const data = await loadMergedPack(env, req, pid);
@@ -480,7 +482,18 @@ export async function handleAdmin(req, env, path, { isAdmin, body, detectLang })
       const p = packsList.find(x => x.id === pid);
       const off = await packModesOff(env, req, pid, p, data);
       const avail = recomputeAvail(data.pack, movies);
-      return json({ modes: MODES, modes_off: off, avail, questions: (data.pack.questions || []).length });
+      return json({ modes: MODES, modes_off: off, avail, questions: (data.pack.questions || []).length,
+        bombs: (data.pack.bombs || []).length, music: movies.filter(x => x.music).length });
+    }
+
+    if (sub === "music") {
+      if (req.method !== "GET") throw new ApiError(405, MUSIC_LOCAL);
+      const out = movies.map(mv => ({
+        id: mv.id, title: mv.title, year: mv.year, pl_title: mv.pl_title || "", music_on: mv.music ? 1 : 0,
+        music_url: "", music_error: "", dur: mv.music_dur || null, have: !!mv.music,
+      })).sort((a, b) => a.title.localeCompare(b.title));
+      return json({ movies: out, need: MIN.music, have: out.filter(x => x.have).length, on: out.filter(x => x.have).length,
+        cloud: true, note: MUSIC_LOCAL });
     }
 
     if (sub === "quotes" && req.method === "GET") {
@@ -511,13 +524,15 @@ export async function handleAdmin(req, env, path, { isAdmin, body, detectLang })
       return json({ rows, saved, matched: rows.filter(r => r.status === "matched").length, unmatched: rows.filter(r => r.status !== "matched").length });
     }
 
-    if (sub === "questions" && req.method === "GET") {
-      return json((data.pack.questions || []).map(q => ({
-        id: q.id, prompt_pl: q.prompt_pl || "", prompt_en: q.prompt_en || "", answers: q.answers || [],
+    if ((sub === "questions" || sub === "bombs") && req.method === "GET") {
+      const kind = sub === "bombs" ? "bomba" : "licytacja";
+      return json(((sub === "bombs" ? data.pack.bombs : data.pack.questions) || []).map(q => ({
+        id: q.id, prompt_pl: q.prompt_pl || "", prompt_en: q.prompt_en || "", answers: q.answers || [], kind,
       })));
     }
 
-    if (sub === "questions" && req.method === "POST") {
+    if ((sub === "questions" || sub === "bombs") && req.method === "POST") {
+      const kind = sub === "bombs" ? "bomba" : "licytacja";
       const d = await body(req);
       if ("bulk" in d) {
         if (String(d.bulk || "").length > MAX_TEXT_BODY) throw new ApiError(413, "Za duże żądanie");
@@ -525,13 +540,13 @@ export async function handleAdmin(req, env, path, { isAdmin, body, detectLang })
         let saved = 0;
         if (d.apply) {
           for (const r of rows) if (r.status === "ok") {
-            await contentOp(env, { op: "addQuestion", pack_id: pid, question: r });
+            await contentOp(env, { op: "addQuestion", pack_id: pid, question: { ...r, kind } });
             saved++;
           }
         }
         return json({ rows, saved, ok: rows.filter(r => r.status === "ok").length });
       }
-      const q = questionFrom(d);
+      const q = { ...questionFrom(d), kind };
       const r = await contentOp(env, { op: "addQuestion", pack_id: pid, question: q });
       return json({ id: r.id });
     }
@@ -752,10 +767,11 @@ export async function handleAdmin(req, env, path, { isAdmin, body, detectLang })
           for (const p of packsList) {
             const data = await loadMergedPack(env, req, p.id);
             const hit = (data.pack.questions || []).find(x => x.id === iid);
-            if (hit) { packId = packId || p.id; existing = hit.answers || []; break; }
+            const bomb = !hit && (data.pack.bombs || []).find(x => x.id === iid);
+            if (hit || bomb) { packId = packId || p.id; existing = (hit || bomb).answers || []; if (bomb) d.kind = "bomba"; break; }
           }
         }
-        const q = questionFrom(d, existing);
+        const q = { ...questionFrom(d, existing), kind: d.kind === "bomba" ? "bomba" : "licytacja" };
         await contentOp(env, { op: "editQuestion", id: iid, pack_id: packId, question: q });
         return json({ ok: true });
       }

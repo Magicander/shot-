@@ -157,6 +157,7 @@ def build(db_path: Path) -> dict:
     (BUILD / "frame").mkdir(parents=True)
     (BUILD / "poster").mkdir()
     (BUILD / "data").mkdir()
+    (BUILD / "music").mkdir()
     # Pełny panel admina (ten sam UI co lokalnie); Worker wstrzykuje window.KADR_CLOUD=true
     shutil.copytree(BASE / "static", BUILD / "static")
     (BUILD / "static" / "rt.js").write_text(
@@ -166,7 +167,7 @@ def build(db_path: Path) -> dict:
         "<!doctype html><meta http-equiv=refresh content='0;url=/admin'><title>admin</title>",
         encoding="utf-8")
 
-    frame_ids, poster_ids, packs_out, meta_packs = set(), set(), [], []
+    frame_ids, poster_ids, music_ids, packs_out, meta_packs = set(), set(), set(), [], []
     for p in con.execute("SELECT * FROM packs ORDER BY sort, id").fetchall():
         movies = rooms.load_pack(con, p["id"])
         pdata = rooms.pack_data(con, p)
@@ -178,7 +179,10 @@ def build(db_path: Path) -> dict:
                 frame_ids.add(m["zoom_frame"])
             if m["poster"]:
                 poster_ids.add(m["id"])
-        pack = {k: pdata.get(k) for k in ("id", "slug", "name", "name_en", "description", "description_en", "color", "questions")}
+            if m.get("music"):
+                music_ids.add(m["id"])
+        pack = {k: pdata.get(k) for k in ("id", "slug", "name", "name_en", "description", "description_en", "color",
+                                          "questions", "bombs")}
         (BUILD / "data" / f"pack-{p['id']}.json").write_text(
             json.dumps({"pack": pack, "movies": movies, "avail": avail}, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
         for lang in ("pl", "en"):
@@ -200,6 +204,7 @@ def build(db_path: Path) -> dict:
                            "framed": len(framed), "posters": sum(1 for m in movies if m["poster"]),
                            "cast": sum(1 for m in movies if len(m["cast"]) >= 3),
                            "quotes": sum(len(m["quotes"]) for m in movies), "questions": len(pdata["questions"]),
+                           "bombs": len(pdata.get("bombs") or []), "music": sum(1 for m in movies if m.get("music")),
                            "avail": avail})
     nbytes = 0
     for fid in sorted(frame_ids):
@@ -218,6 +223,15 @@ def build(db_path: Path) -> dict:
             nbytes += len(img)
             # adres zawsze /poster/{id}.jpg (jak lokalnie); przeglądarka rozpozna PNG/WebP po treści
             (BUILD / "poster" / f"{mid}.jpg").write_bytes(img)
+    # Muzyka Hot buzz: /music/{movie_id}.mp3 (małe mp3 ~250 KB), serwowane jak kadry
+    music_bytes = 0
+    for mid in sorted(music_ids):
+        row = con.execute("SELECT audio FROM music WHERE movie_id=?", (mid,)).fetchone()
+        if row and row["audio"]:
+            audio = bytes(row["audio"])
+            music_bytes += len(audio)
+            (BUILD / "music" / f"{mid}.mp3").write_bytes(audio)
+    nbytes += music_bytes
     # Zdjęcia aktorów: jeden wpis na unikalnego aktora, spakowane w kilka plików (nie jeden plik/aktor),
     # żeby nie zjadać limitu 20 000 Static Assets. Worker serwuje /actor/{id}.jpg z indeksu + shardu.
     actor_n, shard_n, actor_bytes = write_actor_shards(con)
@@ -234,14 +248,15 @@ def build(db_path: Path) -> dict:
     (BUILD / "data" / "packs.json").write_text(json.dumps(packs_out, ensure_ascii=False), encoding="utf-8")
     (BUILD / "_headers").write_text(
         "/frame/*\n  Cache-Control: public, max-age=86400\n/poster/*\n  Cache-Control: public, max-age=3600\n"
+        "/music/*\n  Cache-Control: public, max-age=3600\n  Content-Type: audio/mpeg\n"
         "/static/*\n  Cache-Control: no-cache\n", encoding="utf-8")
     files = sum(1 for f in BUILD.rglob("*") if f.is_file())
     meta = {"built": time.strftime("%Y-%m-%d %H:%M:%S %z"), "frames": len(frame_ids), "posters": len(poster_ids),
-            "actors": actor_n, "actor_shards": shard_n,
+            "music": len(music_ids), "music_bytes": music_bytes, "actors": actor_n, "actor_shards": shard_n,
             "files": files + 1, "bytes": nbytes, "packs": meta_packs, "limit_files": MAX_FILES}
     (BUILD / "data" / "meta.json").write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
     print(f"Zbudowano {BUILD}: {len(packs_out)} pakietów, {len(frame_ids)} kadrów, {len(poster_ids)} plakatów, "
-          f"{actor_n} zdjęć aktorów ({shard_n} plików), "
+          f"{actor_n} zdjęć aktorów ({shard_n} plików), {len(music_ids)} klipów muzyki, "
           f"{meta['files']} plików ({nbytes / 1e6:.1f} MB obrazów).")
     if meta["files"] > MAX_FILES:
         sys.exit(f"Za dużo plików ({meta['files']}) - limit planu Free to {MAX_FILES}.")
@@ -262,7 +277,9 @@ def local_counts(db_path: Path) -> dict:
     out = {
         "movies": con.execute("SELECT COUNT(*) FROM movies").fetchone()[0],
         "quotes": con.execute("SELECT COUNT(*) FROM quotes").fetchone()[0],
-        "questions": con.execute("SELECT COUNT(*) FROM questions").fetchone()[0],
+        "questions": con.execute("SELECT COUNT(*) FROM questions WHERE kind='licytacja'").fetchone()[0],
+        "bombs": con.execute("SELECT COUNT(*) FROM questions WHERE kind='bomba'").fetchone()[0],
+        "music": con.execute("SELECT COUNT(*) FROM music").fetchone()[0],
         "frames": con.execute("SELECT COUNT(*) FROM frames").fetchone()[0],
         "posters": con.execute("SELECT COUNT(*) FROM posters").fetchone()[0],
         "actors": con.execute("SELECT COUNT(*) FROM actor_photos").fetchone()[0],

@@ -162,14 +162,15 @@ def write_db(data: dict, out: Path, images: dict):
     for i, p in enumerate(data["packs"]):
         # modes w eksporcie = włączone; modes_off = reszta z pełnej listy
         # modes_off w bazie to lista CSV (jak w app.py), nie JSON
-        ALL_MODES = ["kadry", "zoom", "licytacja", "rok", "kolejnosc", "plakat", "aktorzy", "top"]
+        ALL_MODES = ["kadry", "zoom", "licytacja", "rok", "kolejnosc", "plakat", "aktorzy", "top", "bomba", "hotbuzz"]
         modes_on = set(p.get("modes") or ALL_MODES)
         if isinstance(p.get("modes_off"), str):
             modes_off = p["modes_off"]
         elif isinstance(p.get("modes_off"), list):
             modes_off = ",".join(m for m in ALL_MODES if m in p["modes_off"])
         else:
-            modes_off = ",".join(m for m in ALL_MODES if m not in modes_on)
+            # Bomba/Hot buzz zależą od danych (kategorie, muzyka) - brak na liście to nie wyłączenie
+            modes_off = ",".join(m for m in ALL_MODES if m not in modes_on and m not in ("bomba", "hotbuzz"))
         cur = con.execute(
             "INSERT INTO packs (id, slug, name, description, color, cover_frame_id, sort, name_en, description_en, modes_off) "
             "VALUES (?,?,?,?,?,?,?,?,?,?)",
@@ -177,13 +178,14 @@ def write_db(data: dict, out: Path, images: dict):
              p.get("color") or "#E2541B", p.get("cover_frame_id"), i,
              p.get("name_en") or p["name"], p.get("description_en") or p.get("description") or "", modes_off),
         )
-        for q in p.get("questions") or []:
-            con.execute(
-                "INSERT INTO questions (id, pack_id, prompt_pl, prompt_en, answers) VALUES (?,?,?,?,?)",
-                (q["id"], p["id"], q.get("prompt_pl") or "", q.get("prompt_en") or "",
-                 json.dumps(q.get("answers") or [], ensure_ascii=False)),
-            )
-            questions_n += 1
+        for kind, qs in (("licytacja", p.get("questions") or []), ("bomba", p.get("bombs") or [])):
+            for q in qs:
+                con.execute(
+                    "INSERT INTO questions (id, pack_id, prompt_pl, prompt_en, answers, kind) VALUES (?,?,?,?,?,?)",
+                    (q["id"], p["id"], q.get("prompt_pl") or "", q.get("prompt_en") or "",
+                     json.dumps(q.get("answers") or [], ensure_ascii=False), kind),
+                )
+                questions_n += 1
         for m in p.get("movies") or []:
             aliases = m.get("aliases") or []
             if isinstance(aliases, list):

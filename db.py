@@ -88,6 +88,22 @@ CREATE TABLE IF NOT EXISTS actor_photos (
 CREATE INDEX IF NOT EXISTS actor_photos_name ON actor_photos(name);
 """
 
+# Hot buzz: krótki fragment muzyki z filmu (mp3), trzymany w bazie jak kadry
+SCHEMA6 = """
+CREATE TABLE IF NOT EXISTS music (
+    movie_id    INTEGER PRIMARY KEY REFERENCES movies(id) ON DELETE CASCADE,
+    audio       BLOB NOT NULL,
+    mime        TEXT NOT NULL DEFAULT 'audio/mpeg',
+    start_s     REAL,
+    dur         REAL,
+    video_id    TEXT NOT NULL DEFAULT '',
+    video_title TEXT NOT NULL DEFAULT '',
+    url         TEXT NOT NULL DEFAULT '',
+    updated     REAL
+);
+CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
+"""
+
 HORRORS = [
     ("The Exorcist", 1973), ("Halloween", 1978), ("The Shining", 1980),
     ("A Nightmare on Elm Street", 1984), ("The Thing", 1982), ("Alien", 1979),
@@ -225,6 +241,18 @@ def migrate(con):
         fc = _cols(con, "frames")
         if "kind" not in fc:
             con.execute("ALTER TABLE frames ADD COLUMN kind TEXT NOT NULL DEFAULT 'kadry'")
+        # faza 7: Bomba (kategorie w tabeli questions z kind='bomba') i Hot buzz (muzyka)
+        qc = _cols(con, "questions")
+        if "kind" not in qc:
+            con.execute("ALTER TABLE questions ADD COLUMN kind TEXT NOT NULL DEFAULT 'licytacja'")
+        mc = _cols(con, "movies")
+        if "music_on" not in mc:
+            con.execute("ALTER TABLE movies ADD COLUMN music_on INTEGER NOT NULL DEFAULT 0")
+        for c in ("music_url", "music_error"):
+            if c not in mc:
+                con.execute(f"ALTER TABLE movies ADD COLUMN {c} TEXT NOT NULL DEFAULT ''")
+        con.executescript(SCHEMA6)
+        seed_bombs(con)
         con.execute("CREATE TABLE IF NOT EXISTS tmdb_cache ("
                     "key TEXT PRIMARY KEY, body TEXT NOT NULL, updated REAL)")
         for slug, (n, d) in SEED_EN.items():
@@ -236,6 +264,97 @@ def migrate(con):
         con.execute("CREATE UNIQUE INDEX IF NOT EXISTS movies_norm_unique ON movies(pack_id, norm_title, IFNULL(year, -1))")
     if removed:
         print(f"Usunięto {removed} zduplikowanych filmów.")
+
+
+# ---------------------------------------------------------------- Bomba: domyślne kategorie
+# (PL, EN, przykładowe odpowiedzi dla gospodarza - jedna na linię). Gracze mówią tytuły na głos,
+# gospodarz klika "dobra"/"zła", więc przykłady to tylko ściąga, nie zamknięta lista.
+BOMB_SEEDS = {
+    "horror": [
+        ("Horrory z duchami", "Horror films with ghosts", "The Conjuring\nInsidious\nThe Others\nPoltergeist\nThe Ring"),
+        ("Horrory o opętaniu", "Horror films about possession", "The Exorcist\nThe Conjuring\nThe Exorcism of Emily Rose\nInsidious"),
+        ("Horrory z zabójcą w masce", "Horror films with a masked killer", "Halloween\nScream\nFriday the 13th\nThe Texas Chain Saw Massacre\nThe Strangers"),
+        ("Horrory o nawiedzonym domu", "Haunted house horror films", "The Conjuring\nPoltergeist\nThe Amityville Horror\nThe Others\nInsidious"),
+        ("Horrory z przerażającym dzieckiem", "Horror films with a creepy child", "The Omen\nThe Exorcist\nThe Ring\nOrphan"),
+        ("Horrory z potworem albo kosmitą", "Horror films with a monster or an alien", "Alien\nThe Thing\nA Quiet Place\nThe Descent"),
+        ("Horrory z 2010 roku i nowsze", "Horror films from 2010 or later", "Get Out\nHereditary\nIt Follows\nThe Babadook\nSmile"),
+    ],
+    "marvel": [
+        ("Filmy z Iron Manem", "Films featuring Iron Man", "Iron Man\nThe Avengers\nCaptain America: Civil War\nSpider-Man: Homecoming\nAvengers: Endgame"),
+        ("Filmy z Kapitanem Ameryką", "Films featuring Captain America", "Captain America: The First Avenger\nThe Avengers\nCaptain America: The Winter Soldier\nAvengers: Endgame"),
+        ("Filmy z Thorem", "Films featuring Thor", "Thor\nThor: The Dark World\nThor: Ragnarok\nThe Avengers\nAvengers: Infinity War"),
+        ("Filmy, w których pojawia się Spider-Man", "Films where Spider-Man appears", "Captain America: Civil War\nSpider-Man: Homecoming\nAvengers: Infinity War\nSpider-Man: No Way Home"),
+        ("Filmy z Kamieniem Nieskończoności", "Films featuring an Infinity Stone", "Captain America: The First Avenger\nThe Avengers\nGuardians of the Galaxy\nDoctor Strange\nAvengers: Infinity War"),
+        ("Filmy Marvela z liczbą w tytule", "Marvel films with a number in the title", "Iron Man 2\nIron Man 3\nGuardians of the Galaxy Vol. 2\nDeadpool 2"),
+    ],
+    "action": [
+        ("Filmy akcji z Tomem Cruise'em", "Action films starring Tom Cruise", "Top Gun: Maverick\nMission: Impossible - Fallout\nEdge of Tomorrow\nJack Reacher\nCollateral"),
+        ("Filmy o Jamesie Bondzie", "James Bond films", "Skyfall\nCasino Royale\nGoldenEye\nSpectre\nNo Time to Die"),
+        ("Filmy akcji z Keanu Reevesem", "Action films starring Keanu Reeves", "The Matrix\nJohn Wick\nSpeed\nPoint Break"),
+        ("Filmy akcji z pościgiem samochodowym", "Action films with a car chase", "Mad Max: Fury Road\nBaby Driver\nRonin\nThe French Connection"),
+        ("Filmy akcji z lat 80. i 90.", "Action films from the 80s and 90s", "Die Hard\nTerminator 2: Judgment Day\nSpeed\nHeat\nFace/Off"),
+        ("Filmy akcji o zemście", "Revenge action films", "John Wick\nKill Bill: Volume 1\nGladiator\nMan on Fire"),
+    ],
+    "animation": [
+        ("Filmy Pixara", "Pixar films", "Toy Story\nFinding Nemo\nUp\nInside Out\nCoco"),
+        ("Filmy DreamWorks Animation", "DreamWorks Animation films", "Shrek\nKung Fu Panda\nMadagascar\nHow to Train Your Dragon"),
+        ("Animacje z gadającymi zwierzętami", "Animated films with talking animals", "The Lion King\nZootopia\nMadagascar\nKung Fu Panda\nFinding Nemo"),
+        ("Animacje Disneya z księżniczką", "Disney animated films with a princess", "Frozen\nMoana\nTangled\nThe Little Mermaid\nMulan"),
+        ("Animacje, które mają sequel", "Animated films that have a sequel", "Toy Story\nShrek\nFrozen\nFinding Nemo\nInside Out"),
+    ],
+    "thriller": [
+        ("Thrillery z seryjnym mordercą", "Thrillers with a serial killer", "Se7en\nThe Silence of the Lambs\nZodiac\nMemories of Murder"),
+        ("Filmy Davida Finchera", "David Fincher films", "Se7en\nFight Club\nZodiac\nGone Girl\nThe Social Network"),
+        ("Thrillery z twistem na końcu", "Thrillers with a twist ending", "The Sixth Sense\nShutter Island\nFight Club\nThe Usual Suspects\nMemento"),
+        ("Filmy Alfreda Hitchcocka", "Alfred Hitchcock films", "Psycho\nVertigo\nRear Window\nThe Birds\nNorth by Northwest"),
+        ("Thrillery o porwaniu", "Kidnapping thrillers", "Prisoners\nTaken\nGone Baby Gone\nSplit\nRansom"),
+    ],
+    "scifi": [
+        ("Filmy o kosmitach", "Films about aliens", "Alien\nArrival\nIndependence Day\nE.T. the Extra-Terrestrial\nDistrict 9"),
+        ("Filmy o podróżach w czasie", "Time travel films", "Back to the Future\nTerminator 2: Judgment Day\nLooper\nEdge of Tomorrow\n12 Monkeys"),
+        ("Filmy o robotach albo sztucznej inteligencji", "Films about robots or artificial intelligence", "Ex Machina\nThe Terminator\nBlade Runner\nI, Robot\nWALL-E"),
+        ("Filmy, których akcja dzieje się w kosmosie", "Films set in space", "Gravity\nInterstellar\nThe Martian\nAlien\n2001: A Space Odyssey"),
+        ("Filmy Christophera Nolana", "Christopher Nolan films", "Inception\nInterstellar\nTenet\nThe Prestige\nMemento"),
+    ],
+    "generic": [
+        ("Filmy z liczbą w tytule", "Films with a number in the title", "2001: A Space Odyssey\nThe Sixth Sense\n12 Angry Men\n21 Jump Street"),
+        ("Filmy z imieniem bohatera w tytule", "Films with a character's name in the title", "Forrest Gump\nJohn Wick\nRocky\nAmélie"),
+        ("Filmy z kolorem w tytule", "Films with a colour in the title", "The Green Mile\nBlack Panther\nBlue Velvet\nThe Color Purple"),
+        ("Filmy, które dostały Oscara za najlepszy film", "Best Picture Oscar winners", "Gladiator\nThe Silence of the Lambs\nParasite\nTitanic\nOppenheimer"),
+    ],
+    "pack": [
+        ("Filmy z tego pakietu z jednowyrazowym tytułem", "Films from this pack with a one-word title", ""),
+        ("Filmy z tego pakietu sprzed 2000 roku", "Films from this pack released before 2000", ""),
+    ],
+}
+BOMB_KEYWORDS = [("horror", ("horror",)), ("marvel", ("marvel", "mcu")), ("action", ("akcj", "action")),
+                 ("animation", ("anim", "pixar", "disney", "dreamworks")), ("thriller", ("thriller",)),
+                 ("scifi", ("sci-fi", "scifi", "sci fi", "science fiction", "fantastyka"))]
+
+
+def bomb_seed_group(pack) -> str:
+    text = " ".join(str(pack[k] or "") for k in ("slug", "name", "name_en") if k in pack.keys()).lower()
+    for group, words in BOMB_KEYWORDS:
+        if any(w in text for w in words):
+            return group
+    return "generic"
+
+
+def seed_bombs(con):
+    """Jednorazowo na pakiet: domyślne kategorie Bomby (PL+EN). Znacznik w meta, więc usunięte nie wracają."""
+    import json
+    for p in con.execute("SELECT * FROM packs").fetchall():
+        key = f"bomb_seed:{p['id']}"
+        if con.execute("SELECT 1 FROM meta WHERE k=?", (key,)).fetchone():
+            continue
+        if not con.execute("SELECT 1 FROM questions WHERE pack_id=? AND kind='bomba'", (p["id"],)).fetchone():
+            group = bomb_seed_group(p)
+            rows = BOMB_SEEDS[group] + BOMB_SEEDS["pack"] + (BOMB_SEEDS["generic"][:2] if group != "generic" else [])
+            for pl, en, ex in rows:
+                con.execute("INSERT INTO questions (pack_id, prompt_pl, prompt_en, answers, created, kind) "
+                            "VALUES (?,?,?,?,?, 'bomba')",
+                            (p["id"], pl, en, json.dumps(parse_answers(ex), ensure_ascii=False), time.time()))
+        con.execute("INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)", (key, str(int(time.time()))))
 
 
 def dedupe(con) -> int:
@@ -283,6 +402,8 @@ def init_db(path=None, seed=True) -> sqlite3.Connection:
                                 (pid, t, y, overrides.get((t, y)), norm_title(t)))
         if (path is None) and LEGACY_DB.exists():
             import_legacy(con, LEGACY_DB)
+        with con:
+            seed_bombs(con)
     return con
 
 
@@ -325,6 +446,14 @@ def import_legacy(con: sqlite3.Connection, legacy: Path) -> int:
     old.close()
     print(f"Zaimportowano {n} filmów ze starej bazy {legacy.name} do pakietu Horrory.")
     return n
+
+
+def save_music(con, movie_id, audio, *, start_s=None, dur=None, video_id="", video_title="", url="", mime="audio/mpeg"):
+    con.execute("INSERT INTO music (movie_id, audio, mime, start_s, dur, video_id, video_title, url, updated) "
+                "VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(movie_id) DO UPDATE SET audio=excluded.audio, mime=excluded.mime, "
+                "start_s=excluded.start_s, dur=excluded.dur, video_id=excluded.video_id, video_title=excluded.video_title, "
+                "url=excluded.url, updated=excluded.updated",
+                (movie_id, audio, mime, start_s, dur, video_id or "", video_title or "", url or "", time.time()))
 
 
 def kadry_frame_ids(con, movie_id):

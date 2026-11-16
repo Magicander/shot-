@@ -7,6 +7,8 @@ const NEW_ID_BASE = 1_000_000; // new cloud-only quote/question ids start here
 const MAX_POSTER = 1_500_000;  // 1.5 MB upload/URL blob limit
 const MAX_TEXT_BODY = 200_000;
 
+const qkind = k => (k === "bomba" ? "bomba" : "licytacja");
+
 export class Content extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
@@ -84,6 +86,10 @@ export class Content extends DurableObject {
       INSERT OR IGNORE INTO seq(name, n) VALUES ('actors', ${NEW_ID_BASE});
       INSERT OR IGNORE INTO seq(name, n) VALUES ('frames', ${NEW_ID_BASE});
     `);
+    // faza 7: kategorie Bomby w tej samej tabeli co pytania licytacji (kind='bomba'); migracja addytywna
+    const qcols = [...this.ctx.storage.sql.exec("PRAGMA table_info(questions)")].map(r => r.name);
+    if (!qcols.includes("kind"))
+      this.ctx.storage.sql.exec("ALTER TABLE questions ADD COLUMN kind TEXT NOT NULL DEFAULT 'licytacja'");
   }
 
   now() { return Date.now() / 1000; }
@@ -101,7 +107,7 @@ export class Content extends DurableObject {
     return {
       movies: rows("SELECT * FROM movies"),
       quotes: rows("SELECT id, movie_id, text, lang, deleted, updated_at, base FROM quotes"),
-      questions: rows("SELECT id, pack_id, prompt_pl, prompt_en, answers, deleted, updated_at, base FROM questions"),
+      questions: rows("SELECT id, pack_id, prompt_pl, prompt_en, answers, deleted, updated_at, base, kind FROM questions"),
       packs: rows("SELECT * FROM packs"),
       posters: posters.map(p => ({ ...p, has_image: (p.bytes || 0) > 0 })),
       actors: [...this.ctx.storage.sql.exec("SELECT id, key, name, source, source_id, url, deleted, updated_at, image FROM actor_photos")].map(r => {
@@ -253,8 +259,8 @@ export class Content extends DurableObject {
     const id = this.nextId("questions");
     const ts = this.now();
     this.ctx.storage.sql.exec(
-      "INSERT INTO questions(id, pack_id, prompt_pl, prompt_en, answers, deleted, updated_at, base) VALUES (?,?,?,?,?,0,?,0)",
-      id, +packId, q.prompt_pl || "", q.prompt_en || "", JSON.stringify(q.answers || []), ts,
+      "INSERT INTO questions(id, pack_id, prompt_pl, prompt_en, answers, deleted, updated_at, base, kind) VALUES (?,?,?,?,?,0,?,0,?)",
+      id, +packId, q.prompt_pl || "", q.prompt_en || "", JSON.stringify(q.answers || []), ts, qkind(q.kind),
     );
     return { id, updated_at: ts };
   }
@@ -270,8 +276,8 @@ export class Content extends DurableObject {
       );
     } else {
       this.ctx.storage.sql.exec(
-        "INSERT INTO questions(id, pack_id, prompt_pl, prompt_en, answers, deleted, updated_at, base) VALUES (?,?,?,?,?,0,?,1)",
-        +id, +packId, q.prompt_pl || "", q.prompt_en || "", answers, ts,
+        "INSERT INTO questions(id, pack_id, prompt_pl, prompt_en, answers, deleted, updated_at, base, kind) VALUES (?,?,?,?,?,0,?,1,?)",
+        +id, +packId, q.prompt_pl || "", q.prompt_en || "", answers, ts, qkind(q.kind),
       );
     }
     return { ok: true, updated_at: ts };
@@ -408,8 +414,7 @@ export class Content extends DurableObject {
       return out;
     });
 
-    // questions
-    let questions = (data.pack.questions || []).map(q => ({ ...q }));
+    // questions (licytacja) i kategorie Bomby: ta sama tabela nakładki, rozdzielone po kind
     const qEdits = new Map();
     const qAdded = [];
     for (const oq of questionsOv) {
@@ -423,24 +428,29 @@ export class Content extends DurableObject {
       } else {
         qAdded.push({
           id: oq.id, prompt_pl: oq.prompt_pl, prompt_en: oq.prompt_en,
-          answers: JSON.parse(oq.answers || "[]"),
+          answers: JSON.parse(oq.answers || "[]"), kind: qkind(oq.kind),
         });
       }
     }
-    questions = questions.map(q => {
+    const applyEdits = list => list.map(q => {
       if (qEdits.has(q.id)) {
         const e = qEdits.get(q.id);
         if (e.deleted) return null;
         return e;
       }
       return q;
-    }).filter(Boolean).concat(qAdded);
+    }).filter(Boolean);
+    const strip = ({ kind, ...q }) => q;
+    const questions = applyEdits((data.pack.questions || []).map(q => ({ ...q })))
+      .concat(qAdded.filter(q => q.kind === "licytacja").map(strip));
+    const bombs = applyEdits((data.pack.bombs || []).map(q => ({ ...q })))
+      .concat(qAdded.filter(q => q.kind === "bomba").map(strip));
 
     // tryby wyłączone lokalnie: pack-N.json nie ma modes_off, ale avail ma reason "disabled"
     const baseOff = data.pack.modes_off || Object.entries(data.avail || {})
       .filter(([, v]) => v && v.reason === "disabled").map(([k]) => k).join(",");
     let modesOff = packOv ? (packOv.modes_off || "") : baseOff;
-    const pack = { ...data.pack, questions, modes_off: modesOff };
+    const pack = { ...data.pack, questions, bombs, modes_off: modesOff };
     const off = new Set(String(modesOff || "").split(",").filter(Boolean));
     const framed = movies.filter(m => (m.frames || []).length).length;
     const zoomed = movies.filter(m => m.zoom_frame || (m.frames || []).length).length;
@@ -457,8 +467,10 @@ export class Content extends DurableObject {
       plakat: [nPosters, 3, "posters"],
       aktorzy: [nCast, 3, "cast"],
       top: [movies.length, 5, "movies"],
+      bomba: [bombs.length, 1, "bombs"],
+      hotbuzz: [movies.filter(m => m.music).length, 5, "music"],
     };
-    const MODES = ["kadry", "zoom", "licytacja", "rok", "kolejnosc", "plakat", "aktorzy", "top"];
+    const MODES = ["kadry", "zoom", "licytacja", "rok", "kolejnosc", "plakat", "aktorzy", "top", "bomba", "hotbuzz"];
     const avail = {};
     for (const k of MODES) {
       const [have, needN, what] = need[k];

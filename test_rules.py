@@ -521,6 +521,129 @@ check(not s["started_names"] and s["can_start"], "losowanie zeruje Start graczy"
 r.answer(A, {"start": True}, "pl"); r.answer(A, {"stop": True}, "pl")
 check(not r.most_reroll(A, "pl")["ok"], "po zwycięstwie nie da się losować")
 
+print("Bomba: gospodarz zalicza odpowiedzi, ukryty lont, wybuch")
+r, (A, B, C) = room(3, {"bomb_fuse": "normal"}, modes=["bomba"])
+r.configure(rounds=2)
+r.start()
+check(r.task["mode"] == "bomba" and r.task["sub"] == "ready", "runda zaczyna się od zapalenia lontu")
+s = r.state(A)
+check(s["can_judge"] and "examples" in s and s["prompt"], "gospodarz ocenia i widzi przykładowe odpowiedzi")
+sB = r.state(B)
+check(not sB["can_judge"] and "examples" not in sB, "gracze nie widzą przykładów")
+check("fuse_end" not in json.dumps(sB) and sB["left"] is None and sB["duration"] is None, "dokładny czas wybuchu nie trafia do graczy")
+check(not r.answer(B, {"light": True}, "pl")["ok"], "tylko gospodarz zapala lont")
+check(r.answer(A, {"light": True}, "pl")["ok"] and r.task["sub"] == "live", "gospodarz zapala lont")
+check(20 <= r.task["fuse"] <= 45, "lont normalny 20-45 s")
+h0 = r.task["holder"]
+check(r.answer(A, {"verdict": True}, "pl")["ok"] and r.task["holder"] != h0, "dobra: bomba idzie dalej")
+check(not r.answer(A, {"verdict": True}, "pl")["ok"], "podwójne kliknięcie dobra nie przerzuca bomby drugi raz")
+adv(r, 1)
+h1 = r.task["holder"]
+check(r.answer(A, {"verdict": False}, "pl")["ok"] and r.task["holder"] == h1 and r.task["sub"] == "live", "zła: ten sam gracz próbuje dalej, czas leci")
+check(not r.answer(B, {"verdict": True}, "pl")["ok"], "gracz nie może zaliczyć sobie odpowiedzi")
+heats = []
+while r.phase == "round":
+    heats.append(r.state(B)["heat"]); adv(r, 0.5)
+check(heats == sorted(heats) and heats[-1] == 3, "tykanie przyspiesza (heat 0..3)")
+check(r.phase == "reveal" and r.task["exploded"] and r.task["loser"] == h1, "wybuch: przegrywa trzymający bombę")
+pts = {p["name"]: p["history"][-1] for p in r.players.values()}
+loser = r.players[h1]["name"]
+check(pts[loser] == 0, "trzymający bombę dostaje 0")
+check(all(v >= 500 for k, v in pts.items() if k != loser), "pozostali +500 (plus 100 za zaliczoną odpowiedź)")
+check(pts[r.players[h0]["name"]] == 600 if h0 != h1 else True, "za zaliczoną odpowiedź +100")
+st = r.state(A)
+check(st["untimed"] and st["answer"]["exploded"] and st["answer"]["loser_name"] == loser, "odsłona czeka na gospodarza")
+adv(r, 60)
+check(r.phase == "reveal", "bez automatycznego przejścia")
+r.next()
+check(r.phase == "round" and r.round == 1 and r.task["sub"] == "ready", "gospodarz przechodzi do kolejnej rundy")
+r.answer(A, {"light": True}, "pl")
+check(r.mult() == r.cfg["final_x"], "ostatnia runda z mnożnikiem")
+r2, _ = room(2, {"bomb_fuse": "short"}, modes=["bomba"]); r2.start(); r2.answer(r2.players[r2.host], {"light": True}, "pl")
+check(15 <= r2.task["fuse"] <= 30, "krótki lont 15-30 s")
+pk = json.loads(json.dumps(FX["pack"])); pk["bombs"] = []
+av = rooms.availability(pk, FX["movies"], False)
+check(not av["bomba"]["ok"] and av["hotbuzz"]["ok"], "Bomba wymaga kategorii, Hot buzz 5 filmów z muzyką")
+ms = json.loads(json.dumps(FX["movies"]))
+for m in ms[4:]:
+    m["music"] = False
+check(not rooms.availability(FX["pack"], ms, False)["hotbuzz"]["ok"], "mniej niż 5 filmów z muzyką: Hot buzz niedostępny")
+
+print("Hot buzz: muzyka, buzzer, blokada po pudle")
+r, (A, B, C) = room(3, {"buzz_answer": 8}, modes=["hotbuzz"])
+r.start()
+t = r.task
+check(t["movie"]["music"] and t["clip"] == "/music/%d.mp3" % t["movie"]["id"] and t["sub"] == "ready", "runda z klipem, czeka na start")
+check(r.answer(B, {"ready": True}, "pl")["ok"] and B["id"] in r.state(A)["ready"], "gracz zgłasza gotowość (odblokowanie dźwięku)")
+check(not r.answer(B, {"start": True}, "pl")["ok"], "tylko gospodarz startuje muzykę")
+r.answer(A, {"start": True}, "pl")
+s = r.state(B)
+check(s["playing"] and s["music_pos"] < 0, "muzyka rusza u wszystkich po krótkim wyprzedzeniu")
+check(not r.answer(B, {"buzz": True}, "pl")["ok"], "buzzer przed startem muzyki nie działa")
+adv(r, 5)
+check(abs(r.state(B)["music_pos"] - 4.0) < 0.01, "pozycja muzyki liczona przez serwer")
+check(r.answer(B, {"buzz": True}, "pl")["ok"] and r.task["sub"] == "answer", "pierwszy buzzer przejmuje odpowiedź")
+check(not r.answer(C, {"buzz": True}, "pl")["ok"], "drugi buzzer w tym czasie nie działa")
+s = r.state(C)
+check(not s["playing"] and s["buzzer_name"] == "B" and s["answer_left"] == 8, "muzyka pauzuje, 8 s na wpisanie")
+check(not r.answer(C, {"text": "Movie 1"}, "pl")["ok"], "wpisać może tylko ten, kto wcisnął")
+check(r.answer(B, {"text": "zupełnie nie to"}, "pl")["correct"] is False, "zły tytuł")
+check(B["id"] in r.task["locked"] and r.task["sub"] == "play", "pudło: gracz zablokowany, muzyka gra dalej")
+check(not r.answer(B, {"buzz": True}, "pl")["ok"], "zablokowany nie może wcisnąć ponownie")
+adv(r, 2)
+check(r.answer(C, {"buzz": True}, "pl")["ok"], "inni mogą wcisnąć po wznowieniu")
+adv(r, 9)
+check(C["id"] in r.task["locked"] and r.task["sub"] == "play", "brak odpowiedzi w czasie = pudło")
+adv(r, 1)
+pos = r.buzz_pos()
+r.answer(A, {"buzz": True}, "pl")
+title = r.task["movie"]["pl_title"]
+res = r.answer(A, {"text": title}, "pl")
+want = round(1000 - 500 * min(1, pos / r.task["clip_len"]))
+check(res["correct"] and res["points"] == want * r.mult(), "dobry tytuł (polski): punkty maleją z czasem muzyki")
+check(r.phase == "reveal" and A["history"][-1] == want * r.mult() and B["history"][-1] == 0, "punkty tylko dla zgadującego")
+st = r.state(B)["answer"]
+check(st["winner_name"] == "A" and st["title"] and len(st["tries"]) == 3, "odsłona: tytuł, zwycięzca, próby")
+r, (A, B) = room(2, {}, modes=["hotbuzz"]); r.start(); r.answer(A, {"start": True}, "pl")
+adv(r, 2); r.answer(A, {"buzz": True}, "pl"); r.answer(A, {"text": "nope"}, "pl")
+adv(r, 1); r.answer(B, {"buzz": True}, "pl"); r.answer(B, {"text": "nope"}, "pl")
+check(r.phase == "reveal" and not r.task["winner"], "wszyscy zablokowani: koniec rundy bez punktów")
+r, (A, B) = room(2, {}, modes=["hotbuzz"]); r.start(); r.answer(A, {"start": True}, "pl")
+adv(r, 30)
+check(r.phase == "reveal" and r.state(A)["untimed"], "koniec klipu: koniec rundy, gospodarz przechodzi dalej")
+r, (A, B) = room(2, {"titles": "en"}, modes=["hotbuzz"]); r.start(); r.answer(A, {"start": True}, "pl"); adv(r, 2)
+r.answer(B, {"buzz": True}, "en")
+check(r.answer(B, {"text": r.task["movie"]["title"]}, "en")["correct"], "angielski tytuł zaliczony w EN")
+check(rooms.norm_settings({"buzz_answer": 99, "bomb_fuse": "x"})["buzz_answer"] == 20 and rooms.norm_settings({"bomb_fuse": "x"})["bomb_fuse"] == "normal", "zakresy ustawień nowych trybów")
+
+print("migracja faza 7: addytywna, jednorazowe kategorie Bomby")
+import shutil as _sh, tempfile as _tf, sqlite3 as _sq
+_src = HERE / "quiz.db"
+if _src.exists():
+    _d = Path(_tf.mkdtemp(prefix="kadr-mig-")); _f = _d / "copy.db"; _sh.copy(_src, _f)
+    _c0 = _sq.connect(_f); _before = _c0.execute("SELECT COUNT(*) FROM movies").fetchone()[0]; _c0.close()
+    import db as _db
+    _c = _db.init_db(_f, seed=False)
+    _n1 = _c.execute("SELECT COUNT(*) FROM questions WHERE kind='bomba'").fetchone()[0]
+    _packs = _c.execute("SELECT COUNT(*) FROM packs").fetchone()[0]
+    check(_n1 >= _packs and _c.execute("SELECT COUNT(*) FROM movies").fetchone()[0] == _before, "kategorie Bomby dla każdego pakietu, filmy bez zmian")
+    check(_c.execute("SELECT COUNT(*) FROM questions WHERE kind='licytacja'").fetchone()[0] >= 0 and
+          {"music_on", "music_url", "music_error"} <= {r[1] for r in _c.execute("PRAGMA table_info(movies)")}, "nowe kolumny movies")
+    _c.close()
+    _c = _db.init_db(_f, seed=False)
+    check(_c.execute("SELECT COUNT(*) FROM questions WHERE kind='bomba'").fetchone()[0] == _n1, "druga migracja nic nie dubluje")
+    _c.execute("DELETE FROM questions WHERE kind='bomba'"); _c.commit(); _c.close()
+    _c = _db.init_db(_f, seed=False)
+    check(_c.execute("SELECT COUNT(*) FROM questions WHERE kind='bomba'").fetchone()[0] == 0, "usunięte przez admina kategorie nie wracają")
+    _c.close(); _sh.rmtree(_d, ignore_errors=True)
+import music as _music
+check(_music.score_entry({"title": "Halloween (1978) Main Theme", "duration": 180}, "Halloween", 1978) is not None, "muzyka: motyw przyjęty")
+check(_music.score_entry({"title": "Halloween Theme REACTION", "duration": 180}, "Halloween", 1978) is None
+      and _music.score_entry({"title": "Halloween Theme 10 hours", "duration": 36000}, "Halloween", 1978) is None, "muzyka: reakcje i 10-godzinne pętle odrzucone")
+_rms = [100.0] * 20 + [3000.0] * 30 + [200.0] * 60
+check(18 <= _music.pick_window(_rms) <= 25, "muzyka: okno 25 s w najgłośniejszym fragmencie")
+check(_music.url_start("https://youtu.be/abc?t=1m13s") == 73, "muzyka: start z linku")
+
 # składnia frontendu — zepsuty i18n.js wyłącza całą stronę
 import subprocess, pathlib
 for name in ("static/i18n.js", "static/game.js", "static/admin.js", "static/rt.js"):

@@ -118,6 +118,56 @@ Object.assign(EN, {
   "Żaden z {k} trailerów nie dał się pobrać": "None of the {k} trailers could be downloaded",
   "Brak trailera: {x}": "No trailer: {x}",
 });
+Object.assign(EN, {
+  "Bomba": "Bomb",
+  "Hot buzz": "Hot buzz",
+  "kategorie": "categories",
+  "filmy z muzyką": "movies with music",
+  "Bomba krąży między graczami, kto ją ma, mówi tytuł z kategorii, a gospodarz klika dobra albo zła. Dane: kategorie (PL/EN).": "The bomb goes around the players, whoever holds it says a title from the category and the host clicks good or wrong. Data: categories (PL/EN).",
+  "Leci muzyka z filmu, kto pierwszy wciśnie buzzer, wpisuje tytuł. Dane: fragmenty muzyki pobrane lokalnie (min. 5 filmów).": "Movie music plays, the first to hit the buzzer types the title. Data: music clips fetched locally (min. 5 movies).",
+  "kategorie Bomby": "Bomb categories",
+  "muzyka do Hot buzz": "Hot buzz music",
+  "edytuj kategorię": "edit category",
+  "nowa kategoria": "new category",
+  "Kategoria po polsku": "Category in Polish",
+  "Kategoria po angielsku": "Category in English",
+  "np. Horrory z duchami": "e.g. Ghost horror movies",
+  "Przykładowe odpowiedzi (opcjonalnie, jedna w linii) - widzi je tylko gospodarz": "Example answers (optional, one per line) - only the host sees them",
+  "Odpowiedzi w Bombie mówi się na głos, a gospodarz klika dobra albo zła. Lista przykładów tylko mu podpowiada.": "In Bomb answers are said out loud and the host clicks good or wrong. The examples are just a hint for the host.",
+  "bomba: kategorie": "bomb: categories",
+  "Każda runda Bomby losuje jedną kategorię. Gracz z bombą mówi pasujący tytuł, gospodarz ocenia. Tryb działa od 1 kategorii.": "Each Bomb round draws one category. The player holding the bomb says a matching title, the host judges. The mode works from 1 category.",
+  "przykłady: {n}": "examples: {n}",
+  "Brak kategorii. Bez nich Bomba jest niedostępna.": "No categories. Without them Bomb is unavailable.",
+  "wklej wiele kategorii": "paste many categories",
+  "Kategorie oddziel pustą linią. Pierwsza linia: <b>kategoria PL | kategoria EN</b>, kolejne linie (opcjonalnie): przykładowe odpowiedzi.": "Separate categories with a blank line. First line: <b>category PL | category EN</b>, next lines (optional): example answers.",
+  "Usunąć kategorię?": "Delete this category?",
+  "Zapisano {n} kategorii": "Saved {n} categories",
+  "jest": "ready",
+  "błąd": "error",
+  "czeka": "waiting",
+  "hot buzz: muzyka": "hot buzz: music",
+  "z muzyką: {a} / min. {b}": "with music: {a} / min. {b}",
+  "Z linii poleceń (w folderze gry):": "From the command line (in the game folder):",
+  "filmy": "movies",
+  "zaznacz wszystkie": "select all",
+  "odznacz wszystkie": "clear all",
+  "w grze": "in game",
+  "film": "movie",
+  "muzyka": "music",
+  "podgląd": "preview",
+  "pobierz muzykę dla tego filmu": "fetch music for this movie",
+  "własny link YouTube (opcjonalnie, np. ...&t=73)": "own YouTube link (optional, e.g. ...&t=73)",
+  "pobierz muzykę (od nowa)": "fetch music (again)",
+  "pobierz": "fetch",
+  "usuń muzykę": "delete music",
+  "Brak filmów w pakiecie.": "No movies in this pack.",
+  "pobierz muzykę": "fetch music",
+  "Dla zaznaczonych filmów szukam na YouTube „tytuł rok main theme soundtrack”, wybieram najbardziej rozpoznawalne ok. 25 s i zapisuję małe mp3 (80 kb/s) w bazie. Wymaga yt-dlp i ffmpeg.": "For the selected movies I search YouTube for “title year main theme soundtrack”, pick the most recognizable ~25 s and save a small mp3 (80 kbps) in the database. Needs yt-dlp and ffmpeg.",
+  "pobierz od nowa także filmy, które już mają muzykę": "refetch movies that already have music",
+  "pobierz muzykę dla zaznaczonych ({n})": "fetch music for selected ({n})",
+  "Usunąć muzykę tego filmu?": "Delete this movie's music?",
+  "Plakaty, obsada, cytaty, pytania do licytacji, kategorie Bomby i muzyka.": "Posters, cast, quotes, auction questions, Bomb categories and music."
+});
 const ROLES = [["hard",T("trudny")],["medium",T("średni")],["easy",T("łatwy")]];
 const KEYS_PL = "Klawisze: <span class=\"kbd\">&larr;</span> <span class=\"kbd\">&rarr;</span> filmy, <span class=\"kbd\">N</span> nast\u0119pny bez wyboru, najed\u017a na kadr i <span class=\"kbd\">1</span> trudny <span class=\"kbd\">2</span> \u015bredni <span class=\"kbd\">3</span> \u0142atwy <span class=\"kbd\">4</span> zoom.";
 const CLOUD = !!window.KADR_CLOUD;
@@ -200,7 +250,7 @@ async function route() {
   if (h === "/new") { if (CLOUD) return (location.hash = "#/"); return packForm(null); }
   if ((m = h.match(/^\/pack\/(\d+)$/))) return packPage(+m[1]);
   if ((m = h.match(/^\/pick\/(\d+)\/(\d+)$/))) { if (CLOUD) return (location.hash = "#/pack/" + m[1]); return picker(+m[1], +m[2]); }
-  if ((m = h.match(/^\/(modes|posters|cast|quotes|questions|zoom)\/(\d+)$/))) return EDITORS[m[1]](+m[2]);
+  if ((m = h.match(/^\/(modes|posters|cast|quotes|questions|zoom|bombs|music)\/(\d+)$/))) return EDITORS[m[1]](+m[2]);
   location.hash = "#/";
 }
 
@@ -494,9 +544,9 @@ boot();
 /* faza 3: tryby, TMDB, polskie tytuły */
 const castN = m => { try { return JSON.parse(m.cast_json || "[]").length; } catch { return 0; } };
 const quoteN = m => m.nquotes || 0;
-const MODE_NAMES = {kadry: "Kadry", zoom: "Zoom", licytacja: "Licytacja", rok: "Który rok", kolejnosc: "Ułóż po kolei", plakat: "Plakat", aktorzy: "Aktorzy", top: "Top"};
-const NEED_TXT = {frames: "filmy z kadrami", movies: "filmy w pakiecie", years: "filmy z rokiem", posters: "plakaty", cast: "filmy z obsadą", questions: "pytania"};
-const MODE_NEED = {kadry: "frames", zoom: "frames", licytacja: "questions", rok: "years", kolejnosc: "years", plakat: "posters", aktorzy: "cast", top: "movies"};
+const MODE_NAMES = {kadry: "Kadry", zoom: "Zoom", licytacja: "Licytacja", rok: "Który rok", kolejnosc: "Ułóż po kolei", plakat: "Plakat", aktorzy: "Aktorzy", top: "Top", bomba: "Bomba", hotbuzz: "Hot buzz"};
+const NEED_TXT = {frames: "filmy z kadrami", movies: "filmy w pakiecie", years: "filmy z rokiem", posters: "plakaty", cast: "filmy z obsadą", questions: "pytania", bombs: "kategorie", music: "filmy z muzyką"};
+const MODE_NEED = {kadry: "frames", zoom: "frames", licytacja: "questions", rok: "years", kolejnosc: "years", plakat: "posters", aktorzy: "cast", top: "movies", bomba: "bombs", hotbuzz: "music"};
 
 async function modesPanel(id) {
   const box = $("#modespanel"); if (!box) return;
@@ -507,7 +557,7 @@ async function modesPanel(id) {
       return `<label class="mt ${enough ? "" : "lack"}"><input type="checkbox" value="${k}" ${on ? "checked" : ""}><b>${T(MODE_NAMES[k])}</b>
         <span class="sub">${T(NEED_TXT[MODE_NEED[k]])}: ${a.have}/${a.need}${enough ? "" : " - " + T("za mało")}</span></label>`; }).join("")}</div>
     <div class="tmdb"><a class="pill orange small" href="#/modes/${id}">${T("Otwórz edytor trybów")}</a>
-      <span class="muted" style="font-size:14px">${T("Plakaty, obsada, cytaty i pytania do licytacji.")}</span>
+      <span class="muted" style="font-size:14px">${T("Plakaty, obsada, cytaty, pytania do licytacji, kategorie Bomby i muzyka.")}</span>
     </div>`;
   box.querySelectorAll(".mt input").forEach(cb => cb.onchange = async () => {
     const off = [...box.querySelectorAll(".mt input")].filter(x => !x.checked).map(x => x.value);
@@ -593,9 +643,11 @@ const MODE_DESC = {
   kolejnosc: "Ułóż filmy od najstarszego. Dane: rok filmu.",
   plakat: "Rozmyty plakat wyostrza się. Dane: plakaty z IMDb, Filmweb albo TMDB.",
   aktorzy: "Nazwiska z obsady odsłaniane po kolei, gwiazda na końcu. Dane: obsada.",
-  top: "Każdy układa topkę tych samych filmów, potem odgaduje topkę innego gracza. Dane: filmy w pakiecie (domyślnie 5)."};
-const MODE_EDITOR = {kadry: "pack", zoom: "zoom", rok: "pack", kolejnosc: "pack", plakat: "posters", aktorzy: "cast", licytacja: "questions"};
-const EDIT_NAMES = {pack: "lista filmów", posters: "edytor plakatów", cast: "edytor obsady", quotes: "edytor cytatów", questions: "pytania do licytacji", zoom: "kadr do Zoomu"};
+  top: "Każdy układa topkę tych samych filmów, potem odgaduje topkę innego gracza. Dane: filmy w pakiecie (domyślnie 5).",
+  bomba: "Bomba krąży między graczami, kto ją ma, mówi tytuł z kategorii, a gospodarz klika dobra albo zła. Dane: kategorie (PL/EN).",
+  hotbuzz: "Leci muzyka z filmu, kto pierwszy wciśnie buzzer, wpisuje tytuł. Dane: fragmenty muzyki pobrane lokalnie (min. 5 filmów)."};
+const MODE_EDITOR = {kadry: "pack", zoom: "zoom", rok: "pack", kolejnosc: "pack", plakat: "posters", aktorzy: "cast", licytacja: "questions", bomba: "bombs", hotbuzz: "music"};
+const EDIT_NAMES = {pack: "lista filmów", posters: "edytor plakatów", cast: "edytor obsady", quotes: "edytor cytatów", questions: "pytania do licytacji", zoom: "kadr do Zoomu", bombs: "kategorie Bomby", music: "muzyka do Hot buzz"};
 
 function edHead(p, title, extra = "") {
   return `<div class="ph1"><div><a href="#/modes/${p.id}" class="muted backl">&larr; ${esc(packName(p))} · ${T("edytor trybów")}</a><h1>${title}<span class="ast">*</span></h1></div>${extra}</div>`;
@@ -978,4 +1030,116 @@ async function questionsPage(id) {
   $("#bqsave").onclick = () => { if ($("#bqtext").value !== last) return preview(false); preview(true).catch(e => toast(e.message)); };
   $("#bqtext").oninput = () => { $("#bqsave").disabled = true; };
 }
-const EDITORS = {modes: modesHub, posters: postersPage, cast: castPage, quotes: quotesPage, questions: questionsPage, zoom: zoomPage};
+/* Bomba: kategorie PL/EN, przykładowe odpowiedzi widzi tylko gospodarz */
+function bombModal(id, q) {
+  modal(`<h2>${q ? T("edytuj kategorię") : T("nowa kategoria")}</h2>
+    <div class="form-grid">
+      <label class="field full">${T("Kategoria po polsku")}<input class="input sm" name="prompt_pl" value="${esc(q?.prompt_pl || "")}" placeholder="${T("np. Horrory z duchami")}"></label>
+      <label class="field full">${T("Kategoria po angielsku")}<input class="input sm" name="prompt_en" value="${esc(q?.prompt_en || "")}" placeholder="Ghost horror movies"></label>
+      <label class="field full">${T("Przykładowe odpowiedzi (opcjonalnie, jedna w linii) - widzi je tylko gospodarz")}<textarea class="input sm" name="answers" rows="5" placeholder="The Conjuring; Obecność&#10;The Others; Inni">${esc((q?.answers || []).map(a => [a.text].concat(a.aliases || [], a.pl ? [a.pl] : []).filter((x, i, arr) => x && arr.indexOf(x) === i).join("; ")).join("\n"))}</textarea></label>
+    </div>
+    <p class="muted" style="margin:8px 0 0;font-size:14px">${T("Odpowiedzi w Bombie mówi się na głos, a gospodarz klika dobra albo zła. Lista przykładów tylko mu podpowiada.")}</p>
+    <div class="actions"><button type="button" class="pill ghost" data-close>${T("anuluj")}</button><button class="pill orange">${T("zapisz")}</button></div>`,
+    async fd => {
+      const body = {prompt_pl: fd.get("prompt_pl") || "", prompt_en: fd.get("prompt_en") || "", answers_text: fd.get("answers") || "", kind: "bomba"};
+      if (q) await api(`/api/admin/questions/${q.id}`, "PUT", body); else await api(`/api/admin/packs/${id}/bombs`, "POST", body);
+      toast(T("Zapisano")); bombsPage(id); });
+}
+async function bombsPage(id) {
+  const p = packs.find(x => x.id === id); if (!p) return (location.hash = "#/");
+  const qs = await api(`/api/admin/packs/${id}/bombs`);
+  $("#main").innerHTML = edHead(p, T("bomba: kategorie"), `<button class="pill orange" id="qnew">${T("nowa kategoria")}</button>`) + `
+    <p class="muted" style="margin:-6px 0 16px;font-size:15px">${T("Każda runda Bomby losuje jedną kategorię. Gracz z bombą mówi pasujący tytuł, gospodarz ocenia. Tryb działa od 1 kategorii.")}</p>
+    <div class="ed-grid">
+      <div class="panel"><h2>${T("kategorie")} <span class="muted">(${qs.length})</span></h2>
+        ${qs.length ? `<div class="qlist">${qs.map(q => `<div class="qq" data-id="${q.id}"><div class="row" style="justify-content:space-between;flex-wrap:nowrap;align-items:flex-start">
+            <div><div class="t">${esc(q.prompt_pl || q.prompt_en)}</div>${q.prompt_pl && q.prompt_en ? `<div class="sub">EN: ${esc(q.prompt_en)}</div>` : !q.prompt_pl ? `<div class="sub">${T("tylko EN")}</div>` : ""}
+              ${(q.answers || []).length ? `<div class="sub">${T("przykłady: {n}", {n: q.answers.length})}</div>` : ""}</div>
+            <div class="row" style="gap:6px;flex-wrap:nowrap"><button class="ibtn" data-a="edit" title="${T("edytuj")}">${ICON.edit || T("edytuj")}</button><button class="ibtn" data-a="del" title="${T("usuń")}">${ICON.del || "&times;"}</button></div></div>
+            </div>`).join("")}</div>`
+        : `<p class="empty">${T("Brak kategorii. Bez nich Bomba jest niedostępna.")}</p>`}
+      </div>
+      <div class="panel"><h2>${T("wklej wiele kategorii")}</h2>
+        <p class="muted" style="font-size:14px;margin:0 0 10px">${T("Kategorie oddziel pustą linią. Pierwsza linia: <b>kategoria PL | kategoria EN</b>, kolejne linie (opcjonalnie): przykładowe odpowiedzi.")}</p>
+        <textarea class="input" id="bqtext" rows="10" placeholder="Horrory z duchami | Ghost horror movies\nThe Conjuring; Obecność\nThe Others; Inni\n\nFilmy z liczbą w tytule | Movies with a number in the title"></textarea>
+        <div class="row" style="margin-top:10px"><button class="pill light" id="bqprev">${T("podgląd")}</button><button class="pill orange" id="bqsave" disabled>${T("zapisz poprawne")}</button></div>
+        <div id="bqres"></div>
+      </div></div>`;
+  $("#qnew").onclick = () => bombModal(id, null);
+  document.querySelectorAll(".qq[data-id]").forEach(el => {
+    const q = qs.find(x => x.id === +el.dataset.id);
+    el.querySelector("[data-a=edit]").onclick = () => bombModal(id, q);
+    el.querySelector("[data-a=del]").onclick = async () => { if (confirm(T("Usunąć kategorię?"))) { await api(`/api/admin/questions/${q.id}`, "DELETE"); bombsPage(id); } };
+  });
+  let last = "";
+  const preview = async apply => {
+    const text = $("#bqtext").value; if (!text.trim()) return toast(T("Wklej listę"));
+    const r = await api(`/api/admin/packs/${id}/bombs`, "POST", {bulk: text, apply}); last = text;
+    $("#bqres").innerHTML = `<p class="plsum"><b>${T("poprawne: {n}", {n: r.ok})}</b> · ${T("błędne: {n}", {n: r.rows.length - r.ok})}</p>
+      ${r.rows.map(x => `<div class="qq ${x.status}"><div class="t">${esc(x.prompt_pl || x.prompt_en || "?")}${x.status !== "ok" ? ` <span class="badge error">${T("potrzeba pytania PL albo EN")}</span>` : ""}</div>
+        ${x.prompt_pl && x.prompt_en ? `<div class="sub">EN: ${esc(x.prompt_en)}</div>` : ""}${(x.answers || []).length ? `<div class="sub">${T("przykłady: {n}", {n: x.answers.length})}</div>` : ""}</div>`).join("")}`;
+    $("#bqsave").disabled = apply || !r.ok;
+    if (apply) { toast(T("Zapisano {n} kategorii", {n: r.saved})); setTimeout(() => bombsPage(id), 900); }
+  };
+  $("#bqprev").onclick = () => preview(false).catch(e => toast(e.message));
+  $("#bqsave").onclick = () => { if ($("#bqtext").value !== last) return preview(false); preview(true).catch(e => toast(e.message)); };
+  $("#bqtext").oninput = () => { $("#bqsave").disabled = true; };
+}
+
+/* Hot buzz: zaznaczasz filmy, lokalny scraper (yt-dlp + ffmpeg) pobiera ok. 25 s motywu do bazy */
+const MUSIC_LOCAL_PL = "Muzykę pobiera tylko lokalny panel albo skrypt na Twoim komputerze (yt-dlp + ffmpeg), bo Worker Cloudflare nie uruchomi YouTube ani ffmpeg. Do chmury trafia z pełnym wgraniem danych (deploy_cloudflare.py), samo wdrożenie kodu nie wystarczy.";
+const MUSIC_LOCAL_EN = "Music is fetched only by the local panel or script on your computer (yt-dlp + ffmpeg), because a Cloudflare Worker cannot run YouTube or ffmpeg. It reaches the cloud with a full data upload (deploy_cloudflare.py); a code-only deploy is not enough.";
+async function musicPage(id) {
+  const p = packs.find(x => x.id === id); if (!p) return (location.hash = "#/");
+  const d = await api(`/api/admin/packs/${id}/music`);
+  const en = document.documentElement.lang === "en";
+  const cmd = `python music.py --pack ${p.slug || id}`;
+  const fmt = s => s ? (Math.round(s) + " s") : "";
+  const status = m => m.have ? `<span class="badge ok">${T("jest")} ${fmt(m.dur)}</span>`
+    : m.music_error ? `<span class="badge error" title="${esc(m.music_error)}">${T("błąd")}</span>`
+    : m.music_on ? `<span class="badge pending">${T("czeka")}</span>` : `<span class="muted">-</span>`;
+  $("#main").innerHTML = edHead(p, T("hot buzz: muzyka"), `<span class="tag">${T("z muzyką: {a} / min. {b}", {a: d.have, b: d.need})}</span>`) + `
+    <div class="panel" style="border-left:6px solid var(--orange);margin-bottom:14px"><p style="margin:0;line-height:1.45">${en ? MUSIC_LOCAL_EN : MUSIC_LOCAL_PL}</p>
+      ${CLOUD ? "" : `<p class="muted" style="margin:8px 0 0;font-size:14px">${T("Z linii poleceń (w folderze gry):")} <code>${esc(cmd)}</code></p>`}</div>
+    <div class="ed-grid music-grid">
+      <div class="panel"><div class="row" style="justify-content:space-between"><h2>${T("filmy")} <span class="muted">(${d.movies.length})</span></h2>
+        ${CLOUD ? "" : `<div class="row" style="gap:6px"><button class="pill small light" id="mall">${T("zaznacz wszystkie")}</button><button class="pill small light" id="mnone">${T("odznacz wszystkie")}</button></div>`}</div>
+        <div style="overflow-x:auto"><table class="ptable musictable"><thead><tr>${CLOUD ? "" : `<th>${T("w grze")}</th>`}<th>${T("film")}</th><th>${T("muzyka")}</th><th class="hide-m">${T("podgląd")}</th>${CLOUD ? "" : `<th></th>`}</tr></thead><tbody>
+        ${d.movies.map(m => `<tr data-id="${m.id}">
+          ${CLOUD ? "" : `<td><input type="checkbox" class="mon" ${m.music_on ? "checked" : ""} aria-label="${T("pobierz muzykę dla tego filmu")}"></td>`}
+          <td><div class="t">${esc(m.title)}${m.year ? ` <span class="muted">(${m.year})</span>` : ""}</div>${m.pl_title ? `<div class="sub">PL: ${esc(m.pl_title)}</div>` : ""}
+            ${m.video_title ? `<div class="sub">${esc(m.video_title)}</div>` : ""}${m.music_error && !m.have ? `<div class="sub" style="color:var(--err)">${esc(m.music_error)}</div>` : ""}
+            ${CLOUD ? "" : `<input class="input sm murl" placeholder="${T("własny link YouTube (opcjonalnie, np. ...&t=73)")}" value="${esc(m.music_url || "")}">`}</td>
+          <td>${status(m)}</td>
+          <td class="hide-m">${m.have ? `<audio controls preload="none" src="/music/${m.id}.mp3?v=${Math.round(m.updated || 0)}"></audio>` : ""}</td>
+          ${CLOUD ? "" : `<td><div class="row" style="gap:6px;flex-wrap:nowrap"><button class="ibtn" data-a="get" title="${T("pobierz muzykę (od nowa)")}">${ICON.run || T("pobierz")}</button>${m.have ? `<button class="ibtn danger" data-a="del" title="${T("usuń muzykę")}">${ICON.del || "&times;"}</button>` : ""}</div></td>`}
+        </tr>`).join("") || `<tr><td colspan="5" class="empty">${T("Brak filmów w pakiecie.")}</td></tr>`}</tbody></table></div></div>
+      ${CLOUD ? `<div class="panel"><h2>${T("pobierz muzykę")}</h2><p class="muted" style="font-size:14px;margin:0">${en ? MUSIC_LOCAL_EN : MUSIC_LOCAL_PL}</p></div>`
+        : `<div class="panel"><h2>${T("pobierz muzykę")}</h2>
+        <p class="muted" style="font-size:14px;margin:0 0 10px">${T("Dla zaznaczonych filmów szukam na YouTube „tytuł rok main theme soundtrack”, wybieram najbardziej rozpoznawalne ok. 25 s i zapisuję małe mp3 (80 kb/s) w bazie. Wymaga yt-dlp i ffmpeg.")}</p>
+        <label class="toggle"><input type="checkbox" id="mredo"><span>${T("pobierz od nowa także filmy, które już mają muzykę")}</span></label>
+        <div class="row" style="margin-top:10px"><button class="pill orange" id="mgo">${T("pobierz muzykę dla zaznaczonych ({n})", {n: d.on})}</button></div>
+        <div id="scrapebox" style="margin-top:12px"></div></div>`}
+    </div>`;
+  if (CLOUD) return;
+  const put = (body) => api(`/api/admin/packs/${id}/music`, "PUT", body);
+  document.querySelectorAll(".musictable tr[data-id]").forEach(tr => {
+    const mid = +tr.dataset.id;
+    tr.querySelector(".mon").onchange = async e => { await put({ids: [mid], on: e.target.checked}); toast(T("Zapisano")); };
+    const u = tr.querySelector(".murl");
+    u.onchange = async () => { try { await api(`/api/admin/movies/${mid}/music`, "PUT", {music_url: u.value.trim()}); toast(T("Zapisano")); } catch (e) { toast(e.message); } };
+    tr.querySelector("[data-a=get]").onclick = async () => {
+      try { await api(`/api/admin/movies/${mid}/music`, "PUT", {music_on: true}); const r = await api(`/api/admin/packs/${id}/music`, "POST", {movie_ids: [mid], redo: true}); toast(T("Start: {n} filmów", {n: r.count})); const b = $("#scrapebox"); b.dataset.was = "1"; b.dataset.reload = "1"; }
+      catch (e) { toast(e.message); } };
+    const del = tr.querySelector("[data-a=del]");
+    if (del) del.onclick = async () => { if (confirm(T("Usunąć muzykę tego filmu?"))) { await api(`/api/admin/movies/${mid}/music`, "DELETE"); musicPage(id); } };
+  });
+  $("#mall").onclick = async () => { await put({all: true}); musicPage(id); };
+  $("#mnone").onclick = async () => { await put({all: false}); musicPage(id); };
+  $("#mgo").onclick = async () => {
+    try { const r = await api(`/api/admin/packs/${id}/music`, "POST", {redo: $("#mredo").checked}); toast(T("Start: {n} filmów", {n: r.count})); const b = $("#scrapebox"); b.dataset.was = "1"; b.dataset.reload = "1"; }
+    catch (e) { toast(e.message); }
+  };
+  startLog(); $("#scrapebox").dataset.reload = "1";
+}
+const EDITORS = {modes: modesHub, posters: postersPage, cast: castPage, quotes: quotesPage, questions: questionsPage, zoom: zoomPage, bombs: bombsPage, music: musicPage};

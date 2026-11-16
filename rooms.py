@@ -1,6 +1,7 @@
 """rooms.py - silnik gry: tryby rund, dopasowanie odpowiedzi, punktacja (tylko biblioteka standardowa)."""
 import json
 import random
+import sqlite3
 import re
 import secrets
 import time
@@ -10,7 +11,7 @@ import db
 
 STAGE_SECONDS = 15          # Kadry: trudny -> średni -> łatwy, co 15 s
 REVEAL_SECONDS = 9
-MANUAL_REVEAL = ("top", "kolejnosc")   # wyniki tych trybów zawsze czekają na gospodarza
+MANUAL_REVEAL = ("top", "kolejnosc", "bomba", "hotbuzz")   # wyniki tych trybów zawsze czekają na gospodarza
 STAGE_POINTS = [1000, 600, 300]
 FIRST_BONUS = 100
 MAX_PLAYERS = 16
@@ -22,13 +23,32 @@ TOP_GUESS = 45              # sekundy na odgadywanie cudzej
 MOST_TIME = 90              # dawny limit rundy Mostu (Filmrun nie używa zegara)
 LIC_BID_CAP = 30            # max deklaracja, gdy pytanie nie ma listy odpowiedzi
 
-MODES = ["kadry", "zoom", "licytacja", "rok", "kolejnosc", "plakat", "aktorzy", "top"]
+MODES = ["kadry", "zoom", "licytacja", "rok", "kolejnosc", "plakat", "aktorzy", "top", "bomba", "hotbuzz"]
 DURATION = {"kadry": 3 * STAGE_SECONDS, "zoom": 30, "plakat": 30, "top": TOP_OWN, "rok": 25, "kolejnosc": 40}
 ACTOR_SECONDS = 6
 MAX_ACTORS = 8
 BID_SECONDS = 15
 ORDER_N = 4
 TITLE_MODES = {"kadry", "zoom", "plakat", "aktorzy"}
+
+def example_label(a):
+    """Przykładowa odpowiedź Bomby dla gospodarza: "The Conjuring (Obecność)"."""
+    if isinstance(a, str):
+        return a
+    al = [x for x in (a.get("aliases") or []) + ([a["pl"]] if a.get("pl") else []) if x and x != a.get("text")]
+    return (a.get("text") or "") + (f" ({', '.join(dict.fromkeys(al))})" if al else "")
+
+
+# Bomba: ukryty, losowy lont (s) zależnie od ustawienia; punkty
+BOMB_FUSE = {"short": (15, 30), "normal": (20, 45), "long": (35, 60)}
+BOMB_SURVIVE = 500          # po wybuchu każdy poza trzymającym bombę
+BOMB_ANSWER = 100           # za każdą odpowiedź zaliczoną przez gospodarza
+BOMB_DEBOUNCE = 0.6         # podwójne kliknięcie "dobra" nie przerzuca bomby dwa razy
+# Hot buzz: fragment muzyki, buzzer, czas na wpisanie tytułu
+BUZZ_MIN_MUSIC = 5          # tryb dostępny od tylu filmów z muzyką
+BUZZ_LEAD = 1.0             # muzyka startuje chwilę po kliknięciu, żeby wszyscy zaczęli równo
+BUZZ_MAX, BUZZ_MIN = 1000, 500
+CLIP_DEFAULT = 25
 
 
 
@@ -55,7 +75,7 @@ LIC_DONE_DELAY = 3          # licytacja na głos: chwila na cofnięcie ostatnieg
 DEFAULTS = {"time": 0, "mode_time": {}, "order": "mix", "per_mode": False, "mode_rounds": {},
             "answer": "type", "mode_answer": {}, "judge": "rotate", "lic_answer": 30, "lic_bid": 10,
             "hints": True, "final_x": 1, "top_n": TOP_N, "top_own": TOP_OWN, "top_guess": TOP_GUESS,
-            "most_time": MOST_TIME, "titles": "ui"}
+            "most_time": MOST_TIME, "titles": "ui", "bomb_fuse": "normal", "buzz_answer": 8}
 
 
 def _int(v, lo, hi, dflt):
@@ -128,6 +148,8 @@ def norm_settings(d):
         "top_guess": phase_limit(d.get("top_guess"), 15, 180, TOP_GUESS),
         "most_time": _int(d.get("most_time"), 30, 180, MOST_TIME),
         "titles": titles,
+        "bomb_fuse": d.get("bomb_fuse") if d.get("bomb_fuse") in BOMB_FUSE else "normal",
+        "buzz_answer": _int(d.get("buzz_answer"), 4, 20, 8),
     }
 
 
@@ -203,6 +225,11 @@ def load_pack(con, pack_id):
     movies = []
     posters = {r[0] for r in con.execute(
         "SELECT p.movie_id FROM posters p JOIN movies m ON m.id=p.movie_id WHERE m.pack_id=?", (pack_id,))}
+    try:
+        music = {r[0]: r[1] for r in con.execute(
+            "SELECT mu.movie_id, mu.dur FROM music mu JOIN movies m ON m.id=mu.movie_id WHERE m.pack_id=?", (pack_id,))}
+    except sqlite3.OperationalError:     # baza sprzed migracji (bez tabeli music)
+        music = {}
     quotes = {}
     for q in con.execute("SELECT q.id, q.movie_id, q.text, q.lang FROM quotes q JOIN movies m ON m.id=q.movie_id "
                          "WHERE m.pack_id=? ORDER BY q.id", (pack_id,)):
@@ -216,13 +243,21 @@ def load_pack(con, pack_id):
         zf = db.game_zoom_frame(con, m["id"]) if m["status"] == "ok" else None
         movies.append({"id": m["id"], "title": m["title"], "year": m["year"], "pl_title": m["pl_title"] or "",
                        "aliases": db.split_aliases(m["aliases"]), "quotes": quotes.get(m["id"], []),
-                       "frames": fr, "zoom_frame": zf, "poster": m["id"] in posters, "cast": cast})
+                       "frames": fr, "zoom_frame": zf, "poster": m["id"] in posters, "cast": cast,
+                       "music": m["id"] in music, "music_dur": round(float(music.get(m["id"]) or 0), 2) or None})
     return movies
 
 
-def load_questions(con, pack_id):
+def load_questions(con, pack_id, kind="licytacja"):
+    """Pytania licytacji (kind='licytacja') albo kategorie Bomby (kind='bomba')."""
     out = []
-    for r in con.execute("SELECT * FROM questions WHERE pack_id=? ORDER BY id", (pack_id,)):
+    cols = {c[1] for c in con.execute("PRAGMA table_info(questions)")}
+    if "kind" in cols:
+        rows = con.execute("SELECT * FROM questions WHERE pack_id=? AND IFNULL(kind,'licytacja')=? ORDER BY id",
+                           (pack_id, kind))
+    else:   # baza sprzed migracji: same pytania licytacji
+        rows = con.execute("SELECT * FROM questions WHERE pack_id=? ORDER BY id", (pack_id,)) if kind == "licytacja" else []
+    for r in rows:
         try:
             ans = json.loads(r["answers"] or "[]")
         except ValueError:
@@ -291,6 +326,7 @@ def remake_tags(items):
 def pack_data(con, pack):
     d = dict(pack)
     d["questions"] = load_questions(con, d["id"])
+    d["bombs"] = load_questions(con, d["id"], "bomba")
     return d
 
 
@@ -356,7 +392,7 @@ def merge_packs(con, pack_ids):
             packs.append(dict(row))
     if not packs:
         raise ValueError("no packs")
-    movies, questions, seen, qseen = [], [], {}, set()
+    movies, questions, bombs, seen, qseen = [], [], [], {}, set()
     for p in packs:
         for m in load_pack(con, p["id"]):
             key = (db.norm_title(m["title"]), m.get("year") or -1)
@@ -374,13 +410,17 @@ def merge_packs(con, pack_ids):
             if q["id"] not in qseen:
                 qseen.add(q["id"])
                 questions.append(q)
+        for q in load_questions(con, p["id"], "bomba"):
+            if q["id"] not in qseen:
+                qseen.add(q["id"])
+                bombs.append(q)
     names = [p["name"] for p in packs]
     pack = {
         "id": "custom", "slug": "custom", "name": "Custom", "name_en": "Custom",
         "description": " + ".join(names),
         "description_en": " + ".join(p.get("name_en") or p["name"] for p in packs),
         "color": packs[0]["color"] if packs else "#1B1712",
-        "modes_off": "", "questions": questions, "source_ids": [p["id"] for p in packs],
+        "modes_off": "", "questions": questions, "bombs": bombs, "source_ids": [p["id"] for p in packs],
     }
     return pack, movies
 
@@ -415,6 +455,8 @@ def availability(pack, movies, has_key, cfg=None):
         "plakat": (sum(1 for m in movies if m["poster"]), 3, "posters"),
         "aktorzy": (sum(1 for m in movies if len(m["cast"]) >= 3), 3, "cast"),
         "top": (len(movies), tn, "movies"),
+        "bomba": (len(pack.get("bombs") or []), 1, "bombs"),
+        "hotbuzz": (sum(1 for m in movies if m.get("music")), BUZZ_MIN_MUSIC, "music"),
     }
     out = {}
     for k in MODES:
@@ -478,7 +520,7 @@ class Room:
         if self.phase not in ("lobby", "final"):
             return
         if modes is not None:
-            chosen = list(dict.fromkeys(k for k in modes if k in MODES and self.avail[k]["ok"]))
+            chosen = list(dict.fromkeys(k for k in modes if k in MODES and self.avail.get(k, {}).get("ok")))
             if chosen:
                 self.modes = chosen          # kolejność gospodarza (ważna przy order="fixed")
         if rounds is not None:
@@ -510,7 +552,7 @@ class Room:
         mode, c = t["mode"], self.cfg
         if mode == "licytacja":
             return c["lic_answer"], c["lic_bid"]
-        if mode == "most":
+        if mode in ("most", "bomba", "hotbuzz"):
             return None, None
         if mode == "top":
             own, guess = c["top_own"], c["top_guess"]
@@ -599,6 +641,21 @@ class Room:
             q = random.choice(fresh) if fresh else fallback_question(ms)
             used.add(("q", q["id"]))
             return {"mode": mode, "q": q, "bids": [], "bidder": None, "bid": 0, "found": [], "type_end": None}
+        if mode == "bomba":
+            qs = self.pack.get("bombs") or []
+            if not qs:
+                return None
+            fresh = [q for q in qs if ("b", q["id"]) not in used] or qs
+            q = random.choice(fresh)
+            used.add(("b", q["id"]))
+            return {"mode": mode, "q": q}
+        if mode == "hotbuzz":
+            pool = [x for x in ms if x.get("music")]
+            if not pool:
+                return None
+            m = self.pick(pool, used)
+            return {"mode": mode, "movie": m, "clip": f"/music/{m['id']}.mp3",
+                    "clip_len": float(m.get("music_dur") or CLIP_DEFAULT)}
         return None
 
     @property
@@ -646,6 +703,14 @@ class Room:
             t.setdefault("started", {})
             t.setdefault("stopped", {})
             t["winner"] = None
+        elif t["mode"] == "bomba":
+            s = random.randrange(len(pl)) if pl else 0
+            t.update(order=pl[s:] + pl[:s], sub="ready", holder=(pl[s] if pl else None), passes=0, answers={},
+                     wrong={}, lit_at=None, fuse=None, fuse_end=None, heat_at=[], last=None, last_at=0.0,
+                     loser=None, exploded=False)
+        elif t["mode"] == "hotbuzz":
+            t.update(sub="ready", ready=[], offset=0.0, play_start=None, buzzer=None, answer_end=None,
+                     locked=[], tries=[], winner=None, win_pts=0, buzz_pos=0.0)
         elif t["voice"]:
             t.update(claims=[], peek=[])
         if t.get("dur") is None:
@@ -798,11 +863,180 @@ class Room:
             elif t["mode"] == "most":
                 if t.get("winner"):
                     self.end_round()
+            elif t["mode"] == "bomba":
+                if t.get("sub") == "live" and t.get("fuse_end") and now >= t["fuse_end"]:
+                    self.bomb_explode()
+                elif t.get("sub") == "live" and self.bomb_heat(now) != t.get("heat_seen", 0):
+                    t["heat_seen"] = self.bomb_heat(now)
+                    self.version += 1
+            elif t["mode"] == "hotbuzz":
+                self.buzz_tick(now)
             elif self.has_timer() and (el >= self.duration() or (act and all(p["ans"] is not None or p["got"] for p in act))):
                 self.end_round()
         elif self.phase == "reveal":
             if not self.reveal_manual() and now - self.t0 >= REVEAL_SECONDS + (6 if self.mode in ("kolejnosc", "licytacja", "top", "most") else 0):
                 self.next()
+
+    # --- Bomba
+    def bomb_judge(self):
+        """Odpowiedzi ocenia gospodarz; gdy go nie ma - pierwszy obecny gracz."""
+        if self.on(self.players.get(self.host)):
+            return self.host
+        return next(iter(self.online_ids()), None)
+
+    def bomb_heat(self, now=None):
+        """0..3: jak szybko tyka. Progi losowe w każdej rundzie, więc nie da się wyliczyć dokładnego czasu."""
+        t = self.task
+        if t.get("sub") != "live":
+            return 0
+        now = time.time() if now is None else now
+        return sum(1 for x in t.get("heat_at") or [] if now >= x)
+
+    def bomb_next(self, pid):
+        """Następny obecny gracz w kolejności (sam gracz, gdy gra solo)."""
+        order = [x for x in self.task["order"] if x in self.players]
+        if not order:
+            return None
+        i = order.index(pid) if pid in order else -1
+        for k in range(1, len(order) + 1):
+            cand = order[(i + k) % len(order)]
+            if self.on(self.players[cand]):
+                return cand
+        return pid
+
+    def bomb_light(self, p):
+        t = self.task
+        if p["id"] != self.bomb_judge() or t.get("sub") != "ready":
+            return {"ok": False}
+        now = time.time()
+        lo, hi = BOMB_FUSE.get(self.cfg.get("bomb_fuse"), BOMB_FUSE["normal"])
+        fuse = round(random.uniform(lo, hi), 2)
+        r1 = min(random.uniform(10, 16), fuse * 0.6)
+        r2 = min(random.uniform(5, 8), r1 * 0.6)
+        r3 = min(random.uniform(2, 3.5), r2 * 0.6)
+        end = now + fuse
+        if t.get("holder") not in self.players or not self.on(self.players.get(t.get("holder"))):
+            t["holder"] = self.bomb_next(t.get("holder")) or t.get("holder")
+        t.update(sub="live", lit_at=now, fuse=fuse, fuse_end=end, heat_at=[end - r1, end - r2, end - r3])
+        self.event("bomb", self.pname(t["holder"]) or "?")
+        self.version += 1
+        return {"ok": True}
+
+    def bomb_verdict(self, p, yes):
+        t = self.task
+        if p["id"] != self.bomb_judge() or t.get("sub") != "live":
+            return {"ok": False}
+        now = time.time()
+        if now >= t["fuse_end"]:
+            self.bomb_explode()
+            return {"ok": False, "late": True}
+        if now - (t.get("last_at") or 0) < BOMB_DEBOUNCE:
+            return {"ok": False, "fast": True}
+        holder = t["holder"]
+        t["last_at"] = now
+        if yes:
+            t["answers"][holder] = t["answers"].get(holder, 0) + 1
+            t["passes"] += 1
+            t["holder"] = self.bomb_next(holder)
+            t["last"] = "ok"
+            self.event("bombpass", self.pname(holder) or "?")
+        else:
+            t["wrong"][holder] = t["wrong"].get(holder, 0) + 1
+            t["last"] = "bad"
+            if holder in self.players:
+                self.players[holder]["wrong"] += 1
+            self.event("wrong", self.pname(holder) or "?")
+        self.version += 1
+        return {"ok": True, "holder": t["holder"]}
+
+    def bomb_explode(self):
+        t = self.task
+        if t.get("exploded"):
+            return
+        t.update(exploded=True, sub="boom", loser=t.get("holder"))
+        self.event("boom", self.pname(t["loser"]) or "?")
+        self.end_round()
+
+    # --- Hot buzz
+    def buzz_pos(self, now=None):
+        """Pozycja w klipie (s). Ujemna tuż po starcie: muzyka rusza za chwilę u wszystkich równo."""
+        t = self.task
+        now = time.time() if now is None else now
+        if t.get("sub") == "play" and t.get("play_start") is not None:
+            return t["offset"] + (now - t["play_start"])
+        return t.get("offset") or 0.0
+
+    def buzz_tick(self, now):
+        t = self.task
+        if t.get("sub") == "play" and self.buzz_pos(now) >= t["clip_len"]:
+            t["offset"] = t["clip_len"]
+            t["sub"] = "done"
+            self.end_round()
+        elif t.get("sub") == "answer" and t.get("answer_end") and now >= t["answer_end"]:
+            self.buzz_miss(t["buzzer"], timeout=True)
+
+    def buzz_resume(self):
+        t = self.task
+        alive = [pid for pid in self.online_ids() if pid not in t["locked"]]
+        t.update(buzzer=None, answer_end=None)
+        if not alive:
+            t["sub"] = "done"
+            return self.end_round()
+        t.update(sub="play", play_start=time.time() + BUZZ_LEAD * 0.6)
+        self.version += 1
+
+    def buzz_miss(self, pid, timeout=False, text=""):
+        t = self.task
+        if pid and pid not in t["locked"]:
+            t["locked"].append(pid)
+        t["tries"].append({"pid": pid, "ok": False, "text": str(text)[:60], "timeout": bool(timeout)})
+        if pid in self.players:
+            self.players[pid]["wrong"] += 1
+            self.event("wrong", self.players[pid]["name"])
+        self.buzz_resume()
+
+    def buzz_action(self, p, d, lang):
+        t = self.task
+        now = time.time()
+        sub = t.get("sub")
+        if d.get("ready"):
+            if p["id"] not in t["ready"]:
+                t["ready"].append(p["id"])
+                self.version += 1
+            return {"ok": True}
+        if d.get("start"):
+            if p["id"] != self.host or sub != "ready":
+                return {"ok": False}
+            t.update(sub="play", offset=0.0, play_start=now + BUZZ_LEAD)
+            self.version += 1
+            return {"ok": True}
+        if d.get("buzz"):
+            if sub != "play" or p["id"] in t["locked"]:
+                return {"ok": False, "locked": p["id"] in t["locked"]}
+            pos = self.buzz_pos(now)
+            if pos < 0:
+                return {"ok": False, "early": True}
+            t.update(sub="answer", offset=min(pos, t["clip_len"]), play_start=None, buzzer=p["id"],
+                     answer_end=now + self.cfg["buzz_answer"], buzz_pos=pos)
+            self.event("buzz", p["name"])
+            return {"ok": True, "buzzer": True}
+        if "text" in d:
+            if sub != "answer" or p["id"] != t["buzzer"]:
+                return {"ok": False}
+            text = str(d.get("text") or "")[:120]
+            match_lang = "pl" if (lang == "pl" or self.cfg.get("titles") in ("pl", "both")) else lang
+            if movie_distance(text, t["movie"], match_lang) is None:
+                self.buzz_miss(p["id"], text=text)
+                return {"ok": True, "correct": False}
+            frac = max(0.0, min(1.0, (t.get("buzz_pos") or 0) / max(1.0, t["clip_len"])))
+            t["win_pts"] = int(round(BUZZ_MAX - (BUZZ_MAX - BUZZ_MIN) * frac))
+            t["winner"] = p["id"]
+            t["tries"].append({"pid": p["id"], "ok": True, "text": text[:60], "timeout": False})
+            t["sub"] = "done"
+            self.event("guess", p["name"], t["win_pts"] * self.mult())
+            self.end_round()
+            return {"ok": True, "correct": True, "points": t["win_pts"] * self.mult()}
+        return {"ok": False}
 
     # --- licytacja po kolei
     def lic_tick(self, now):
@@ -881,6 +1115,18 @@ class Room:
             w = t.get("winner")
             for pid in self.players:
                 pts[pid] = (1000 * x) if pid == w else 0
+        elif t["mode"] == "bomba":
+            for pid in self.players:
+                n = BOMB_ANSWER * int(t.get("answers", {}).get(pid, 0))
+                if t.get("exploded") and pid != t.get("loser"):
+                    n += BOMB_SURVIVE
+                pts[pid] = n * x
+        elif t["mode"] == "hotbuzz":
+            if t.get("sub") == "play":
+                t["offset"] = min(t["clip_len"], max(0.0, self.buzz_pos()))
+            t["sub"] = "done"
+            for pid in self.players:
+                pts[pid] = (t.get("win_pts", 0) * x) if pid == t.get("winner") else 0
         for pid, p in self.players.items():
             if t["mode"] not in TITLE_MODES:
                 p["score"] += pts[pid]
@@ -1183,6 +1429,14 @@ class Room:
             return {"ok": True}
         if mode == "most":
             return self.most_answer(p, d)
+        if mode == "bomba":
+            if d.get("light"):
+                return self.bomb_light(p)
+            if "verdict" in d:
+                return self.bomb_verdict(p, bool(d.get("verdict")))
+            return {"ok": False}
+        if mode == "hotbuzz":
+            return self.buzz_action(p, d, lang)
         return {"ok": False}
 
     # --- stan dla klienta
@@ -1350,6 +1604,31 @@ class Room:
                                verdicts=[{"id": pid, "name": self.pname(pid), "vote": (t.get("verdicts") or {}).get(pid)}
                                          for pid in (others or [])],
                                timer_by=self.pname(t.get("timer_by")))
+            elif mode == "bomba":
+                judge = self.bomb_judge()
+                is_judge = bool(me and me["id"] == judge)
+                q = t["q"]
+                out.update(sub=t["sub"], prompt=self.prompt(q, lang), holder=t["holder"],
+                           holder_name=self.pname(t["holder"]), judge=judge, judge_name=self.pname(judge),
+                           can_judge=is_judge, heat=self.bomb_heat(now), passes=t["passes"], misses=sum(t["wrong"].values()),
+                           last=t.get("last"), last_at=round(now - (t.get("last_at") or 0), 2) if t.get("last_at") else None,
+                           fuse_choice=self.cfg["bomb_fuse"],
+                           order=[{"id": pid, "name": self.players[pid]["name"], "online": self.on(self.players[pid]),
+                                   "ok": t["answers"].get(pid, 0)} for pid in t["order"] if pid in self.players],
+                           duration=None, left=None, untimed=True)
+                if is_judge:
+                    # podpowiedzi tylko dla oceniającego (gospodarza), nigdy dla graczy
+                    out["examples"] = [example_label(a) for a in q.get("answers") or []][:30]
+            elif mode == "hotbuzz":
+                pos = self.buzz_pos(now)
+                out.update(sub=t["sub"], clip=t["clip"], clip_len=t["clip_len"], music_pos=round(pos, 3),
+                           playing=t["sub"] == "play", buzzer=t.get("buzzer"), buzzer_name=self.pname(t.get("buzzer")),
+                           answer_left=round(t["answer_end"] - now, 1) if t.get("answer_end") else None,
+                           answer_seconds=self.cfg["buzz_answer"],
+                           locked=list(t["locked"]), ready=list(t["ready"]),
+                           tries=[{"name": self.pname(x["pid"]) or "?", "ok": x["ok"], "timeout": x["timeout"]}
+                                  for x in t["tries"]][-8:],
+                           duration=None, left=None, untimed=True)
             return out
         # reveal
         out["left"] = round(REVEAL_SECONDS - el, 1)
@@ -1427,6 +1706,19 @@ class Room:
                                "stopped": p["id"] in (t.get("stopped") or {}),
                                "won": p["id"] == t.get("winner"),
                                "points": p["history"][-1] if p["history"] else 0} for p in players]
+        if mode == "bomba":
+            ans.update(prompt=self.prompt(t["q"], lang), exploded=bool(t.get("exploded")),
+                       loser=t.get("loser"), loser_name=self.pname(t.get("loser")), passes=t["passes"],
+                       examples=[example_label(a) for a in t["q"].get("answers") or []][:30])
+            ans["results"] = [{"id": p["id"], "name": p["name"], "ok": t["answers"].get(p["id"], 0),
+                               "lost": p["id"] == t.get("loser"),
+                               "points": p["history"][-1] if p["history"] else 0} for p in players]
+        if mode == "hotbuzz":
+            ans.update(clip=t["clip"], clip_len=t["clip_len"], winner=t.get("winner"),
+                       winner_name=self.pname(t.get("winner")), points=t.get("win_pts", 0) * self.mult(),
+                       buzz_at=round(t.get("buzz_pos") or 0, 1) if t.get("winner") else None,
+                       tries=[{"name": self.pname(x["pid"]) or "?", "ok": x["ok"], "timeout": x["timeout"],
+                               "text": x["text"]} for x in t["tries"]])
         if mode == "licytacja":
             got = {f["i"] for f in t["found"]}
             answers = [self.fview({"text": a["text"], "pl": a.get("pl") or ""}, lang) for a in t["q"]["answers"]]

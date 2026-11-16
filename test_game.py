@@ -266,6 +266,85 @@ def main():
     check(pl_tested, "polski tytuł zaakceptowany w wersji PL")
     check(sf["players"][0]["name"] == "Ala", "Ala wygrywa")
 
+    # --- Bomba i Hot buzz (migracja, edytory, muzyka, pełna gra przez HTTP)
+    con = db.connect()
+    qcols = {r[1] for r in con.execute("PRAGMA table_info(questions)")}
+    tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    check("kind" in qcols and "music" in tables, "migracja: questions.kind i tabela music")
+    bombs = adm.req("GET", f"/api/admin/packs/{pid}/bombs")
+    check(len(bombs) >= 3 and all(b["kind"] == "bomba" for b in bombs), f"domyślne kategorie Bomby ({len(bombs)})")
+    nq = len(adm.req("GET", f"/api/admin/packs/{pid}/questions"))
+    r = adm.req("POST", f"/api/admin/packs/{pid}/bombs", {"prompt_pl": "Testowa kategoria", "prompt_en": "Test category",
+                                                          "answers_text": "Alien; Obcy"})
+    adm.req("PUT", f"/api/admin/questions/{r['id']}", {"prompt_pl": "Testowa kategoria 2", "prompt_en": "Test category 2"})
+    bombs2 = adm.req("GET", f"/api/admin/packs/{pid}/bombs")
+    hit = [b for b in bombs2 if b["id"] == r["id"]]
+    check(hit and hit[0]["prompt_pl"] == "Testowa kategoria 2" and hit[0]["answers"][0]["text"] == "Alien", "edycja kategorii zachowuje przykłady")
+    check(len(adm.req("GET", f"/api/admin/packs/{pid}/questions")) == nq, "kategorie Bomby nie mieszają się z pytaniami licytacji")
+    br = adm.req("POST", f"/api/admin/packs/{pid}/bombs", {"bulk": "Jedna | One\nPrzyklad\n\nDruga | Two", "apply": True})
+    check(br["saved"] == 2, "wklejanie kategorii Bomby")
+    ids = [m["id"] for m in list(mv.values())[:6]]
+    fake = b"ID3" + bytes(30000)
+    for mid in ids:
+        db.save_music(con, mid, fake, start_s=10, dur=24.5, video_title="test")
+    con.commit(); con.close()
+    with adm.op.open(urllib.request.Request(base + f"/music/{ids[0]}.mp3")) as resp:
+        check(resp.read() == fake and resp.headers["Content-Type"] == "audio/mpeg", "/music/<id>.mp3 serwuje klip z bazy")
+    mu = adm.req("GET", f"/api/admin/packs/{pid}/music")
+    check(mu["have"] == 6 and mu["need"] == 5, "panel muzyki: 6 filmów z muzyką")
+    adm.req("PUT", f"/api/admin/packs/{pid}/music", {"ids": ids[:2], "on": True})
+    adm.req("PUT", f"/api/admin/movies/{ids[0]}/music", {"music_url": "https://www.youtube.com/watch?v=abcdefghijk&t=40"})
+    mu = {m["id"]: m for m in adm.req("GET", f"/api/admin/packs/{pid}/music")["movies"]}
+    check(mu[ids[0]]["music_on"] and mu[ids[0]]["music_url"].endswith("t=40") and not mu[ids[3]]["music_on"], "zaznaczanie filmów i własny link")
+    check(adm.req("PUT", f"/api/admin/movies/{ids[0]}/music", {"music_url": "javascript:x"}, ok=False).get("_code") == 400, "zły link odrzucony")
+    adm.req("DELETE", f"/api/admin/movies/{ids[5]}/music")
+    md = adm.req("GET", f"/api/admin/packs/{pid}/modes")
+    check(md["avail"]["bomba"]["ok"] and md["avail"]["hotbuzz"]["ok"] and md["music"] == 5 and md["bombs"] >= 4, "Bomba i Hot buzz dostępne")
+    lobby = {p["id"]: p for p in Client(base).req("GET", "/api/packs")}
+    check({"bomba", "hotbuzz"} <= set(lobby[pid]["modes"]), "lobby pokazuje nowe tryby")
+
+    a, b = Client(base, "pl"), Client(base, "en")
+    ra = a.req("POST", "/api/rooms", {"pack_id": pid, "name": "Ala"})
+    code = ra["code"]; A = {"pid": ra["pid"], "token": ra["token"]}
+    rb = b.req("POST", f"/api/rooms/{code}/join", {"name": "Bob"}); B = {"pid": rb["pid"], "token": rb["token"]}
+    a.req("POST", f"/api/rooms/{code}/setup", {**A, "modes": ["bomba", "hotbuzz"], "rounds": 2, "settings": {"order": "fixed"}})
+    a.req("POST", f"/api/rooms/{code}/start", A)
+    room = app.rooms[code]
+    check([t["mode"] for t in room.plan] == ["bomba", "hotbuzz"], "plan: Bomba, potem Hot buzz")
+    sb = b.req("GET", f"/api/rooms/{code}?pid={B['pid']}&token={B['token']}")
+    check(sb["mode"] == "bomba" and sb["prompt"] and "examples" not in sb and not sb["can_judge"], "Bomba: Bob widzi kategorię, nie ocenia")
+    check(b.req("POST", f"/api/rooms/{code}/guess", {**B, "light": True}).get("ok") is False, "Bob nie zapala lontu")
+    check(a.req("POST", f"/api/rooms/{code}/guess", {**A, "light": True})["ok"], "gospodarz zapala lont")
+    h0 = room.task["holder"]
+    check(a.req("POST", f"/api/rooms/{code}/guess", {**A, "verdict": True})["ok"] and room.task["holder"] != h0, "dobra: bomba przechodzi")
+    sb = b.req("GET", f"/api/rooms/{code}?pid={B['pid']}&token={B['token']}")
+    leak = json.dumps(sb)
+    check(not any(k in leak for k in ('"fuse_end"', '"heat_at"', '"fuse":', '"lit_at"')) and sb["heat"] in (0, 1, 2, 3), "stan nie zdradza czasu lontu")
+    room.task["fuse_end"] = time.time() - 0.01
+    sa = a.req("GET", f"/api/rooms/{code}?pid={A['pid']}&token={A['token']}")
+    check(sa["phase"] == "reveal" and sa["answer"]["exploded"] and sa["untimed"], "wybuch kończy rundę, odsłona czeka")
+    pts = {p["name"]: p["history"][-1] for p in sa["players"]}
+    loser = sa["answer"]["loser_name"]
+    check(pts[loser] == 0 and all(v >= 500 for k, v in pts.items() if k != loser), "punkty Bomby: przegrany 0, reszta 500+")
+    a.req("POST", f"/api/rooms/{code}/next", A)
+    t = room.task
+    check(t["mode"] == "hotbuzz" and t["clip"].startswith("/music/") and t["movie"]["id"] in ids[:5], "Hot buzz: klip z bazy")
+    b.req("POST", f"/api/rooms/{code}/guess", {**B, "ready": True})
+    a.req("POST", f"/api/rooms/{code}/guess", {**A, "start": True})
+    time.sleep(rooms.BUZZ_LEAD + 0.2)
+    check(b.req("POST", f"/api/rooms/{code}/guess", {**B, "buzz": True})["ok"], "Bob wciska buzzer")
+    check(b.req("POST", f"/api/rooms/{code}/guess", {**B, "text": "zzzz qqqq"})["correct"] is False, "Bob pudłuje, blokada")
+    time.sleep(rooms.BUZZ_LEAD)
+    check(a.req("POST", f"/api/rooms/{code}/guess", {**A, "buzz": True})["ok"], "Ala wciska po wznowieniu")
+    ans = t["movie"]["pl_title"] or t["movie"]["title"]
+    rr = a.req("POST", f"/api/rooms/{code}/guess", {**A, "text": ans})
+    check(rr["correct"] and 500 <= rr["points"] // room.mult() <= 1000, f"Ala zgaduje po muzyce: +{rr.get('points')}")
+    sa = a.req("GET", f"/api/rooms/{code}?pid={A['pid']}&token={A['token']}")
+    check(sa["phase"] == "reveal" and sa["answer"]["winner_name"] == "Ala" and len(sa["answer"]["tries"]) == 2, "odsłona Hot buzz")
+    a.req("POST", f"/api/rooms/{code}/next", A)
+    check(a.req("GET", f"/api/rooms/{code}?pid={A['pid']}&token={A['token']}")["phase"] == "final", "koniec gry w nowych trybach")
+    seen += ["bomba", "hotbuzz"]
+
     # oryginalna baza nietknięta
     if SRC.exists():
         c2 = sqlite3.connect(SRC)

@@ -1,6 +1,6 @@
 // Testy zasad portu (bez wranglera): node cloudflare/test/rules.mjs - te same scenariusze co test_rules.py
 import { readFileSync } from "node:fs";
-import { Game, newRoom, normSettings, JUDGE_GRACE, LIC_DONE_DELAY, LIC_BID_CAP, licTotal, topScore, topAssign, availability, mergePackData, MODES, remakeTags, placeMarks, timeOpt, REVEAL_SECONDS, GameError } from "../src/game.js";
+import { Game, newRoom, normSettings, JUDGE_GRACE, LIC_DONE_DELAY, LIC_BID_CAP, licTotal, topScore, topAssign, availability, mergePackData, MODES, BOMB_FUSE, remakeTags, placeMarks, timeOpt, REVEAL_SECONDS, GameError } from "../src/game.js";
 import { scrapeCtx, fetchOne, parseFilmwebCast, parseImdbPage, absFwPhoto, isPlaceholderUrl, chain as scrapeChain, fetchActorImage } from "../src/webscrape.js";
 import { mostScore, pathMovies, pickPairFromGraph, localGraph, pickFilmrunPair, poolPeople } from "../src/most.js";
 
@@ -28,7 +28,7 @@ const st = (g, p) => g.state(p, "pl");
 let A, B, C, t;
 
 console.log("ustawienia");
-const DEF = { time: 0, mode_time: {}, order: "mix", per_mode: false, mode_rounds: {}, answer: "type", mode_answer: {}, judge: "rotate", lic_answer: 30, lic_bid: 10, hints: true, final_x: 1, top_n: 5, top_own: 45, top_guess: 45, most_time: 90, titles: "ui" };
+const DEF = { time: 0, mode_time: {}, order: "mix", per_mode: false, mode_rounds: {}, answer: "type", mode_answer: {}, judge: "rotate", lic_answer: 30, lic_bid: 10, hints: true, final_x: 1, top_n: 5, top_own: 45, top_guess: 45, most_time: 90, titles: "ui", bomb_fuse: "normal", buzz_answer: 8 };
 check(eq(normSettings({}), DEF), "domyślne ustawienia");
 let d = normSettings({ time: 5, mode_time: { kadry: 500, licytacja: 40, xx: 3 }, order: "fixed", answer: "voice", mode_answer: { rok: "voice", zoom: "type" }, judge: "vote", lic_answer: 999, lic_bid: 1, final_x: 7, hints: false, mode_rounds: { rok: 50 } });
 check(d.time === 10 && eq(d.mode_time, { kadry: 120 }), "czas przycięty do 10..120, licytacja bez nadpisania");
@@ -518,5 +518,93 @@ console.log("panel w chmurze: pobieranie plakatów i obsady (atrapa HTTP)");
   check(ui.includes("bindWebCloud") && ui.includes("CLOUD_FRAMES_PL") && /status === 403 && d\.key === "Zaloguj się"/.test(ui), "panel: pobieranie film po filmie, komunikat o kadrach, logowanie przy 401/403");
 }
 
+}
+console.log("Bomba: gospodarz zalicza odpowiedzi, ukryty lont, wybuch");
+{
+  const [g, [A, B, C]] = room(3, { bomb_fuse: "normal" }, ["bomba"]);
+  g.configure(null, 2, null);
+  g.start();
+  const t = g.r.task;
+  check(t.mode === "bomba" && t.sub === "ready", "runda zaczyna się od zapalenia lontu");
+  let s = st(g, A);
+  check(s.can_judge && "examples" in s && s.prompt, "gospodarz ocenia i widzi przykłady");
+  const sB = st(g, B);
+  check(!sB.can_judge && !("examples" in sB) && !JSON.stringify(sB).includes("fuse_end") && sB.left === null, "gracze nie widzą przykładów ani czasu wybuchu");
+  check(!g.answer(B, { light: true }, "pl").ok, "tylko gospodarz zapala lont");
+  check(g.answer(A, { light: true }, "pl").ok && g.r.task.sub === "live", "gospodarz zapala lont");
+  check(g.r.task.fuse >= 20 && g.r.task.fuse <= 45, "lont normalny 20-45 s");
+  check(g.nextWake() === Math.min(...g.r.task.heat_at), "alarm DO na najbliższą zmianę tempa tykania");
+  const h0 = g.r.task.holder;
+  check(g.answer(A, { verdict: true }, "pl").ok && g.r.task.holder !== h0, "dobra: bomba idzie dalej");
+  check(!g.answer(A, { verdict: true }, "pl").ok, "podwójne kliknięcie nie przerzuca drugi raz");
+  adv(g, 1);
+  const h1 = g.r.task.holder;
+  check(g.answer(A, { verdict: false }, "pl").ok && g.r.task.holder === h1 && g.r.task.sub === "live", "zła: ten sam gracz, czas leci");
+  check(!g.answer(B, { verdict: true }, "pl").ok, "gracz nie zalicza sobie");
+  const heats = [];
+  while (g.r.phase === "round") { heats.push(st(g, B).heat); adv(g, 0.5); }
+  check(eq(heats, heats.slice().sort()) && heats[heats.length - 1] === 3, "tykanie przyspiesza (heat 0..3)");
+  check(g.r.phase === "reveal" && g.r.task.exploded && g.r.task.loser === h1, "wybuch: przegrywa trzymający");
+  const pts = Object.fromEntries(Object.values(g.r.players).map(p => [p.id, p.history[p.history.length - 1]]));
+  check(pts[h1] === 0 && Object.entries(pts).every(([k, v]) => k === h1 || v >= 500), "trzymający 0, pozostali +500");
+  if (h0 !== h1) check(pts[h0] === 600, "za zaliczoną odpowiedź +100");
+  s = st(g, A);
+  check(s.untimed && s.answer.exploded && g.nextWake() === null, "odsłona czeka na gospodarza");
+  g.next();
+  check(g.r.phase === "round" && g.r.task.sub === "ready", "kolejna runda");
+  const [g2] = room(2, { bomb_fuse: "short" }, ["bomba"]); g2.start(); g2.answer(g2.r.players[g2.r.host], { light: true }, "pl");
+  check(g2.r.task.fuse >= 15 && g2.r.task.fuse <= 30, "krótki lont 15-30 s");
+  const pk = clone(FX.pack); pk.bombs = [];
+  const av = availability(pk, FX.movies);
+  check(!av.bomba.ok && av.hotbuzz.ok, "Bomba wymaga kategorii, Hot buzz 5 filmów z muzyką");
+  const ms = clone(FX.movies); ms.slice(4).forEach(m => { m.music = false; });
+  check(!availability(FX.pack, ms).hotbuzz.ok, "mniej niż 5 filmów z muzyką: niedostępny");
+  const mg = mergePackData([{ pack: FX.pack, movies: FX.movies }, { pack: { id: 2, name: "B", bombs: [{ id: 7, prompt_pl: "x", prompt_en: "x", answers: [] }] }, movies: [] }]);
+  check(mg.pack.bombs.length === FX.pack.bombs.length + 1, "Custom łączy kategorie Bomby");
+}
+
+console.log("Hot buzz: muzyka, buzzer, blokada po pudle");
+{
+  let [g, [A, B, C]] = room(3, { buzz_answer: 8 }, ["hotbuzz"]);
+  g.start();
+  let t = g.r.task;
+  check(t.movie.music && t.clip === `/music/${t.movie.id}.mp3` && t.sub === "ready", "runda z klipem, czeka na start");
+  check(g.answer(B, { ready: true }, "pl").ok && st(g, A).ready.includes(B.id), "gotowość gracza");
+  check(!g.answer(B, { start: true }, "pl").ok, "tylko gospodarz startuje");
+  g.answer(A, { start: true }, "pl");
+  check(st(g, B).playing && st(g, B).music_pos < 0, "start z wyprzedzeniem");
+  check(!g.answer(B, { buzz: true }, "pl").ok, "buzzer przed muzyką nie działa");
+  adv(g, 5);
+  check(Math.abs(st(g, B).music_pos - 4) < 0.01, "pozycja liczona przez serwer");
+  check(g.answer(B, { buzz: true }, "pl").ok && g.r.task.sub === "answer", "pierwszy buzzer");
+  check(!g.answer(C, { buzz: true }, "pl").ok, "drugi w tym czasie nie działa");
+  check(g.nextWake() === g.r.task.answer_end, "alarm DO na koniec czasu odpowiedzi");
+  const s = st(g, C);
+  check(!s.playing && s.buzzer_name === "B" && s.answer_left === 8, "muzyka pauzuje, 8 s na wpisanie");
+  check(!g.answer(C, { text: "Movie 1" }, "pl").ok, "wpisuje tylko ten, kto wcisnął");
+  check(g.answer(B, { text: "zupełnie nie to" }, "pl").correct === false && g.r.task.locked.includes(B.id) && g.r.task.sub === "play", "pudło: blokada, muzyka dalej");
+  check(!g.answer(B, { buzz: true }, "pl").ok, "zablokowany nie wciska");
+  adv(g, 2);
+  check(g.answer(C, { buzz: true }, "pl").ok, "inni mogą wcisnąć");
+  adv(g, 9);
+  check(g.r.task.locked.includes(C.id) && g.r.task.sub === "play", "brak odpowiedzi = pudło");
+  adv(g, 1);
+  const pos = g.buzzPos();
+  g.answer(A, { buzz: true }, "pl");
+  const res = g.answer(A, { text: g.r.task.movie.pl_title }, "pl");
+  const want = Math.round(1000 - 500 * Math.min(1, pos / g.r.task.clip_len));
+  check(res.correct && res.points === want * g.mult(), "dobry tytuł: punkty maleją z czasem");
+  check(g.r.phase === "reveal" && A.history.at(-1) === want * g.mult() && B.history.at(-1) === 0, "punkty tylko dla zgadującego");
+  const an = st(g, B).answer;
+  check(an.winner_name === "A" && an.title && an.tries.length === 3, "odsłona: tytuł, zwycięzca, próby");
+  [g, [A, B]] = room(2, {}, ["hotbuzz"]); g.start(); g.answer(A, { start: true }, "pl");
+  adv(g, 2); g.answer(A, { buzz: true }, "pl"); g.answer(A, { text: "nope" }, "pl");
+  adv(g, 1); g.answer(B, { buzz: true }, "pl"); g.answer(B, { text: "nope" }, "pl");
+  check(g.r.phase === "reveal" && !g.r.task.winner, "wszyscy zablokowani: koniec bez punktów");
+  [g, [A, B]] = room(2, {}, ["hotbuzz"]); g.start(); g.answer(A, { start: true }, "pl");
+  check(Math.abs(g.nextWake() - (g.r.task.play_start + g.r.task.clip_len)) < 1e-6, "alarm DO na koniec klipu");
+  adv(g, 30);
+  check(g.r.phase === "reveal" && st(g, A).untimed, "koniec klipu: koniec rundy");
+  check(normSettings({ buzz_answer: 99 }).buzz_answer === 20 && normSettings({ bomb_fuse: "x" }).bomb_fuse === "normal", "zakresy ustawień");
 }
 console.log(`\nOK: ${OK} sprawdzeń`);

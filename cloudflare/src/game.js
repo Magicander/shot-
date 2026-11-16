@@ -3,7 +3,7 @@
 
 export const STAGE_SECONDS = 15;
 export const REVEAL_SECONDS = 9;
-export const MANUAL_REVEAL = ["top", "kolejnosc"];   // wyniki tych trybów zawsze czekają na gospodarza
+export const MANUAL_REVEAL = ["top", "kolejnosc", "bomba", "hotbuzz"];   // wyniki tych trybów zawsze czekają na gospodarza
 export const STAGE_POINTS = [1000, 600, 300];
 export const FIRST_BONUS = 100;
 export const MAX_PLAYERS = 16;
@@ -12,7 +12,16 @@ export const TOP_N = 5;
 export const TOP_N_MIN = 3, TOP_N_MAX = 8;
 export const TOP_OWN = 45, TOP_GUESS = 45, MOST_TIME = 90;
 export const LIC_BID_CAP = 30;
-export const MODES = ["kadry", "zoom", "licytacja", "rok", "kolejnosc", "plakat", "aktorzy", "top"];
+export const MODES = ["kadry", "zoom", "licytacja", "rok", "kolejnosc", "plakat", "aktorzy", "top", "bomba", "hotbuzz"];
+// Bomba: ukryty, losowy lont (s); Hot buzz: muzyka + buzzer (jak w rooms.py)
+export function exampleLabel(a) {
+  if (typeof a === "string") return a;
+  const al = [...new Set([...(a.aliases || []), ...(a.pl ? [a.pl] : [])].filter(x => x && x !== a.text))];
+  return (a.text || "") + (al.length ? ` (${al.join(", ")})` : "");
+}
+export const BOMB_FUSE = { short: [15, 30], normal: [20, 45], long: [35, 60] };
+export const BOMB_SURVIVE = 500, BOMB_ANSWER = 100, BOMB_DEBOUNCE = 0.6;
+export const BUZZ_MIN_MUSIC = 5, BUZZ_LEAD = 1.0, BUZZ_MAX = 1000, BUZZ_MIN = 500, CLIP_DEFAULT = 25;
 export const DURATION = { kadry: 3 * STAGE_SECONDS, zoom: 30, plakat: 30, top: TOP_OWN, rok: 25, kolejnosc: 40 };
 export const ACTOR_SECONDS = 6;
 export const MAX_ACTORS = 8;
@@ -93,6 +102,8 @@ export function normSettings(d) {
     top_guess: phaseLimit(d.top_guess, 15, 180, TOP_GUESS),
     most_time: toInt(d.most_time, 30, 180, MOST_TIME),
     titles: ["ui", "pl", "en", "both"].includes(d.titles) ? d.titles : "ui",
+    bomb_fuse: Object.prototype.hasOwnProperty.call(BOMB_FUSE, d.bomb_fuse) ? d.bomb_fuse : "normal",
+    buzz_answer: toInt(d.buzz_answer, 4, 20, 8),
   };
 }
 
@@ -127,7 +138,7 @@ function movieRichness(m) {
 
 export function mergePackData(datas) {
   if (!datas || !datas.length) throw new GameError(400, "Wybierz przynajmniej jeden pakiet");
-  const movies = [], questions = [], seen = new Map(), qseen = new Set();
+  const movies = [], questions = [], bombs = [], seen = new Map(), qseen = new Set();
   const packs = [];
   for (const data of datas) {
     const pack = data.pack || data;
@@ -144,13 +155,16 @@ export function mergePackData(datas) {
     for (const q of (pack.questions || [])) {
       if (!qseen.has(q.id)) { qseen.add(q.id); questions.push(q); }
     }
+    for (const q of (pack.bombs || [])) {
+      if (!qseen.has(q.id)) { qseen.add(q.id); bombs.push(q); }
+    }
   }
   const pack = {
     id: "custom", slug: "custom", name: "Custom", name_en: "Custom",
     description: packs.map(p => p.name).join(" + "),
     description_en: packs.map(p => p.name_en || p.name).join(" + "),
     color: packs[0].color || "#1B1712",
-    modes_off: "", questions, source_ids: packs.map(p => p.id),
+    modes_off: "", questions, bombs, source_ids: packs.map(p => p.id),
   };
   return { pack, movies };
 }
@@ -170,6 +184,8 @@ export function availability(pack, movies, cfg = null) {
     plakat: [movies.filter(m => m.poster).length, 3, "posters"],
     aktorzy: [movies.filter(m => (m.cast || []).length >= 3).length, 3, "cast"],
     top: [movies.length, tn, "movies"],
+    bomba: [(pack.bombs || []).length, 1, "bombs"],
+    hotbuzz: [movies.filter(m => m.music).length, BUZZ_MIN_MUSIC, "music"],
   };
   const out = {};
   for (const k of MODES) {
@@ -379,7 +395,7 @@ export class Game {
     const r = this.r;
     if (!["lobby", "final"].includes(r.phase)) return;
     if (modes != null && Array.isArray(modes)) {
-      const chosen = [...new Set(modes.filter(k => MODES.includes(k) && r.avail[k].ok))];
+      const chosen = [...new Set(modes.filter(k => MODES.includes(k) && r.avail[k] && r.avail[k].ok))];
       if (chosen.length) r.modes = chosen;
     }
     if (rounds != null) r.rounds = toInt(rounds, 1, MAX_ROUNDS, r.rounds);
@@ -417,7 +433,7 @@ export class Game {
   timing(t) {
     const c = this.cfg, mode = t.mode;
     if (mode === "licytacja") return [c.lic_answer, c.lic_bid];
-    if (mode === "most") return [null, null];
+    if (mode === "most" || mode === "bomba" || mode === "hotbuzz") return [null, null];
     if (mode === "top") {
       const own = c.top_own, guess = c.top_guess;
       return [own === -1 ? null : own, guess === -1 ? null : guess];
@@ -510,6 +526,20 @@ export class Game {
       used.add("q" + q.id);
       return { mode, q, bids: [], bidder: null, bid: 0, found: [], type_end: null };
     }
+    if (mode === "bomba") {
+      const qs = this.r.pack.bombs || [];
+      if (!qs.length) return null;
+      const fresh = qs.filter(q => !used.has("b" + q.id));
+      const q = choice(fresh.length ? fresh : qs);
+      used.add("b" + q.id);
+      return { mode, q };
+    }
+    if (mode === "hotbuzz") {
+      const pool = ms.filter(x => x.music);
+      if (!pool.length) return null;
+      const m = this.pick(pool, used);
+      return { mode, movie: m, clip: `/music/${m.id}.mp3`, clip_len: Number(m.music_dur) || CLIP_DEFAULT };
+    }
     return null;
   }
 
@@ -537,6 +567,13 @@ export class Game {
       t.started = t.started || {};
       t.stopped = t.stopped || {};
       t.winner = null;
+    } else if (t.mode === "bomba") {
+      const s = pl.length ? Math.floor(rnd() * pl.length) : 0;
+      Object.assign(t, { order: pl.slice(s).concat(pl.slice(0, s)), sub: "ready", holder: pl.length ? pl[s] : null, passes: 0,
+        answers: {}, wrong: {}, lit_at: null, fuse: null, fuse_end: null, heat_at: [], last: null, last_at: 0, loser: null, exploded: false });
+    } else if (t.mode === "hotbuzz") {
+      Object.assign(t, { sub: "ready", ready: [], offset: 0, play_start: null, buzzer: null, answer_end: null,
+        locked: [], tries: [], winner: null, win_pts: 0, buzz_pos: 0 });
     } else if (t.voice) Object.assign(t, { claims: [], peek: [] });
     if (t.dur == null) {
       if (t.mode === "kadry") t.stage = 0;
@@ -653,6 +690,11 @@ export class Game {
         } else if (this.hasTimer() && (el >= this.duration() || (act.length && act.every(p => p.id in t.guess)))) this.endRound();
       } else if (t.mode === "most") {
         if (t.winner) this.endRound();
+      } else if (t.mode === "bomba") {
+        if (t.sub === "live" && t.fuse_end && n >= t.fuse_end) this.bombExplode();
+        else if (t.sub === "live" && this.bombHeat(n) !== (t.heat_seen || 0)) { t.heat_seen = this.bombHeat(n); r.version++; }
+      } else if (t.mode === "hotbuzz") {
+        this.buzzTick(n);
       } else if (this.hasTimer() && (el >= this.duration() || (act.length && act.every(p => p.ans !== null || p.got)))) this.endRound();
     } else if (r.phase === "reveal") {
       if (!this.revealManual() && n - r.t0 >= REVEAL_SECONDS + (["kolejnosc", "licytacja", "top", "most"].includes(this.mode) ? 6 : 0)) this.next();
@@ -669,9 +711,15 @@ export class Game {
     if (r.phase !== "round") return null;
     const t = r.task, n = now();
     const marks = [];
+    const own = t.mode === "bomba" || t.mode === "hotbuzz";
     if (t.mode === "licytacja") {
       if (t.bidder === null) marks.push(t.turn_end);
       else if (t.timer_started && t.type_end && t.sub !== "verdict") marks.push(t.type_end);
+    } else if (t.mode === "bomba") {
+      if (t.sub === "live") marks.push(...(t.heat_at || []), t.fuse_end);
+    } else if (t.mode === "hotbuzz") {
+      if (t.sub === "play" && t.play_start != null) marks.push(t.play_start + (t.clip_len - t.offset));
+      else if (t.sub === "answer" && t.answer_end) marks.push(t.answer_end);
     } else if (this.hasTimer()) {
       const dur = this.duration();
       marks.push(r.t0 + dur);
@@ -681,8 +729,136 @@ export class Game {
     }
     const future = marks.filter(x => x > n + 0.001);
     if (future.length) return Math.min(...future);
+    if (own) return marks.length ? n : null;
     if (!this.hasTimer() && t.mode !== "licytacja") return null;
     return (t.voice && t.mode !== "licytacja" ? null : n);
+  }
+
+  // --- Bomba
+  bombJudge() {
+    const r = this.r;
+    return this.isOnline(r.players[r.host]) ? r.host : (this.onlineIds()[0] ?? null);
+  }
+  bombHeat(n = now()) {
+    const t = this.r.task;
+    if (t.sub !== "live") return 0;
+    return (t.heat_at || []).filter(x => n >= x).length;
+  }
+  bombNext(pid) {
+    const r = this.r, order = r.task.order.filter(x => r.players[x]);
+    if (!order.length) return null;
+    const i = order.indexOf(pid);
+    for (let k = 1; k <= order.length; k++) {
+      const c = order[(i + k + order.length) % order.length];
+      if (this.isOnline(r.players[c])) return c;
+    }
+    return pid;
+  }
+  bombLight(p) {
+    const r = this.r, t = r.task;
+    if (p.id !== this.bombJudge() || t.sub !== "ready") return { ok: false };
+    const n = now();
+    const [lo, hi] = BOMB_FUSE[this.cfg.bomb_fuse] || BOMB_FUSE.normal;
+    const fuse = r2(lo + rnd() * (hi - lo));
+    const h1 = Math.min(10 + rnd() * 6, fuse * 0.6), h2 = Math.min(5 + rnd() * 3, h1 * 0.6), h3 = Math.min(2 + rnd() * 1.5, h2 * 0.6);
+    const end = n + fuse;
+    if (!this.isOnline(r.players[t.holder])) t.holder = this.bombNext(t.holder) || t.holder;
+    Object.assign(t, { sub: "live", lit_at: n, fuse, fuse_end: end, heat_at: [end - h1, end - h2, end - h3] });
+    this.event("bomb", this.pname(t.holder) || "?");
+    return { ok: true };
+  }
+  bombVerdict(p, yes) {
+    const r = this.r, t = r.task;
+    if (p.id !== this.bombJudge() || t.sub !== "live") return { ok: false };
+    const n = now();
+    if (n >= t.fuse_end) { this.bombExplode(); return { ok: false, late: true }; }
+    if (n - (t.last_at || 0) < BOMB_DEBOUNCE) return { ok: false, fast: true };
+    const holder = t.holder;
+    t.last_at = n;
+    if (yes) {
+      t.answers[holder] = (t.answers[holder] || 0) + 1;
+      t.passes++;
+      t.holder = this.bombNext(holder);
+      t.last = "ok";
+      this.event("bombpass", this.pname(holder) || "?");
+    } else {
+      t.wrong[holder] = (t.wrong[holder] || 0) + 1;
+      t.last = "bad";
+      if (r.players[holder]) r.players[holder].wrong++;
+      this.event("wrong", this.pname(holder) || "?");
+    }
+    return { ok: true, holder: t.holder };
+  }
+  bombExplode() {
+    const t = this.r.task;
+    if (t.exploded) return;
+    Object.assign(t, { exploded: true, sub: "boom", loser: t.holder });
+    this.event("boom", this.pname(t.loser) || "?");
+    this.endRound();
+  }
+
+  // --- Hot buzz
+  buzzPos(n = now()) {
+    const t = this.r.task;
+    if (t.sub === "play" && t.play_start != null) return t.offset + (n - t.play_start);
+    return t.offset || 0;
+  }
+  buzzTick(n) {
+    const t = this.r.task;
+    if (t.sub === "play" && this.buzzPos(n) >= t.clip_len) { t.offset = t.clip_len; t.sub = "done"; this.endRound(); }
+    else if (t.sub === "answer" && t.answer_end && n >= t.answer_end) this.buzzMiss(t.buzzer, true);
+  }
+  buzzResume() {
+    const r = this.r, t = r.task;
+    const alive = this.onlineIds().filter(pid => !t.locked.includes(pid));
+    t.buzzer = null; t.answer_end = null;
+    if (!alive.length) { t.sub = "done"; return this.endRound(); }
+    t.sub = "play"; t.play_start = now() + BUZZ_LEAD * 0.6;
+    r.version++;
+  }
+  buzzMiss(pid, timeout = false, text = "") {
+    const r = this.r, t = r.task;
+    if (pid && !t.locked.includes(pid)) t.locked.push(pid);
+    t.tries.push({ pid, ok: false, text: String(text).slice(0, 60), timeout: !!timeout });
+    if (r.players[pid]) { r.players[pid].wrong++; this.event("wrong", r.players[pid].name); }
+    this.buzzResume();
+  }
+  buzzAction(p, d, lang) {
+    const r = this.r, t = r.task, n = now(), sub = t.sub;
+    if (d.ready) {
+      if (!t.ready.includes(p.id)) { t.ready.push(p.id); r.version++; }
+      return { ok: true };
+    }
+    if (d.start) {
+      if (p.id !== r.host || sub !== "ready") return { ok: false };
+      Object.assign(t, { sub: "play", offset: 0, play_start: n + BUZZ_LEAD });
+      r.version++;
+      return { ok: true };
+    }
+    if (d.buzz) {
+      if (sub !== "play" || t.locked.includes(p.id)) return { ok: false, locked: t.locked.includes(p.id) };
+      const pos = this.buzzPos(n);
+      if (pos < 0) return { ok: false, early: true };
+      Object.assign(t, { sub: "answer", offset: Math.min(pos, t.clip_len), play_start: null, buzzer: p.id,
+        answer_end: n + this.cfg.buzz_answer, buzz_pos: pos });
+      this.event("buzz", p.name);
+      return { ok: true, buzzer: true };
+    }
+    if ("text" in d) {
+      if (sub !== "answer" || p.id !== t.buzzer) return { ok: false };
+      const text = String(d.text || "").slice(0, 120);
+      const matchLang = (lang === "pl" || ["pl", "both"].includes(this.cfg.titles)) ? "pl" : lang;
+      if (movieDistance(text, t.movie, matchLang) === null) { this.buzzMiss(p.id, false, text); return { ok: true, correct: false }; }
+      const frac = Math.max(0, Math.min(1, (t.buzz_pos || 0) / Math.max(1, t.clip_len)));
+      t.win_pts = Math.round(BUZZ_MAX - (BUZZ_MAX - BUZZ_MIN) * frac);
+      t.winner = p.id;
+      t.tries.push({ pid: p.id, ok: true, text: text.slice(0, 60), timeout: false });
+      t.sub = "done";
+      this.event("guess", p.name, t.win_pts * this.mult());
+      this.endRound();
+      return { ok: true, correct: true, points: t.win_pts * this.mult() };
+    }
+    return { ok: false };
   }
 
   // --- licytacja po kolei
@@ -745,6 +921,16 @@ export class Game {
     } else if (t.mode === "most") {
       const w = t.winner;
       for (const pid of Object.keys(r.players)) pts[pid] = pid === w ? 1000 * x : 0;
+    } else if (t.mode === "bomba") {
+      for (const pid of Object.keys(r.players)) {
+        let v = BOMB_ANSWER * ((t.answers || {})[pid] || 0);
+        if (t.exploded && pid !== t.loser) v += BOMB_SURVIVE;
+        pts[pid] = v * x;
+      }
+    } else if (t.mode === "hotbuzz") {
+      if (t.sub === "play") t.offset = Math.min(t.clip_len, Math.max(0, this.buzzPos()));
+      t.sub = "done";
+      for (const pid of Object.keys(r.players)) pts[pid] = pid === t.winner ? (t.win_pts || 0) * x : 0;
     }
     for (const [pid, p] of Object.entries(r.players)) {
       if (!TITLE_MODES.has(t.mode)) { p.score += pts[pid]; p.got = pts[pid] ? { points: pts[pid] } : null; }
@@ -1049,6 +1235,12 @@ export class Game {
       if (d.stop) return this.mostStop(p);
       return { ok: false };
     }
+    if (mode === "bomba") {
+      if (d.light) return this.bombLight(p);
+      if ("verdict" in d) return this.bombVerdict(p, !!d.verdict);
+      return { ok: false };
+    }
+    if (mode === "hotbuzz") return this.buzzAction(p, d, lang);
     return { ok: false };
   }
 
@@ -1195,6 +1387,26 @@ export class Game {
             timer_by: this.pname(t.timer_by),
           });
         }
+      } else if (mode === "bomba") {
+        const judge = this.bombJudge(), isJudge = !!(me && me.id === judge), q = t.q;
+        Object.assign(out, {
+          sub: t.sub, prompt: Game.prompt(q, lang), holder: t.holder, holder_name: this.pname(t.holder),
+          judge, judge_name: this.pname(judge), can_judge: isJudge, heat: this.bombHeat(n), passes: t.passes,
+          misses: Object.values(t.wrong || {}).reduce((a, b) => a + b, 0), last: t.last, last_at: t.last_at ? r2(n - t.last_at) : null, fuse_choice: this.cfg.bomb_fuse,
+          order: t.order.filter(pid => r.players[pid]).map(pid => ({ id: pid, name: r.players[pid].name,
+            online: this.isOnline(r.players[pid]), ok: t.answers[pid] || 0 })),
+          duration: null, left: null, untimed: true,
+        });
+        if (isJudge) out.examples = (q.answers || []).map(exampleLabel).slice(0, 30);
+      } else if (mode === "hotbuzz") {
+        Object.assign(out, {
+          sub: t.sub, clip: t.clip, clip_len: t.clip_len, music_pos: Math.round(this.buzzPos(n) * 1000) / 1000,
+          playing: t.sub === "play", buzzer: t.buzzer, buzzer_name: this.pname(t.buzzer),
+          answer_left: t.answer_end ? r1(t.answer_end - n) : null, answer_seconds: this.cfg.buzz_answer,
+          locked: [...t.locked], ready: [...t.ready],
+          tries: t.tries.map(x => ({ name: this.pname(x.pid) || "?", ok: x.ok, timeout: x.timeout })).slice(-8),
+          duration: null, left: null, untimed: true,
+        });
       }
       return out;
     }
@@ -1255,6 +1467,21 @@ export class Game {
         won: p.id === t.winner,
         points: p.history.length ? p.history[p.history.length - 1] : 0,
       }));
+    }
+    if (mode === "bomba") {
+      Object.assign(ans, {
+        prompt: Game.prompt(t.q, lang), exploded: !!t.exploded, loser: t.loser, loser_name: this.pname(t.loser),
+        passes: t.passes, examples: (t.q.answers || []).map(exampleLabel).slice(0, 30),
+        results: players.map(p => ({ id: p.id, name: p.name, ok: (t.answers || {})[p.id] || 0, lost: p.id === t.loser,
+          points: p.history.length ? p.history[p.history.length - 1] : 0 })),
+      });
+    }
+    if (mode === "hotbuzz") {
+      Object.assign(ans, {
+        clip: t.clip, clip_len: t.clip_len, winner: t.winner, winner_name: this.pname(t.winner),
+        points: (t.win_pts || 0) * this.mult(), buzz_at: t.winner ? r1(t.buzz_pos || 0) : null,
+        tries: t.tries.map(x => ({ name: this.pname(x.pid) || "?", ok: x.ok, timeout: x.timeout, text: x.text })),
+      });
     }
     if (mode === "licytacja") {
       const got = new Set(t.found.map(f => f.i));

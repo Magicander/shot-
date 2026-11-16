@@ -123,7 +123,7 @@ async function exportDb(env, req) {
       description: data.pack.description, description_en: data.pack.description_en, color: data.pack.color,
       cover_frame_id: (p.thumbs && p.thumbs[0]) || null, modes: p.modes || [],
       modes_off: data.modes_off,
-      questions: data.pack.questions || [], movies: data.movies || [],
+      questions: data.pack.questions || [], bombs: data.pack.bombs || [], movies: data.movies || [],
     });
   }
   return json({

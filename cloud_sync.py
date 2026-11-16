@@ -137,6 +137,7 @@ def merge_overlay(con: sqlite3.Connection, overlay: dict, *, verbose=True) -> di
             continue
         pl = (q.get("prompt_pl") or "")[:200]
         en = (q.get("prompt_en") or "")[:200]
+        kind = "bomba" if q.get("kind") == "bomba" else "licytacja"     # kategoria Bomby albo pytanie licytacji
         answers = q.get("answers") or "[]"
         if isinstance(answers, (list, dict)):
             answers = json.dumps(answers, ensure_ascii=False)
@@ -150,12 +151,12 @@ def merge_overlay(con: sqlite3.Connection, overlay: dict, *, verbose=True) -> di
                 continue
             try:
                 con.execute(
-                    "INSERT INTO questions (id, pack_id, prompt_pl, prompt_en, answers, created) VALUES (?,?,?,?,?,?)",
-                    (qid, pack_id, pl, en, answers, ots or now))
+                    "INSERT INTO questions (id, pack_id, prompt_pl, prompt_en, answers, created, kind) VALUES (?,?,?,?,?,?,?)",
+                    (qid, pack_id, pl, en, answers, ots or now, kind))
             except sqlite3.IntegrityError:
                 con.execute(
-                    "INSERT INTO questions (pack_id, prompt_pl, prompt_en, answers, created) VALUES (?,?,?,?,?)",
-                    (pack_id, pl, en, answers, ots or now))
+                    "INSERT INTO questions (pack_id, prompt_pl, prompt_en, answers, created, kind) VALUES (?,?,?,?,?,?)",
+                    (pack_id, pl, en, answers, ots or now, kind))
         summary["questions_upsert"] += 1
 
     for p in overlay.get("packs") or []:

@@ -43,6 +43,29 @@
 }
 ]
 }
+],
+"bombs": [
+{
+"id": 901,
+"prompt_pl": "Horrory z duchami",
+"prompt_en": "Ghost horror films",
+"answers": [
+{
+"text": "The Conjuring",
+"pl": "Obecno\u015b\u0107"
+},
+{
+"text": "The Others",
+"pl": "Inni"
+}
+]
+},
+{
+"id": 902,
+"prompt_pl": "Filmy z liczb\u0105 w tytule",
+"prompt_en": "Films with a number in the title",
+"answers": []
+}
 ]
 },
 "movies": [
@@ -80,7 +103,9 @@
 "lang": ""
 }
 ],
-"year": 1991
+"year": 1991,
+"music": true,
+"music_dur": 24.5
 },
 {
 "id": 2,
@@ -116,7 +141,9 @@
 "lang": ""
 }
 ],
-"year": 1992
+"year": 1992,
+"music": true,
+"music_dur": 24.5
 },
 {
 "id": 3,
@@ -152,7 +179,9 @@
 "lang": ""
 }
 ],
-"year": 1993
+"year": 1993,
+"music": true,
+"music_dur": 24.5
 },
 {
 "id": 4,
@@ -188,7 +217,9 @@
 "lang": ""
 }
 ],
-"year": 1994
+"year": 1994,
+"music": true,
+"music_dur": 24.5
 },
 {
 "id": 5,
@@ -224,7 +255,9 @@
 "lang": ""
 }
 ],
-"year": 1995
+"year": 1995,
+"music": true,
+"music_dur": 24.5
 },
 {
 "id": 6,
@@ -260,7 +293,9 @@
 "lang": ""
 }
 ],
-"year": 1996
+"year": 1996,
+"music": true,
+"music_dur": 24.5
 },
 {
 "id": 7,
@@ -358,6 +393,12 @@
 "ok": true
 },
 "top": {
+"ok": true
+},
+"bomba": {
+"ok": true
+},
+"hotbuzz": {
 "ok": true
 }
 }

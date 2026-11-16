@@ -118,4 +118,69 @@ A.ws.close(); B2.ws.close();
   check(FB.s.can_start && !(FB.s.started_names || []).length && FB.s.rerolls === 1, "filmrun: Start wyzerowany po losowaniu");
   FA.ws.close(); FB.ws.close();
 }
+
+// Bomba i Hot buzz: lont liczy serwer (alarm DO), klip z /music/, buzzer i blokada
+if (data.avail.bomba && data.avail.bomba.ok && data.avail.hotbuzz && data.avail.hotbuzz.ok) {
+  const c4 = await post("/api/rooms", { pack_id: PACK, rounds: 2, modes: ["bomba", "hotbuzz"], name: "Ala" });
+  const j4 = await post(`/api/rooms/${c4.code}/join`, { name: "Bob" });
+  const NA = client(c4.code, c4, "pl"), NB = client(c4.code, j4, "en");
+  await Promise.all([NA.open, NB.open]);
+  await until(NA, s => s && s.players.length === 2 && s.players.every(p => p.online));
+  await NA.rpc("setup", { modes: ["bomba", "hotbuzz"], rounds: 2, settings: { bomb_fuse: "short", buzz_answer: 6 } });
+  await NA.rpc("start");
+  const played = new Set();
+  for (;;) {
+    await until(NA, s => ["round", "final"].includes(s.phase));
+    if (NA.s.phase === "final") break;
+    const round = NA.s.round, mode = NA.s.mode; played.add(mode);
+    if (mode === "bomba") {
+      await until(NB, s => s.phase === "round" && s.mode === "bomba");
+      check(NA.s.can_judge && !NB.s.can_judge && Array.isArray(NA.s.examples) && !("examples" in NB.s), "bomba: ocenia gospodarz, przykłady tylko u niego");
+      const no = await NB.rpc("guess", { light: true }); check(!(no.ok && no.d && no.d.ok), "bomba: gracz nie zapala lontu");
+      await NA.rpc("guess", { light: true });
+      await until(NA, s => s.sub === "live");
+      const raw = JSON.stringify(NB.s);
+      check(!/"fuse_end"|"heat_at"|"lit_at"|"fuse":/.test(raw), "bomba: stan nie zdradza czasu lontu");
+      const h0 = NA.s.holder; await NA.rpc("guess", { verdict: true });
+      await until(NA, s => s.holder !== h0);
+      check(NA.s.passes === 1, "bomba: dobra przekazuje bombę");
+      await sleep(700);
+      const h1 = NA.s.holder; await NA.rpc("guess", { verdict: false });
+      await sleep(200); check(NA.s.holder === h1 && NA.s.misses >= 1, "bomba: zła - ten sam gracz dalej");
+      const t0 = Date.now(), heats = new Set();
+      while (NA.s.phase === "round" && Date.now() - t0 < 40000) { heats.add(NA.s.heat); await sleep(200); }
+      await until(NA, s => s.phase === "reveal", 5000);
+      const el = (Date.now() - t0) / 1000;
+      check(NA.s.answer && NA.s.answer.exploded && NA.s.answer.loser === h1, `bomba: wybuch z alarmu serwera po ~${el.toFixed(0)} s, przegrywa trzymający`);
+      check(heats.size >= 2, `bomba: tykanie przyspiesza (fazy ${[...heats].join(",")})`);
+      const res = NA.s.answer.results || [], lo = res.find(x => x.lost), ot = res.find(x => !x.lost);
+      check(lo && ot && lo.points < ot.points && ot.points >= 500, `bomba: runda ${ot && ot.name} +${ot && ot.points}, ${lo && lo.name} +${lo && lo.points}`);
+    } else if (mode === "hotbuzz") {
+      await until(NB, s => s.phase === "round" && s.mode === "hotbuzz");
+      const id = +NA.s.clip.match(/(\d+)\.mp3/)[1], m = byId.get(id);
+      const mp3 = await fetch(BASE + NA.s.clip);
+      const buf = new Uint8Array(await mp3.arrayBuffer());
+      check(mp3.ok && buf.length > 50000 && /audio/.test(mp3.headers.get("content-type") || ""), `hotbuzz: klip ${NA.s.clip} (${buf.length} B)`);
+      await NA.rpc("guess", { ready: true }); await NB.rpc("guess", { ready: true });
+      await NA.rpc("guess", { start: true });
+      await until(NA, s => s.sub === "play");
+      const early = await NB.rpc("guess", { buzz: true }); check(early.d && early.d.early, "hotbuzz: buzzer przed startem muzyki odrzucony");
+      await sleep(1200);
+      const bz = await NB.rpc("guess", { buzz: true }); check(bz.d && bz.d.buzzer, "hotbuzz: Bob pierwszy na buzzerze");
+      await until(NA, s => s.sub === "answer");
+      check(NA.s.buzzer === j4.pid && NA.s.playing === false, "hotbuzz: muzyka stoi, Bob odpowiada");
+      const w = await NB.rpc("guess", { text: "zzzz" }); check(w.d && w.d.correct === false, "hotbuzz: zła odpowiedź");
+      await until(NA, s => s.sub === "play");
+      const lk = await NB.rpc("guess", { buzz: true }); check(lk.d && lk.d.locked, "hotbuzz: Bob zablokowany do końca rundy");
+      await sleep(900);
+      await NA.rpc("guess", { buzz: true });
+      const ok = await NA.rpc("guess", { text: (m.pl_title || m.title).toLowerCase() });
+      check(ok.d && ok.d.correct && ok.d.points >= 500, `hotbuzz: Ala "${m.pl_title || m.title}" +${ok.d && ok.d.points}`);
+    }
+    await until(NA, s => s.phase === "reveal" || s.round !== round);
+    if (NA.s.phase === "reveal") { check(NA.s.untimed, `${mode}: wyniki czekają na gospodarza`); await NA.rpc("next"); }
+  }
+  check(played.has("bomba") && played.has("hotbuzz"), "rozegrano Bombę i Hot buzz");
+  NA.ws.close(); NB.ws.close();
+} else check(false, "build bez Bomby/Hot buzz - zbuduj z bazy z muzyką");
 console.log(log.join("\n"));
