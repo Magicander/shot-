@@ -126,7 +126,7 @@ if (data.avail.bomba && data.avail.bomba.ok && data.avail.hotbuzz && data.avail.
   const NA = client(c4.code, c4, "pl"), NB = client(c4.code, j4, "en");
   await Promise.all([NA.open, NB.open]);
   await until(NA, s => s && s.players.length === 2 && s.players.every(p => p.online));
-  await NA.rpc("setup", { modes: ["bomba", "hotbuzz"], rounds: 2, settings: { bomb_fuse: "short", buzz_answer: 6 } });
+  await NA.rpc("setup", { modes: ["bomba", "hotbuzz"], rounds: 2, settings: { bomb_fuse: "short", buzz_answer: 6, bomb_check: true } });
   await NA.rpc("start");
   const played = new Set();
   for (;;) {
@@ -140,13 +140,26 @@ if (data.avail.bomba && data.avail.bomba.ok && data.avail.hotbuzz && data.avail.
       await NA.rpc("guess", { light: true });
       await until(NA, s => s.sub === "live");
       const raw = JSON.stringify(NB.s);
-      check(!/"fuse_end"|"heat_at"|"lit_at"|"fuse":/.test(raw), "bomba: stan nie zdradza czasu lontu");
+      check(!/"fuse_end"|"heat_at"|"lit_at"|"fuse":|"fuse_left"|"heat_left"/.test(raw), "bomba: stan nie zdradza czasu lontu");
       const h0 = NA.s.holder; await NA.rpc("guess", { verdict: true });
       await until(NA, s => s.holder !== h0);
       check(NA.s.passes === 1, "bomba: dobra przekazuje bombę");
       await sleep(700);
       const h1 = NA.s.holder; await NA.rpc("guess", { verdict: false });
       await sleep(200); check(NA.s.holder === h1 && NA.s.misses >= 1, "bomba: zła - ten sam gracz dalej");
+      const noChk = await NB.rpc("guess", { check: true });
+      check(!(noChk.ok && noChk.d && noChk.d.ok), "bomba: gracz nie klika Sprawdzam");
+      check(NA.s.can_check && !NB.s.can_check, "bomba: Sprawdzam tylko u sędziego");
+      await NA.rpc("guess", { check: true });
+      await until(NA, s => s.paused || s.sub === "check");
+      check(NA.s.paused && NB.s.paused && NA.s.can_resume && !NB.s.can_resume, "bomba: pauza widoczna u wszystkich");
+      const pRaw = JSON.stringify(NA.s) + JSON.stringify(NB.s);
+      check(!/"fuse_end"|"heat_at"|"lit_at"|"fuse":|"fuse_left"|"heat_left"/.test(pRaw), "bomba: pauza nie wycieka pozostałym czasem");
+      await sleep(3000);
+      check(NA.s.phase === "round" && (NA.s.paused || NA.s.sub === "check"), "bomba: zatrzymany lont nie wybucha przez 3 s");
+      await NA.rpc("guess", { resume: true });
+      await until(NA, s => s.sub === "live" && !s.paused);
+      check(NA.s.holder === h1 && !NA.s.paused, "bomba: Wznów wraca do gry z tym samym trzymającym");
       const t0 = Date.now(), heats = new Set();
       while (NA.s.phase === "round" && Date.now() - t0 < 40000) { heats.add(NA.s.heat); await sleep(200); }
       await until(NA, s => s.phase === "reveal", 5000);

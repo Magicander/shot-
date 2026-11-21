@@ -137,6 +137,14 @@ Object.assign(EN, {
   "bomba: kategorie": "bomb: categories",
   "Każda runda Bomby losuje jedną kategorię. Gracz z bombą mówi pasujący tytuł, gospodarz ocenia. Tryb działa od 1 kategorii.": "Each Bomb round draws one category. The player holding the bomb says a matching title, the host judges. The mode works from 1 category.",
   "przykłady: {n}": "examples: {n}",
+  "Zdjęcie aktora": "Actor photo",
+  "Gdy pytanie jest o aktorze, na karcie pokażę jego zdjęcie (jeśli jest w bazie). Możesz wskazać je ręcznie albo wyłączyć.": "When the question is about an actor, I will show their photo on the card (if we have one). You can pick it yourself or turn it off.",
+  "automatycznie": "automatic",
+  "bez zdjęcia": "no photo",
+  "wybrane": "chosen",
+  "szukaj aktora po imieniu...": "search for an actor by name...",
+  "Brak pasujących aktorów ze zdjęciem.": "No matching actors with a photo.",
+  "Można wybrać maksymalnie 3 aktorów.": "You can pick up to 3 actors.",
   "Brak kategorii. Bez nich Bomba jest niedostępna.": "No categories. Without them Bomb is unavailable.",
   "wklej wiele kategorii": "paste many categories",
   "Kategorie oddziel pustą linią. Pierwsza linia: <b>kategoria PL | kategoria EN</b>, kolejne linie (opcjonalnie): przykładowe odpowiedzi.": "Separate categories with a blank line. First line: <b>category PL | category EN</b>, next lines (optional): example answers.",
@@ -203,6 +211,7 @@ async function api(url, method = "GET", body) {
 function toast(msg) { const t = document.createElement("div"); t.className = "toast"; t.textContent = msg; document.body.append(t); setTimeout(() => t.remove(), 2600); }
 function modal(html, onSubmit) {
   const f = $("#mform"); f.innerHTML = html; $("#modal").classList.remove("hidden");
+  if (typeof wireActorPicker === "function") wireActorPicker(f);
   f.querySelector("[data-close]")?.addEventListener("click", () => $("#modal").classList.add("hidden"));
   f.onsubmit = async e => { e.preventDefault(); try { await onSubmit(new FormData(f)); $("#modal").classList.add("hidden"); } catch (err) { toast(err.message); } };
   f.querySelector("input,textarea")?.focus();
@@ -978,16 +987,87 @@ async function quotesPage(id, keepText) {
 }
 
 /* pytania do licytacji — tylko treść PL/EN; zaliczenie oceniają gracze po timerze */
+function actorPicker(q) {
+  const mode = q && Array.isArray(q.actors) ? (q.actors.length ? "pick" : "off") : "auto";
+  const faces = (q && q.faces) || [];
+  const chosen = (mode === "pick" ? (q.actors || []).map(id => {
+    const f = faces.find(x => x.id === id);
+    return {id, name: (f && f.name) || "", photo: (f && f.photo) || ("/actor/" + id + ".jpg")};
+  }) : []);
+  return `<div class="field full" id="apick" data-mode="${mode}">
+    <span>${T("Zdjęcie aktora")}</span>
+    <p class="muted" style="margin:0 0 6px;font-size:13px">${T("Gdy pytanie jest o aktorze, na karcie pokażę jego zdjęcie (jeśli jest w bazie). Możesz wskazać je ręcznie albo wyłączyć.")}</p>
+    <div class="amode">
+      <label class="toggle"><input type="radio" name="actors_mode" value="auto" ${mode==="auto"?"checked":""}><span>${T("automatycznie")}</span></label>
+      <label class="toggle"><input type="radio" name="actors_mode" value="off" ${mode==="off"?"checked":""}><span>${T("bez zdjęcia")}</span></label>
+      <label class="toggle"><input type="radio" name="actors_mode" value="pick" ${mode==="pick"?"checked":""}><span>${T("wybrane")}</span></label>
+    </div>
+    <div id="apickui" class="${mode!=="pick"?"hidden":""}">
+      <div class="qpick" id="achosen">${chosen.map(a => `<span class="choice" data-id="${a.id}"><img src="${esc(a.photo)}" alt=""><span>${esc(a.name)}</span><button type="button" data-rm="${a.id}" aria-label="${T("usuń")}">&times;</button></span>`).join("")}</div>
+      <input class="input sm" id="asearch" type="search" placeholder="${T("szukaj aktora po imieniu...")}" autocomplete="off">
+      <div class="apreview hidden" id="ahits"></div>
+    </div>
+  </div>`;
+}
+function wireActorPicker(root) {
+  const box = root.querySelector("#apick"); if (!box) return;
+  const ui = box.querySelector("#apickui");
+  const hits = box.querySelector("#ahits");
+  const search = box.querySelector("#asearch");
+  const chosen = box.querySelector("#achosen");
+  const modeOf = () => (box.querySelector("[name=actors_mode]:checked") || {}).value || "auto";
+  const ids = () => [...chosen.querySelectorAll(".choice")].map(el => +el.dataset.id);
+  const renderChosen = list => {
+    chosen.innerHTML = list.map(a => `<span class="choice" data-id="${a.id}"><img src="${esc(a.photo)}" alt=""><span>${esc(a.name)}</span><button type="button" data-rm="${a.id}" aria-label="${T("usuń")}">&times;</button></span>`).join("");
+    chosen.querySelectorAll("[data-rm]").forEach(b => b.onclick = ev => { ev.preventDefault(); b.closest(".choice").remove(); });
+  };
+  chosen.querySelectorAll("[data-rm]").forEach(b => b.onclick = ev => { ev.preventDefault(); b.closest(".choice").remove(); });
+  box.querySelectorAll("[name=actors_mode]").forEach(r => r.onchange = () => ui.classList.toggle("hidden", modeOf() !== "pick"));
+  let timer = 0;
+  const run = async () => {
+    const q = (search.value || "").trim();
+    if (q.length < 1) { hits.classList.add("hidden"); hits.innerHTML = ""; return; }
+    try {
+      const rows = await api("/api/admin/actors?q=" + encodeURIComponent(q));
+      const have = new Set(ids());
+      const list = (rows || []).filter(a => !have.has(a.id)).slice(0, 12);
+      hits.innerHTML = list.length
+        ? list.map(a => `<button type="button" data-id="${a.id}" data-name="${esc(a.name)}" data-photo="${esc(a.photo)}"><img src="${esc(a.photo)}" alt=""><span>${esc(a.name)}</span></button>`).join("")
+        : `<p class="muted" style="margin:0;padding:6px">${T("Brak pasujących aktorów ze zdjęciem.")}</p>`;
+      hits.classList.remove("hidden");
+      hits.querySelectorAll("button[data-id]").forEach(b => b.onclick = ev => {
+        ev.preventDefault();
+        if (ids().length >= 3) return toast(T("Można wybrać maksymalnie 3 aktorów."));
+        const cur = ids().map(id => {
+          const el = chosen.querySelector('.choice[data-id="' + id + '"]');
+          return {id, name: el.querySelector("span").textContent, photo: el.querySelector("img").src};
+        });
+        cur.push({id:+b.dataset.id, name:b.dataset.name, photo:b.dataset.photo});
+        renderChosen(cur);
+        search.value = ""; hits.classList.add("hidden"); hits.innerHTML = "";
+      });
+    } catch (e) { toast(e.message); }
+  };
+  search.oninput = () => { clearTimeout(timer); timer = setTimeout(run, 200); };
+  box.collect = () => {
+    const m = modeOf();
+    if (m === "auto") return null;
+    if (m === "off") return [];
+    return ids();
+  };
+}
+
 function questionModal(id, q) {
   modal(`<h2>${q ? T("edytuj pytanie") : T("nowe pytanie")}</h2>
     <div class="form-grid">
       <label class="field full">${T("Pytanie po polsku")}<input class="input sm" name="prompt_pl" value="${esc(q?.prompt_pl || "")}" placeholder="${T("np. Wymień filmy Johna Carpentera")}"></label>
       <label class="field full">${T("Pytanie po angielsku")}<input class="input sm" name="prompt_en" value="${esc(q?.prompt_en || "")}" placeholder="Name John Carpenter films"></label>
+      ${actorPicker(q)}
     </div>
     <p class="muted" style="margin:8px 0 0;font-size:14px">${T("Bez listy odpowiedzi. Po licytacji i timerze pozostali gracze decydują, czy zadanie zostało zaliczone.")}</p>
     <div class="actions"><button type="button" class="pill ghost" data-close>${T("anuluj")}</button><button class="pill orange">${T("zapisz")}</button></div>`,
     async fd => {
-      const body = {prompt_pl: fd.get("prompt_pl") || "", prompt_en: fd.get("prompt_en") || ""};
+      const body = {prompt_pl: fd.get("prompt_pl") || "", prompt_en: fd.get("prompt_en") || "", actors: ($("#apick") && $("#apick").collect) ? $("#apick").collect() : null};
       if (q) await api(`/api/admin/questions/${q.id}`, "PUT", body); else await api(`/api/admin/packs/${id}/questions`, "POST", body);
       toast(T("Zapisano")); questionsPage(id); });
 }
@@ -999,7 +1079,8 @@ async function questionsPage(id) {
     <div class="ed-grid">
       <div class="panel"><h2>${T("pytania")} <span class="muted">(${qs.length})</span></h2>
         ${qs.length ? `<div class="qlist">${qs.map(q => `<div class="qq" data-id="${q.id}"><div class="row" style="justify-content:space-between;flex-wrap:nowrap;align-items:flex-start">
-            <div><div class="t">${esc(q.prompt_pl || q.prompt_en)}</div>${q.prompt_pl && q.prompt_en ? `<div class="sub">EN: ${esc(q.prompt_en)}</div>` : !q.prompt_pl ? `<div class="sub">${T("tylko EN")}</div>` : ""}</div>
+            <div><div class="t">${esc(q.prompt_pl || q.prompt_en)}</div>${q.prompt_pl && q.prompt_en ? `<div class="sub">EN: ${esc(q.prompt_en)}</div>` : !q.prompt_pl ? `<div class="sub">${T("tylko EN")}</div>` : ""}
+              ${(q.faces||[]).length?`<div class="qpick" style="margin-top:6px">${q.faces.map(f=>`<span class="choice"><img src="${esc(f.photo)}" alt=""><span>${esc(f.name)}</span></span>`).join("")}</div>`:""}</div>
             <div class="row" style="gap:6px;flex-wrap:nowrap"><button class="ibtn" data-a="edit" title="${T("edytuj")}">${ICON.edit || T("edytuj")}</button><button class="ibtn" data-a="del" title="${T("usuń")}">${ICON.del || "&times;"}</button></div></div>
             </div>`).join("")}</div>`
         : `<p class="empty">${T("Brak pytań. Bez nich licytacja zadaje jedno proste pytanie: ile filmów z pakietu wymienisz.")}</p>`}
@@ -1037,11 +1118,12 @@ function bombModal(id, q) {
       <label class="field full">${T("Kategoria po polsku")}<input class="input sm" name="prompt_pl" value="${esc(q?.prompt_pl || "")}" placeholder="${T("np. Horrory z duchami")}"></label>
       <label class="field full">${T("Kategoria po angielsku")}<input class="input sm" name="prompt_en" value="${esc(q?.prompt_en || "")}" placeholder="Ghost horror movies"></label>
       <label class="field full">${T("Przykładowe odpowiedzi (opcjonalnie, jedna w linii) - widzi je tylko gospodarz")}<textarea class="input sm" name="answers" rows="5" placeholder="The Conjuring; Obecność&#10;The Others; Inni">${esc((q?.answers || []).map(a => [a.text].concat(a.aliases || [], a.pl ? [a.pl] : []).filter((x, i, arr) => x && arr.indexOf(x) === i).join("; ")).join("\n"))}</textarea></label>
+      ${actorPicker(q)}
     </div>
     <p class="muted" style="margin:8px 0 0;font-size:14px">${T("Odpowiedzi w Bombie mówi się na głos, a gospodarz klika dobra albo zła. Lista przykładów tylko mu podpowiada.")}</p>
     <div class="actions"><button type="button" class="pill ghost" data-close>${T("anuluj")}</button><button class="pill orange">${T("zapisz")}</button></div>`,
     async fd => {
-      const body = {prompt_pl: fd.get("prompt_pl") || "", prompt_en: fd.get("prompt_en") || "", answers_text: fd.get("answers") || "", kind: "bomba"};
+      const body = {prompt_pl: fd.get("prompt_pl") || "", prompt_en: fd.get("prompt_en") || "", answers_text: fd.get("answers") || "", kind: "bomba", actors: ($("#apick") && $("#apick").collect) ? $("#apick").collect() : null};
       if (q) await api(`/api/admin/questions/${q.id}`, "PUT", body); else await api(`/api/admin/packs/${id}/bombs`, "POST", body);
       toast(T("Zapisano")); bombsPage(id); });
 }
@@ -1054,7 +1136,8 @@ async function bombsPage(id) {
       <div class="panel"><h2>${T("kategorie")} <span class="muted">(${qs.length})</span></h2>
         ${qs.length ? `<div class="qlist">${qs.map(q => `<div class="qq" data-id="${q.id}"><div class="row" style="justify-content:space-between;flex-wrap:nowrap;align-items:flex-start">
             <div><div class="t">${esc(q.prompt_pl || q.prompt_en)}</div>${q.prompt_pl && q.prompt_en ? `<div class="sub">EN: ${esc(q.prompt_en)}</div>` : !q.prompt_pl ? `<div class="sub">${T("tylko EN")}</div>` : ""}
-              ${(q.answers || []).length ? `<div class="sub">${T("przykłady: {n}", {n: q.answers.length})}</div>` : ""}</div>
+              ${(q.answers || []).length ? `<div class="sub">${T("przykłady: {n}", {n: q.answers.length})}</div>` : ""}
+              ${(q.faces||[]).length?`<div class="qpick" style="margin-top:6px">${q.faces.map(f=>`<span class="choice"><img src="${esc(f.photo)}" alt=""><span>${esc(f.name)}</span></span>`).join("")}</div>`:""}</div>
             <div class="row" style="gap:6px;flex-wrap:nowrap"><button class="ibtn" data-a="edit" title="${T("edytuj")}">${ICON.edit || T("edytuj")}</button><button class="ibtn" data-a="del" title="${T("usuń")}">${ICON.del || "&times;"}</button></div></div>
             </div>`).join("")}</div>`
         : `<p class="empty">${T("Brak kategorii. Bez nich Bomba jest niedostępna.")}</p>`}

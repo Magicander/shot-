@@ -1,7 +1,7 @@
 // admin_api.js - cloud admin read/write: same routes as local app.py (minus scraper).
 // All writes go to the Content Durable Object overlay. Reads merge ASSETS + overlay.
 import { contentStub, MAX_POSTER, MAX_TEXT_BODY } from "./content.js";
-import { normTitle } from "./game.js";
+import { normTitle, parseActors, questionFaces, actorsFromMovies, foldText, actorStems } from "./game.js";
 import { scrapeCtx, fetchOne, fetchActorImage, tmdbPersonPhoto, SOURCES, DEFAULT_N } from "./webscrape.js";
 
 class ApiError extends Error {
@@ -11,6 +11,31 @@ class ApiError extends Error {
 const MODES = ["kadry", "zoom", "licytacja", "rok", "kolejnosc", "plakat", "aktorzy", "top", "bomba", "hotbuzz"];
 const MIN = { frames: 1, zoom: 1, movies: 5, years: 3, posters: 3, cast: 3, questions: 1, bombs: 1, music: 5 };
 const MUSIC_LOCAL = "Muzykę do Hot buzz pobiera się tylko lokalnie (python music.py), a do chmury trafia z wgraniem danych.";
+
+async function actorCatalog(env, req, data) {
+  const extra = [];
+  try {
+    const ov = await contentOp(env, { op: "listActors" });
+    if (Array.isArray(ov)) extra.push(...ov);
+    else if (ov && Array.isArray(ov.actors)) extra.push(...ov.actors);
+  } catch { /* brak nakładki */ }
+  try {
+    const r = await env.ASSETS.fetch(new Request(new URL("/data/actors-names.json", req.url)));
+    if (r.ok) extra.push(...(await r.json()));
+  } catch { /* stary build */ }
+  const movies = data && data.movies ? data.movies : [];
+  if (!movies.length) {
+    try {
+      const packs = await basePacks(env, req);
+      for (const p of packs || []) {
+        const one = await loadMergedPack(env, req, p.id);
+        if (one && one.movies) movies.push(...one.movies);
+        if (one && one.actors) extra.push(...one.actors);
+      }
+    } catch { /* */ }
+  } else if (data.actors) extra.push(...data.actors);
+  return actorsFromMovies(movies, extra);
+}
 
 function json(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data), {
@@ -169,7 +194,9 @@ function questionFrom(d, existing) {
   } else {
     ans = [];
   }
-  return { prompt_pl: pl, prompt_en: en, answers: ans };
+  const out = { prompt_pl: pl, prompt_en: en, answers: ans };
+  if ("actors" in d) out.actors = parseActors(d.actors);
+  return out;
 }
 
 function parseQuotesText(movies, existing, text) {
@@ -526,9 +553,13 @@ export async function handleAdmin(req, env, path, { isAdmin, body, detectLang })
 
     if ((sub === "questions" || sub === "bombs") && req.method === "GET") {
       const kind = sub === "bombs" ? "bomba" : "licytacja";
-      return json(((sub === "bombs" ? data.pack.bombs : data.pack.questions) || []).map(q => ({
-        id: q.id, prompt_pl: q.prompt_pl || "", prompt_en: q.prompt_en || "", answers: q.answers || [], kind,
-      })));
+      const catalog = await actorCatalog(env, req, data);
+      return json(((sub === "bombs" ? data.pack.bombs : data.pack.questions) || []).map(q => {
+        const row = { id: q.id, prompt_pl: q.prompt_pl || "", prompt_en: q.prompt_en || "", answers: q.answers || [], kind,
+          actors: parseActors(q.actors) };
+        row.faces = questionFaces(row, catalog);
+        return row;
+      }));
     }
 
     if ((sub === "questions" || sub === "bombs") && req.method === "POST") {
@@ -724,6 +755,22 @@ export async function handleAdmin(req, env, path, { isAdmin, body, detectLang })
         meta: { name: String(d.name || "").trim().slice(0, 80), source, url },
       });
       return json({ ok: true, id: r.id });
+    }
+    if (req.method === "GET" && !aid) {
+      const url = new URL(req.url);
+      const qtxt = foldText(url.searchParams.get("q") || "");
+      const catalog = await actorCatalog(env, req, null);
+      const out = [];
+      for (const a of catalog) {
+        if (qtxt) {
+          const folded = foldText(a.name || "");
+          const hit = folded.includes(qtxt) || folded.split(/\s+/).some(w => [...actorStems(qtxt)].some(x => actorStems(w).has(x)));
+          if (!hit) continue;
+        }
+        out.push({ id: a.id, name: a.name, photo: `/actor/${a.id}.jpg` });
+        if (out.length >= 40) break;
+      }
+      return json(out);
     }
     throw new ApiError(404, "Nie ma takiego adresu");
   }

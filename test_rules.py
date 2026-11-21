@@ -569,6 +569,61 @@ for m in ms[4:]:
     m["music"] = False
 check(not rooms.availability(FX["pack"], ms, False)["hotbuzz"]["ok"], "mniej niż 5 filmów z muzyką: Hot buzz niedostępny")
 
+
+print("Zdjęcia aktorów przy pytaniu licytacji i Bomby")
+CAT = [
+    {"id": 1, "name": "Tom Hanks"}, {"id": 2, "name": "Samuel L. Jackson"},
+    {"id": 3, "name": "Meg Ryan"}, {"id": 4, "name": "Pedro Almodóvar"},
+    {"id": 5, "name": "John Carpenter"}, {"id": 6, "name": "Brad Pitt"},
+    {"id": 7, "name": "Angelina Jolie"}, {"id": 8, "name": "Robert De Niro"},
+    {"id": 9, "name": "Michael Jackson"}, {"id": 10, "name": "Cher"},
+]
+def _ids(pl, en=""):
+    return [a["id"] for a in rooms.match_actor_photos(pl, en, CAT)]
+check(_ids("Filmy z Tomem Hanksem") == [1], "odmiana: z Tomem Hanksem")
+check(_ids("Name films with Samuel L. Jackson") == [2], "EN: Samuel L. Jackson")
+check(_ids("Filmy z Tomem Hanksem i Meg Ryan") == [1, 3], "dwóch aktorów w jednym pytaniu")
+check(_ids("Filmy Almodóvara") == [4], "samo nazwisko w dopełniaczu, jednoznaczne")
+check(_ids("Wymień filmy Johna Carpentera") == [5], "Johna Carpentera")
+check(_ids("Filmy z Bradem Pittem") == [6] and _ids("Filmy z Angeliną Jolie") == [7], "Pitt i Jolie")
+check(_ids("Filmy z Robertem De Niro") == [8] and _ids("z De Niro") == [8], "De Niro")
+check(_ids("Filmy Cher") == [10], "mononim")
+check(_ids("filmy Jacksona") == [] and _ids("Horrory z duchami", "Horror films with ghosts") == [], "wieloznaczne nazwisko i pytanie bez aktora")
+q = {"prompt_pl": "Filmy z Tomem Hanksem", "prompt_en": "", "actors": []}
+check(rooms.question_faces(q, CAT) == [], "pusta lista wyłącza wykrywanie")
+q = {"prompt_pl": "Horrory z duchami", "actors": [1]}
+check(rooms.question_faces(q, CAT)[0]["photo"] == "/actor/1.jpg", "jawny wybór nadpisuje treść")
+r, (A, B) = room(2, {}, modes=["bomba"])
+r.actors = CAT
+r.pack["bombs"] = [{"id": 99, "prompt_pl": "Filmy z Tomem Hanksem", "prompt_en": "Name films with Tom Hanks", "answers": [], "actors": None}]
+r.start()
+faces = r.state(B)["faces"]
+check(len(faces) == 1 and faces[0]["id"] == 1 and faces[0]["photo"] == "/actor/1.jpg", "stan rundy ma zdjęcie aktora")
+check("fuse_left" not in json.dumps(r.state(B)), "brak wycieku pól lontu przy zdjęciach")
+
+print("Bomba: Sprawdzam zatrzymuje lont na serwerze")
+r, (A, B) = room(2, {"bomb_fuse": "short", "bomb_check": True}, modes=["bomba"])
+r.start(); r.answer(A, {"light": True}, "pl")
+left0 = r.task["fuse_end"] - T[0]
+adv(r, 3)
+check(not r.answer(B, {"check": True}, "pl")["ok"] and r.task["sub"] == "live", "tylko gospodarz klika Sprawdzam")
+check(r.answer(A, {"check": True}, "pl")["ok"] and r.task["sub"] == "check", "gospodarz pauzuje lont")
+sB = r.state(B); raw = json.dumps(sB)
+check(sB["paused"] and not sB.get("can_check") and r.state(A)["can_resume"], "pauza widoczna dla wszystkich, wznów u gospodarza")
+check(all(k not in raw for k in ('"fuse_left"', '"heat_left"', '"fuse_end"', '"heat_at"', '"lit_at"', '"fuse":')), "pozostały czas lontu nie wycieka")
+adv(r, 40)
+check(r.phase == "round" and r.task["sub"] == "check" and not r.task.get("exploded"), "zatrzymany lont nie wybucha mimo upływu czasu")
+check(r.answer(A, {"resume": True}, "pl")["ok"] and r.task["sub"] == "live", "Wznów odpala lont dalej")
+rem = r.task["fuse_end"] - T[0]
+check(abs(rem - (left0 - 3)) < 0.05, "wznawia z tym samym ukrytym pozostałym czasem")
+r.answer(A, {"check": True}, "pl")
+h = r.task["holder"]
+check(r.answer(A, {"verdict": True}, "pl")["ok"] and r.task["sub"] == "live" and r.task["holder"] != h, "dobra w pauzie wznawia lont i przekazuje bombę")
+r3, (A3, B3) = room(2, {"bomb_check": False, "bomb_fuse": "short"}, modes=["bomba"])
+r3.start(); r3.answer(A3, {"light": True}, "pl")
+check(not r3.answer(A3, {"check": True}, "pl")["ok"] and not r3.state(A3).get("can_check"), "ustawienie wyłącza Sprawdzam")
+check(rooms.norm_settings({})["bomb_check"] is True, "Sprawdzam włączone domyślnie")
+
 print("Hot buzz: muzyka, buzzer, blokada po pudle")
 r, (A, B, C) = room(3, {"buzz_answer": 8}, modes=["hotbuzz"])
 r.start()

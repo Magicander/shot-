@@ -303,6 +303,63 @@ def main():
     lobby = {p["id"]: p for p in Client(base).req("GET", "/api/packs")}
     check({"bomba", "hotbuzz"} <= set(lobby[pid]["modes"]), "lobby pokazuje nowe tryby")
 
+    # zdjęcia aktorów + Sprawdzam (osobny pokój, żeby nie psuć przebiegu poniżej)
+    con2 = sqlite3.connect(DBF)
+    act = con2.execute("SELECT id, name FROM actor_photos WHERE length(image)>=800 AND name!='' LIMIT 8").fetchall()
+    con2.close()
+    if act:
+        aid, aname = act[0][0], act[0][1]
+        qn = adm.req("POST", f"/api/admin/packs/{pid}/questions",
+                     {"prompt_pl": f"Filmy z {aname}", "prompt_en": f"Name films with {aname}"})
+        qs = [q for q in adm.req("GET", f"/api/admin/packs/{pid}/questions") if q["id"] == qn["id"]][0]
+        check(qs["faces"] and qs["faces"][0]["id"] == aid, "panel: pytanie o aktora ma zdjęcie")
+        ca, cb = Client(base, "pl"), Client(base, "en")
+        ra = ca.req("POST", "/api/rooms", {"pack_id": pid, "name": "Ala"})
+        codep, Ap = ra["code"], {"pid": ra["pid"], "token": ra["token"]}
+        rb = cb.req("POST", f"/api/rooms/{codep}/join", {"name": "Bob"}); Bp = {"pid": rb["pid"], "token": rb["token"]}
+        ca.req("POST", f"/api/rooms/{codep}/setup", {**Ap, "modes": ["licytacja"], "rounds": 1, "settings": {"order": "fixed"}})
+        # force this question into the pack by starting until we see faces, or set after start
+        ca.req("POST", f"/api/rooms/{codep}/start", Ap)
+        roomp = app.rooms[codep]
+        roomp.task["q"] = {"id": qn["id"], "prompt_pl": f"Filmy z {aname}", "prompt_en": f"Name films with {aname}", "answers": [], "actors": None}
+        st = ca.req("GET", f"/api/rooms/{codep}?pid={Ap['pid']}&token={Ap['token']}")
+        check(st.get("faces") and st["faces"][0]["id"] == aid and st["faces"][0]["photo"].endswith(f"/actor/{aid}.jpg"),
+              "licytacja pokazuje zdjęcie aktora na karcie")
+        adm.req("DELETE", f"/api/admin/questions/{qn['id']}")
+    ca, cb = Client(base, "pl"), Client(base, "en")
+    ra = ca.req("POST", "/api/rooms", {"pack_id": pid, "name": "Ala"})
+    codep, Ap = ra["code"], {"pid": ra["pid"], "token": ra["token"]}
+    rb = cb.req("POST", f"/api/rooms/{codep}/join", {"name": "Bob"}); Bp = {"pid": rb["pid"], "token": rb["token"]}
+    ca.req("POST", f"/api/rooms/{codep}/setup", {**Ap, "modes": ["bomba"], "rounds": 1, "settings": {"bomb_fuse": "short", "bomb_check": True}})
+    ca.req("POST", f"/api/rooms/{codep}/start", Ap)
+    roomp = app.rooms[codep]
+    ca.req("POST", f"/api/rooms/{codep}/guess", {**Ap, "light": True})
+    left0 = roomp.task["fuse_end"] - time.time()
+    time.sleep(0.4)
+    check(cb.req("POST", f"/api/rooms/{codep}/guess", {**Bp, "check": True}).get("ok") is not True, "gracz nie pauzuje lontu")
+    check(ca.req("POST", f"/api/rooms/{codep}/guess", {**Ap, "check": True})["ok"] and roomp.task["sub"] == "check", "gospodarz klika Sprawdzam")
+    sb = cb.req("GET", f"/api/rooms/{codep}?pid={Bp['pid']}&token={Bp['token']}")
+    leakp = json.dumps(sb)
+    check(sb["paused"] and not sb.get("can_check") and all(k not in leakp for k in ('"fuse_left"', '"heat_left"', '"fuse_end"', '"heat_at"')),
+          "pauza widoczna, pozostały czas nie wycieka")
+    time.sleep(1.2)
+    check(roomp.phase == "round" and roomp.task["sub"] == "check", "zatrzymany lont nie wybucha")
+    ca.req("POST", f"/api/rooms/{codep}/guess", {**Ap, "resume": True})
+    rem = roomp.task["fuse_end"] - time.time()
+    check(roomp.task["sub"] == "live" and rem < left0, "Wznów: lont leci z pozostałym czasem")
+    ca.req("POST", f"/api/rooms/{codep}/setup", {**Ap, "settings": {"bomb_check": False}})  # too late, phase not lobby
+    # wyłączenie ustawienia: nowy pokój
+    ca2, cb2 = Client(base, "pl"), Client(base, "en")
+    ra = ca2.req("POST", "/api/rooms", {"pack_id": pid, "name": "Ala"})
+    code2, A2 = ra["code"], {"pid": ra["pid"], "token": ra["token"]}
+    cb2.req("POST", f"/api/rooms/{code2}/join", {"name": "Bob"})
+    ca2.req("POST", f"/api/rooms/{code2}/setup", {**A2, "modes": ["bomba"], "rounds": 1, "settings": {"bomb_check": False}})
+    ca2.req("POST", f"/api/rooms/{code2}/start", A2)
+    ca2.req("POST", f"/api/rooms/{code2}/guess", {**A2, "light": True})
+    st2 = ca2.req("GET", f"/api/rooms/{code2}?pid={A2['pid']}&token={A2['token']}")
+    check(not st2.get("can_check") and ca2.req("POST", f"/api/rooms/{code2}/guess", {**A2, "check": True}).get("ok") is not True,
+          "ustawienie wyłącza Sprawdzam w pokoju")
+
     a, b = Client(base, "pl"), Client(base, "en")
     ra = a.req("POST", "/api/rooms", {"pack_id": pid, "name": "Ala"})
     code = ra["code"]; A = {"pid": ra["pid"], "token": ra["token"]}
@@ -319,7 +376,7 @@ def main():
     check(a.req("POST", f"/api/rooms/{code}/guess", {**A, "verdict": True})["ok"] and room.task["holder"] != h0, "dobra: bomba przechodzi")
     sb = b.req("GET", f"/api/rooms/{code}?pid={B['pid']}&token={B['token']}")
     leak = json.dumps(sb)
-    check(not any(k in leak for k in ('"fuse_end"', '"heat_at"', '"fuse":', '"lit_at"')) and sb["heat"] in (0, 1, 2, 3), "stan nie zdradza czasu lontu")
+    check(not any(k in leak for k in ('"fuse_end"', '"heat_at"', '"fuse":', '"lit_at"', '"fuse_left"', '"heat_left"')) and sb["heat"] in (0, 1, 2, 3), "stan nie zdradza czasu lontu")
     room.task["fuse_end"] = time.time() - 0.01
     sa = a.req("GET", f"/api/rooms/{code}?pid={A['pid']}&token={A['token']}")
     check(sa["phase"] == "reveal" and sa["answer"]["exploded"] and sa["untimed"], "wybuch kończy rundę, odsłona czeka")

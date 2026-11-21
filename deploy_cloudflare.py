@@ -65,10 +65,11 @@ ACTOR_SHARD = 400_000  # bajty na plik data/actors-XX.bin
 def write_actor_shards(con) -> tuple[int, int, int]:
     """Zwraca (liczba zdjęć, liczba shardów, bajty). Zero zdjęć -> pusty indeks, 0 shardów."""
     try:
-        rows = con.execute("SELECT id, image FROM actor_photos ORDER BY id").fetchall()
+        rows = con.execute("SELECT id, image, name FROM actor_photos ORDER BY id").fetchall()
     except Exception:
         rows = []
     index, buf, shard, nbytes = {}, bytearray(), 0, 0
+    names = []
 
     def flush():
         nonlocal buf, shard
@@ -89,11 +90,15 @@ def write_actor_shards(con) -> tuple[int, int, int]:
             flush()
         ctype = "image/png" if img[:4] == b"\x89PNG" else "image/webp" if img[8:12] == b"WEBP" else "image/jpeg"
         index[str(r["id"])] = {"s": shard, "o": len(buf), "n": len(img), "t": ctype}
+        if (r["name"] or "").strip():
+            names.append({"id": r["id"], "name": (r["name"] or "").strip()})
         buf.extend(img)
         nbytes += len(img)
     flush()
     (BUILD / "data" / "actors-index.json").write_text(
         json.dumps(index, separators=(",", ":")), encoding="utf-8")
+    (BUILD / "data" / "actors-names.json").write_text(
+        json.dumps(names, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     return len(index), shard, nbytes
 
 

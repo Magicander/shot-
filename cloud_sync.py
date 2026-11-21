@@ -141,22 +141,27 @@ def merge_overlay(con: sqlite3.Connection, overlay: dict, *, verbose=True) -> di
         answers = q.get("answers") or "[]"
         if isinstance(answers, (list, dict)):
             answers = json.dumps(answers, ensure_ascii=False)
+        actors = q.get("actors")
+        if isinstance(actors, (list, dict)):
+            actors = json.dumps(actors, ensure_ascii=False)
+        elif actors == "" or actors == "auto":
+            actors = None
         row = con.execute("SELECT id FROM questions WHERE id=?", (qid,)).fetchone()
         if row:
-            con.execute("UPDATE questions SET prompt_pl=?, prompt_en=?, answers=?, created=? WHERE id=?",
-                        (pl, en, answers, max(ots, lts, now), qid))
+            con.execute("UPDATE questions SET prompt_pl=?, prompt_en=?, answers=?, created=?, actors=? WHERE id=?",
+                        (pl, en, answers, max(ots, lts, now), actors, qid))
         else:
             if not pack_id:
                 summary["skipped"] += 1
                 continue
             try:
                 con.execute(
-                    "INSERT INTO questions (id, pack_id, prompt_pl, prompt_en, answers, created, kind) VALUES (?,?,?,?,?,?,?)",
-                    (qid, pack_id, pl, en, answers, ots or now, kind))
+                    "INSERT INTO questions (id, pack_id, prompt_pl, prompt_en, answers, created, kind, actors) VALUES (?,?,?,?,?,?,?,?)",
+                    (qid, pack_id, pl, en, answers, ots or now, kind, actors))
             except sqlite3.IntegrityError:
                 con.execute(
-                    "INSERT INTO questions (pack_id, prompt_pl, prompt_en, answers, created, kind) VALUES (?,?,?,?,?,?)",
-                    (pack_id, pl, en, answers, ots or now, kind))
+                    "INSERT INTO questions (pack_id, prompt_pl, prompt_en, answers, created, kind, actors) VALUES (?,?,?,?,?,?,?)",
+                    (pack_id, pl, en, answers, ots or now, kind, actors))
         summary["questions_upsert"] += 1
 
     for p in overlay.get("packs") or []:

@@ -463,8 +463,9 @@ function settingsPanel() {
     S.modes.includes("licytacja") ? grp(T("licytacja"), T("Gracze licytują po kolei. Timer puszcza przeciwnik, a po czasie pozostali oceniają, czy zadanie zostało zaliczone. Czas odpowiedzi: {n} s.", {n: c.lic_answer}),
       `<div class="sub2"><span>${T("czas na odpowiedź")}</span>${seg("lic_answer", [20, 30, 45, 60].map(n => [n, sec(n)]), c.lic_answer, dis)}</div>
        <div class="sub2"><span>${T("czas na turę")}</span>${seg("lic_bid", [5, 10, 15, 20].map(n => [n, sec(n)]), c.lic_bid, dis)}</div>`) : "",
-    S.modes.includes("bomba") ? grp(T("Bomba"), T("Lont jest ukryty i losowy w każdej rundzie. Tykanie przyspiesza pod koniec, ale nikt nie zna dokładnego czasu."),
-      seg("bomb_fuse", [["short", T("krótki (15-30 s)")], ["normal", T("normalny (20-45 s)")], ["long", T("długi (35-60 s)")]], c.bomb_fuse || "normal", dis)) : "",
+    S.modes.includes("bomba") ? grp(T("Bomba"), T("Lont jest ukryty i losowy w każdej rundzie. Tykanie przyspiesza pod koniec, ale nikt nie zna dokładnego czasu. „Sprawdzam” zatrzymuje lont, żeby gospodarz mógł zweryfikować odpowiedź."),
+      seg("bomb_fuse", [["short", T("krótki (15-30 s)")], ["normal", T("normalny (20-45 s)")], ["long", T("długi (35-60 s)")]], c.bomb_fuse || "normal", dis) +
+      `<div class="sub2"><span>${T("Sprawdzam w Bombie")}</span><label class="toggle"><input type="checkbox" id="bombcheck" ${c.bomb_check !== false ? "checked" : ""} ${d}><span>${c.bomb_check !== false ? T("włączone") : T("wyłączone")}</span></label></div>`) : "",
     S.modes.includes("hotbuzz") ? grp(T("Hot buzz"), T("Ile czasu ma na wpisanie tytułu ten, kto pierwszy wcisnął buzzer."),
       seg("buzz_answer", [5, 8, 12, 15].map(n => [n, sec(n)]), c.buzz_answer || 8, dis)) : "",
     S.modes.includes("top") ? grp(T("Top"), T("Za każdy film: {n} pkt za dokładne miejsce, o 1 mniej za każde miejsce pomyłki (minimum 0). Przy {n} filmach maksimum to {m}.", {n: c.top_n || 5, m: (c.top_n || 5) * (c.top_n || 5)}),
@@ -546,6 +547,7 @@ function renderLobby(v) {
   sp.querySelectorAll("[data-mr]").forEach(x => x.onchange = () => patch({mode_rounds: {...S.settings.mode_rounds, [x.dataset.mr]: +x.value}}));
   if ($("#permode")) $("#permode").onchange = e => patch({per_mode: e.target.checked});
   if ($("#hints")) $("#hints").onchange = e => patch({hints: e.target.checked});
+  if ($("#bombcheck")) $("#bombcheck").onchange = e => patch({bomb_check: e.target.checked});
   sp.querySelectorAll("[data-mv]").forEach(b => b.onclick = e => {
     e.preventDefault();
     const ms = S.modes.slice(), i = ms.indexOf(b.dataset.mv), j = i + +b.dataset.d;
@@ -564,7 +566,8 @@ function feedText(f) {
   return T({join:"{name} dołącza", guess:"{name} zgaduje (+{pts})", leave:"{name} wychodzi", bid:"{name} licytuje: {pts}",
     bidwin:"{name} wygrywa licytację: {pts}", answered:"{name} odpowiada", claim:"{name}: Mam!", wrong:"{name}: pudło",
     pass:"{name} pasuje", reroll:"{name} losuje nową parę aktorów", bomb:"{name} trzyma bombę", bombpass:"{name} zalicza",
-    boom:"{name}: bomba wybuchła", buzz:"{name}: buzz!"}[f.k] || "{name}", {name:f.name, pts:f.pts});
+    boom:"{name}: bomba wybuchła", buzz:"{name}: buzz!",
+    bombcheck:"{name} sprawdza odpowiedź", bombresume:"{name} wznawia lont"}[f.k] || "{name}", {name:f.name, pts:f.pts});
 }
 function me() { return S.players.find(p => p.id === S.me) || {}; }
 
@@ -736,6 +739,10 @@ function wireCommon() {
   if ($("#sheetbg")) $("#sheetbg").onclick = () => open(false);
 }
 
+function facesHtml(faces) {
+  if (!faces || !faces.length) return "";
+  return `<div class="qfaces">${faces.slice(0, 3).map(f => `<figure class="qface"><img src="${esc(f.photo)}" alt="${esc(f.name || "")}" width="80" height="80">${f.name ? `<figcaption>${esc(f.name)}</figcaption>` : ""}</figure>`).join("")}</div>`;
+}
 function renderAuction(m) {
   const secs = S.answer_seconds;
   const notice = `<p class="notice30">${T("Masz tylko {n} s na odpowiedź", {n: secs})}</p>`;
@@ -749,7 +756,7 @@ function renderAuction(m) {
     const myTurn = S.turn === S.me;
     const order = `<ol class="border">${S.order.map(o => `<li class="${o.id === S.turn ? "cur" : ""} ${o.passed ? "passed" : ""} ${o.online ? "" : "off"}">${esc(o.name)}${o.id === S.leader ? ` <b>${S.bid}</b>` : ""}</li>`).join("")}</ol>`;
     const stage = `<div class="stage textstage auction"><span class="lvl">${T("licytacja · tury")}</span><span class="clock" id="clock"></span>
-      <h2 class="ytitle qprompt">${esc(S.prompt)}</h2>
+      <h2 class="ytitle qprompt">${esc(S.prompt)}</h2>${facesHtml(S.faces)}
       <p class="starter">${T("Zaczyna: {name}", {name: esc(S.starter || "")})}</p>
       <div class="curbid"><span class="muted">${T("aktualna oferta")}</span><b class="bigbid">${S.bid || 0}</b><span>${S.leader_name ? esc(S.leader_name) : T("brak ofert")}</span></div>
       ${order}${hist}${rules}</div>`;
@@ -763,7 +770,7 @@ function renderAuction(m) {
   const mine = S.bidder === S.me;
   const sub = S.sub || "wait_timer";
   const stageHead = `<div class="stage textstage auction loose"><span class="lvl">${T("licytacja · {name} odpowiada", {name: esc(S.bidder_name)})}</span>${sub === "timed" ? `<span class="clock" id="clock"></span>` : ""}
-    <h2 class="ytitle qprompt">${esc(S.prompt)}</h2>
+    <h2 class="ytitle qprompt">${esc(S.prompt)}</h2>${facesHtml(S.faces)}
     <div class="curbid loose-bid"><span class="muted">${T("deklaracja")}</span><b class="bigbid">${S.bid}</b></div>`;
   if (sub === "wait_timer") {
     const stage = `${stageHead}
@@ -821,7 +828,7 @@ document.addEventListener("keydown", e => {
   const typing = ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement && document.activeElement.tagName);
   if (S.mode === "hotbuzz" && e.code === "Space" && !typing && !e.repeat) { e.preventDefault(); buzzNow(); }
   const onButton = document.activeElement && document.activeElement.tagName === "BUTTON";
-  if (S.mode === "bomba" && S.can_judge && S.sub === "live" && !typing && !e.repeat && !(onButton && (e.key === "Enter" || e.key === " "))) {
+  if (S.mode === "bomba" && S.can_judge && (S.sub === "live" || S.sub === "check") && !typing && !e.repeat && !(onButton && (e.key === "Enter" || e.key === " "))) {
     if (e.key === "ArrowRight" || e.key === "Enter") { e.preventDefault(); guessAct({verdict: true}); }
     else if (e.key === "ArrowLeft" || e.key === "Backspace") { e.preventDefault(); guessAct({verdict: false}); }
   }
@@ -997,11 +1004,12 @@ function renderBomb(m) {
   const order = `<ol class="border bomborder">${(S.order || []).map(o => `<li class="${o.id === S.holder ? "cur" : ""} ${o.online ? "" : "off"}">${esc(o.name)}${o.ok ? ` <b>${o.ok}</b>` : ""}</li>`).join("")}</ol>`;
   const who = S.sub === "ready" ? T("Bomba zaczyna u: {name}", {name: esc(S.holder_name || "?")})
     : mine ? T("Masz bombę! Mów tytuł na głos.") : T("Bomba u: {name}", {name: esc(S.holder_name || "?")});
-  const stage = `<div class="stage textstage bombstage ${S.sub} ${mine ? "mine" : ""} ${bad ? "bad" : ""}"><span class="lvl">${T("bomba · kategoria")}</span>${soundBtn()}
-    <h2 class="ytitle qprompt">${esc(S.prompt)}</h2>
+  const stage = `<div class="stage textstage bombstage ${S.sub} ${mine ? "mine" : ""} ${bad ? "bad" : ""} ${S.paused ? "paused" : ""}"><span class="lvl">${T("bomba · kategoria")}</span>${soundBtn()}
+    <h2 class="ytitle qprompt">${esc(S.prompt)}</h2>${facesHtml(S.faces)}
     <div class="bomb" id="bomb" data-heat="${S.sub === "live" ? S.heat : "x"}">${BOMB_SVG}</div>
     <p class="bholder">${who}</p>
     ${bad ? `<p class="bflash">${T("Zła odpowiedź, próbuj dalej!")}</p>` : ""}
+    ${S.paused ? `<p class="bpause">${T("Lont zatrzymany. Gospodarz sprawdza odpowiedź.")}</p>` : ""}
     ${order}
     ${judge && S.examples && S.examples.length ? `<details class="rules"><summary>${T("przykładowe odpowiedzi (widzisz tylko ty)")}</summary><p class="muted small-note">${S.examples.map(esc).join(", ")}</p></details>` : ""}
     </div>`;
@@ -1010,7 +1018,9 @@ function renderBomb(m) {
     dock = judge ? `<button type="button" class="pill orange big" id="blight" style="width:100%">${T("zapal lont")}</button><p class="muted small-note center">${T("Lont jest losowy, nikt nie zna czasu. Ty oceniasz odpowiedzi.")}</p>`
       : waitBox(T("Za chwilę start"), T("{name} zapala lont i ocenia odpowiedzi.", {name: esc(S.judge_name || "?")}));
   } else if (judge) {
-    dock = `<p class="judgehint">${T("{name} mówi tytuł. Pasuje do kategorii?", {name: esc(S.holder_name || "?")})}</p>
+    const chk = S.can_check ? `<button type="button" class="pill light" id="bcheck">${T("Sprawdzam")}</button>` : (S.can_resume ? `<button type="button" class="pill light" id="bresume">${T("Wznów")}</button>` : "");
+    const dockPause = S.paused ? `<p class="bpause dockpause">${T("Lont zatrzymany. Gospodarz sprawdza odpowiedź.")}</p>` : "";
+    dock = `${dockPause}${chk}<p class="judgehint">${S.paused ? T("Sprawdź odpowiedź, potem zalicz albo wznów lont.") : T("{name} mówi tytuł. Pasuje do kategorii?", {name: esc(S.holder_name || "?")})}</p>
       <div class="verdict-row bombjudge"><button type="button" class="pill ghost big" id="bbad">${T("zła")}</button><button type="button" class="pill orange big" id="bok">${T("dobra")}</button></div>
       ${matchMedia("(pointer:fine)").matches ? `<p class="muted small-note center">${T("Klawiatura: strzałka w prawo = dobra, w lewo = zła")}</p>` : ""}`;
   } else {
@@ -1024,12 +1034,14 @@ function wireBomb() {
   if ($("#blight")) $("#blight").onclick = () => { unlockAudio(); guessAct({light: true}); };
   if ($("#bok")) $("#bok").onclick = () => guessAct({verdict: true});
   if ($("#bbad")) $("#bbad").onclick = () => guessAct({verdict: false});
+  if ($("#bcheck")) $("#bcheck").onclick = () => guessAct({check: true});
+  if ($("#bresume")) $("#bresume").onclick = () => guessAct({resume: true});
   if (S.last === "bad" && S.last_at != null && S.last_at < 2) setTimeout(() => { const st = $(".bombstage"); if (st) st.classList.remove("bad"); const f = $(".bflash"); if (f) f.remove(); }, Math.max(300, (2 - S.last_at) * 1000));
   bombFrame();
 }
 function renderBombReveal(a) {
   const rows = (a.results || []).slice().sort((x, y) => y.points - x.points).map(r => `<li class="${r.lost ? "miss" : ""}"><b>${esc(r.name)}</b><span>${r.lost ? T("bomba wybuchła w rękach") : T("dobre odpowiedzi: {n}", {n: r.ok})}</span><span class="sc">+${r.points}</span></li>`).join("");
-  return `<div class="bombrev"><p class="muted qprompt-r">${esc(a.prompt || "")}</p>
+  return `<div class="bombrev"><p class="muted qprompt-r">${esc(a.prompt || "")}</p>${facesHtml(a.faces)}
     <h2>${a.exploded ? T("bum!") : T("runda pominięta")}</h2>
     ${a.exploded ? `<p class="bloser">${T("Bomba wybuchła u: {name}", {name: `<b>${esc(a.loser_name || "?")}</b>`})}</p>` : ""}
     <div class="year">${T("podania: {n}", {n: a.passes || 0})}</div>
@@ -1465,7 +1477,7 @@ function renderReveal(v) {
   else if (mode === "bomba") body = renderBombReveal(a);
   else if (mode === "hotbuzz") body = renderBuzzReveal(a);
   else if (mode === "licytacja") {
-    body = (a.prompt ? `<p class="muted qprompt-r">${esc(a.prompt)}</p>` : "") + (a.bidder_name ? `<h2>${a.success ? T("{name} zaliczył zadanie", {name: esc(a.bidder_name)}) : T("{name} nie zaliczył zadania", {name: esc(a.bidder_name)})}</h2>
+    body = (a.prompt ? `<p class="muted qprompt-r">${esc(a.prompt)}</p>` : "") + facesHtml(a.faces) + (a.bidder_name ? `<h2>${a.success ? T("{name} zaliczył zadanie", {name: esc(a.bidder_name)}) : T("{name} nie zaliczył zadania", {name: esc(a.bidder_name)})}</h2>
       <div class="year">${T("deklaracja: {n}", {n: a.bid})}</div>
       <p class="muted">${T("Po timerze pozostali gracze zdecydowali, czy licytujący wymienił tyle odpowiedzi. Sukces: 200 pkt × deklaracja dla licytującego. Porażka: 100 pkt × deklaracja dla pozostałych.")}</p>
       <p class="muted">${T("Deklaracje: {list}", {list: (a.bids || []).map(b => esc(b.name) + " " + b.bid).join(", ")})}</p>

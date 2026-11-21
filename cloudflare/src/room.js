@@ -1,7 +1,7 @@
 // room.js - jeden Durable Object na pokój. WebSockety z hibernacją (bez pollingu),
 // stan w SQLite obiektu (ctx.storage), zegar rundy przez alarmy.
 import { DurableObject } from "cloudflare:workers";
-import { Game, GameError, newRoom, MAX_PLAYERS, mergePackData, availability, normTitle } from "./game.js";
+import { Game, GameError, newRoom, MAX_PLAYERS, mergePackData, availability, normTitle, actorsFromMovies } from "./game.js";
 import { errText } from "./i18n.js";
 import { pickPair, localGraph, tmdbIsAdjacent, tmdbAdjacent, isAdjacentLocal, enrichLocal } from "./most.js";
 
@@ -82,6 +82,14 @@ export class Room extends DurableObject {
     return data;
   }
 
+  async loadActorNames() {
+    try {
+      const r = await this.env.ASSETS.fetch("https://assets.local/data/actors-names.json");
+      if (r.ok) return await r.json();
+    } catch (e) { /* stary build bez listy nazw */ }
+    return [];
+  }
+
   async loadAllMovies() {
     const res = await this.env.ASSETS.fetch("https://assets.local/data/packs.json");
     if (!res.ok) return [];
@@ -132,6 +140,8 @@ export class Room extends DurableObject {
     }
     this.movies = data.movies;
     this.localGraph = localGraph(this.movies);
+    const extra = [...(data.actors || []), ...(data.pack && data.pack.actors || []), ...await this.loadActorNames()];
+    data.pack = { ...(data.pack || {}), actors: actorsFromMovies(this.movies, extra) };
     this.room = newRoom(code, data, rounds, kind);
     const g = this.game();
     if ((modes && modes.length && kind !== "most") || settings) g.configure(modes && modes.length && kind !== "most" ? modes : null, null, settings);

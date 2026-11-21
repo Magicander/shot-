@@ -8,6 +8,15 @@ const MAX_POSTER = 1_500_000;  // 1.5 MB upload/URL blob limit
 const MAX_TEXT_BODY = 200_000;
 
 const qkind = k => (k === "bomba" ? "bomba" : "licytacja");
+const qactors = raw => {
+  if (raw == null || raw === "" || raw === "auto") return null;
+  if (Array.isArray(raw)) return raw.map(Number).filter(n => n > 0).slice(0, 3);
+  try {
+    const v = typeof raw === "string" ? JSON.parse(raw) : raw;
+    if (v == null || v === "auto") return null;
+    return Array.isArray(v) ? v.map(Number).filter(n => n > 0).slice(0, 3) : null;
+  } catch { return null; }
+};
 
 export class Content extends DurableObject {
   constructor(ctx, env) {
@@ -90,6 +99,8 @@ export class Content extends DurableObject {
     const qcols = [...this.ctx.storage.sql.exec("PRAGMA table_info(questions)")].map(r => r.name);
     if (!qcols.includes("kind"))
       this.ctx.storage.sql.exec("ALTER TABLE questions ADD COLUMN kind TEXT NOT NULL DEFAULT 'licytacja'");
+    if (!qcols.includes("actors"))
+      this.ctx.storage.sql.exec("ALTER TABLE questions ADD COLUMN actors TEXT");
   }
 
   now() { return Date.now() / 1000; }
@@ -107,7 +118,7 @@ export class Content extends DurableObject {
     return {
       movies: rows("SELECT * FROM movies"),
       quotes: rows("SELECT id, movie_id, text, lang, deleted, updated_at, base FROM quotes"),
-      questions: rows("SELECT id, pack_id, prompt_pl, prompt_en, answers, deleted, updated_at, base, kind FROM questions"),
+      questions: rows("SELECT id, pack_id, prompt_pl, prompt_en, answers, deleted, updated_at, base, kind, actors FROM questions"),
       packs: rows("SELECT * FROM packs"),
       posters: posters.map(p => ({ ...p, has_image: (p.bytes || 0) > 0 })),
       actors: [...this.ctx.storage.sql.exec("SELECT id, key, name, source, source_id, url, deleted, updated_at, image FROM actor_photos")].map(r => {
@@ -254,13 +265,18 @@ export class Content extends DurableObject {
     return { ok: true, updated_at: ts };
   }
 
+  listActors() {
+    return [...this.ctx.storage.sql.exec("SELECT id, name FROM actor_photos WHERE deleted=0 AND IFNULL(length(image),0) >= 800")].map(r => ({ id: r.id, name: r.name || "" }));
+  }
+
   // ---- questions
   addQuestion(packId, q) {
     const id = this.nextId("questions");
     const ts = this.now();
     this.ctx.storage.sql.exec(
-      "INSERT INTO questions(id, pack_id, prompt_pl, prompt_en, answers, deleted, updated_at, base, kind) VALUES (?,?,?,?,?,0,?,0,?)",
+      "INSERT INTO questions(id, pack_id, prompt_pl, prompt_en, answers, deleted, updated_at, base, kind, actors) VALUES (?,?,?,?,?,0,?,0,?,?)",
       id, +packId, q.prompt_pl || "", q.prompt_en || "", JSON.stringify(q.answers || []), ts, qkind(q.kind),
+      q.actors != null ? JSON.stringify(q.actors) : null,
     );
     return { id, updated_at: ts };
   }
@@ -269,15 +285,22 @@ export class Content extends DurableObject {
     const ts = this.now();
     const row = [...this.ctx.storage.sql.exec("SELECT * FROM questions WHERE id=?", +id)][0];
     const answers = JSON.stringify(q.answers || []);
+    const actors = "actors" in q ? (q.actors != null ? JSON.stringify(q.actors) : null) : undefined;
     if (row) {
-      this.ctx.storage.sql.exec(
-        "UPDATE questions SET pack_id=COALESCE(NULLIF(pack_id,0),?), prompt_pl=?, prompt_en=?, answers=?, deleted=0, updated_at=? WHERE id=?",
-        +packId || row.pack_id, q.prompt_pl || "", q.prompt_en || "", answers, ts, +id,
-      );
+      if (actors !== undefined)
+        this.ctx.storage.sql.exec(
+          "UPDATE questions SET pack_id=COALESCE(NULLIF(pack_id,0),?), prompt_pl=?, prompt_en=?, answers=?, actors=?, deleted=0, updated_at=? WHERE id=?",
+          +packId || row.pack_id, q.prompt_pl || "", q.prompt_en || "", answers, actors, ts, +id,
+        );
+      else
+        this.ctx.storage.sql.exec(
+          "UPDATE questions SET pack_id=COALESCE(NULLIF(pack_id,0),?), prompt_pl=?, prompt_en=?, answers=?, deleted=0, updated_at=? WHERE id=?",
+          +packId || row.pack_id, q.prompt_pl || "", q.prompt_en || "", answers, ts, +id,
+        );
     } else {
       this.ctx.storage.sql.exec(
-        "INSERT INTO questions(id, pack_id, prompt_pl, prompt_en, answers, deleted, updated_at, base, kind) VALUES (?,?,?,?,?,0,?,1,?)",
-        +id, +packId, q.prompt_pl || "", q.prompt_en || "", answers, ts, qkind(q.kind),
+        "INSERT INTO questions(id, pack_id, prompt_pl, prompt_en, answers, deleted, updated_at, base, kind, actors) VALUES (?,?,?,?,?,0,?,1,?,?)",
+        +id, +packId, q.prompt_pl || "", q.prompt_en || "", answers, ts, qkind(q.kind), actors === undefined ? null : actors,
       );
     }
     return { ok: true, updated_at: ts };
@@ -424,11 +447,13 @@ export class Content extends DurableObject {
         qEdits.set(oq.id, {
           id: oq.id, prompt_pl: oq.prompt_pl, prompt_en: oq.prompt_en,
           answers: JSON.parse(oq.answers || "[]"),
+          actors: qactors(oq.actors),
         });
       } else {
         qAdded.push({
           id: oq.id, prompt_pl: oq.prompt_pl, prompt_en: oq.prompt_en,
           answers: JSON.parse(oq.answers || "[]"), kind: qkind(oq.kind),
+          actors: qactors(oq.actors),
         });
       }
     }
@@ -478,7 +503,9 @@ export class Content extends DurableObject {
       avail[k] = { ok, have, need: needN, reason: ok ? null : (off.has(k) ? "disabled" : what) };
     }
     if (packId > 0) this.cacheReady(packId, MODES.filter(k => avail[k].have >= avail[k].need).join(","), baseOff);
-    return { pack, movies, avail, modes_off: modesOff };
+    const actors = [...this.ctx.storage.sql.exec("SELECT id, name FROM actor_photos WHERE deleted=0 AND image IS NOT NULL")]
+      .filter(a => a.name).map(a => ({ id: a.id, name: a.name }));
+    return { pack, movies, avail, modes_off: modesOff, actors };
   }
 
   cacheReady(packId, ready, baseOff) {
@@ -616,6 +643,7 @@ export class Content extends DurableObject {
       if (op === "addQuote") return Response.json(this.addQuote(d.movie_id, d.text, d.lang));
       if (op === "editQuote") return Response.json(this.editQuoteFull(d.id, d.movie_id, d.text, d.lang));
       if (op === "deleteQuote") return Response.json(this.deleteQuote(d.id, d.movie_id));
+      if (op === "listActors") return Response.json(this.listActors());
       if (op === "addQuestion") return Response.json(this.addQuestion(d.pack_id, d.question));
       if (op === "editQuestion") return Response.json(this.editQuestion(d.id, d.pack_id, d.question));
       if (op === "deleteQuestion") return Response.json(this.deleteQuestion(d.id, d.pack_id));

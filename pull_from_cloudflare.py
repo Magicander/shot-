@@ -181,9 +181,10 @@ def write_db(data: dict, out: Path, images: dict):
         for kind, qs in (("licytacja", p.get("questions") or []), ("bomba", p.get("bombs") or [])):
             for q in qs:
                 con.execute(
-                    "INSERT INTO questions (id, pack_id, prompt_pl, prompt_en, answers, kind) VALUES (?,?,?,?,?,?)",
+                    "INSERT INTO questions (id, pack_id, prompt_pl, prompt_en, answers, kind, actors) VALUES (?,?,?,?,?,?,?)",
                     (q["id"], p["id"], q.get("prompt_pl") or "", q.get("prompt_en") or "",
-                     json.dumps(q.get("answers") or [], ensure_ascii=False), kind),
+                     json.dumps(q.get("answers") or [], ensure_ascii=False), kind,
+                     json.dumps(q["actors"], ensure_ascii=False) if q.get("actors") is not None else None),
                 )
                 questions_n += 1
         for m in p.get("movies") or []:

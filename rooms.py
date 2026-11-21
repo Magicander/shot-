@@ -75,7 +75,7 @@ LIC_DONE_DELAY = 3          # licytacja na głos: chwila na cofnięcie ostatnieg
 DEFAULTS = {"time": 0, "mode_time": {}, "order": "mix", "per_mode": False, "mode_rounds": {},
             "answer": "type", "mode_answer": {}, "judge": "rotate", "lic_answer": 30, "lic_bid": 10,
             "hints": True, "final_x": 1, "top_n": TOP_N, "top_own": TOP_OWN, "top_guess": TOP_GUESS,
-            "most_time": MOST_TIME, "titles": "ui", "bomb_fuse": "normal", "buzz_answer": 8}
+            "most_time": MOST_TIME, "titles": "ui", "bomb_fuse": "normal", "buzz_answer": 8, "bomb_check": True}
 
 
 def _int(v, lo, hi, dflt):
@@ -150,6 +150,7 @@ def norm_settings(d):
         "titles": titles,
         "bomb_fuse": d.get("bomb_fuse") if d.get("bomb_fuse") in BOMB_FUSE else "normal",
         "buzz_answer": _int(d.get("buzz_answer"), 4, 20, 8),
+        "bomb_check": d.get("bomb_check") is not False,
     }
 
 
@@ -263,9 +264,181 @@ def load_questions(con, pack_id, kind="licytacja"):
         except ValueError:
             ans = []
         if r["prompt_pl"] or r["prompt_en"]:
-            out.append({"id": r["id"], "prompt_pl": r["prompt_pl"], "prompt_en": r["prompt_en"], "answers": ans})
+            raw = r["actors"] if "actors" in r.keys() else None
+            out.append({"id": r["id"], "prompt_pl": r["prompt_pl"], "prompt_en": r["prompt_en"],
+                        "answers": ans, "actors": parse_actors(raw)})
     return out
 
+
+
+
+# -------------------------------------------------------- zdjęcia aktorów przy pytaniu
+# dopasowanie nazwisk z polskich odmian ("z Tomem Hanksem") i jawny wybór w panelu
+_ACTOR_ENDINGS = ("owie", "ami", "ach", "ego", "emu", "owi", "iem", "ów", "om", "em", "im", "ym", "ie")
+
+
+def parse_actors(raw):
+    """None = wykrywaj automatycznie, lista id = jawny wybór (pusta = bez zdjęcia)."""
+    if raw is None or raw == "" or raw == "auto":
+        return None
+    if isinstance(raw, (list, tuple)):
+        vals = raw
+    else:
+        try:
+            vals = json.loads(raw)
+        except (TypeError, ValueError):
+            return None
+        if vals is None or vals == "auto":
+            return None
+    if not isinstance(vals, list):
+        return None
+    out, seen = [], set()
+    for x in vals:
+        try:
+            i = int(x)
+        except (TypeError, ValueError):
+            continue
+        if i > 0 and i not in seen:
+            seen.add(i)
+            out.append(i)
+        if len(out) >= 3:
+            break
+    return out
+
+
+def fold_text(s):
+    """Jak norm_title, ale zostawia spacje: do szukania imion w zdaniu pytania."""
+    s = unicodedata.normalize("NFKD", (s or "").replace("ł", "l").replace("Ł", "L"))
+    s = "".join(c for c in s if not unicodedata.combining(c)).lower()
+    s = s.replace("&", " and ")
+    return re.sub(r"[^a-z0-9]+", " ", s).strip()
+
+
+def actor_stems(word):
+    """Rdzeń imienia/nazwiska: Hanksem -> hanks, Angeliną -> angelina (po fold), Carpentera -> carpenter."""
+    w = fold_text(word)
+    if not w:
+        return set()
+    out = {w}
+    for e in _ACTOR_ENDINGS:
+        if w.endswith(e) and len(w) - len(e) >= 3:
+            out.add(w[:-len(e)])
+    if w.endswith("a") and len(w) >= 5:
+        out.add(w[:-1])
+    if w.endswith("u") and len(w) >= 5:
+        out.add(w[:-1])
+    return out
+
+
+def _name_parts(name):
+    return [t for t in fold_text(name).split() if len(t) >= 2]
+
+
+def load_actor_catalog(con):
+    """Aktorzy, dla których jest prawdziwe zdjęcie (id + nazwa). Brak tabeli -> pusta lista."""
+    try:
+        rows = con.execute("SELECT id, name FROM actor_photos WHERE length(image) >= 800 ORDER BY id").fetchall()
+    except sqlite3.OperationalError:
+        return []
+    return [{"id": r["id"], "name": r["name"] or ""} for r in rows if r["name"]]
+
+
+def actors_from_movies(movies, extra=None):
+    """Uzupełnia katalog nazwami z obsady (photo_id), np. gdy nie ma globalnej listy."""
+    by = {}
+    for a in extra or []:
+        if a and a.get("id") and a.get("name"):
+            by[int(a["id"])] = {"id": int(a["id"]), "name": a["name"]}
+    for m in movies or []:
+        for c in m.get("cast") or []:
+            if not isinstance(c, dict):
+                continue
+            try:
+                i = int(c.get("photo_id") or 0)
+            except (TypeError, ValueError):
+                i = 0
+            if i and i not in by and (c.get("name") or "").strip():
+                by[i] = {"id": i, "name": (c.get("name") or "").strip()}
+    return list(by.values())
+
+
+def match_actor_photos(prompt_pl, prompt_en, catalog, limit=3):
+    """Znajduje w treści pytania (PL i EN) aktorów, których mamy na zdjęciach. Max `limit`.
+
+    Imię+nazwisko (także w odmianie: "z Tomem Hanksem") albo jednoznaczne samo nazwisko
+    ("Filmy Almodóvara"). Wieloznaczne nazwiska bez imienia są pomijane.
+    """
+    catalog = [a for a in (catalog or []) if a.get("id") and (a.get("name") or "").strip()]
+    if not catalog:
+        return []
+    hay = (fold_text(prompt_pl) + " " + fold_text(prompt_en)).strip()
+    words = [w for w in hay.split() if w]
+    if not words:
+        return []
+    stems = [actor_stems(w) for w in words]
+    last_hits = {}
+    parsed = []
+    for a in catalog:
+        parts = _name_parts(a["name"])
+        if not parts:
+            continue
+        last, firsts = parts[-1], parts[:-1]
+        lst = actor_stems(last)
+        parsed.append((a, firsts, lst))
+        for st in lst:
+            if len(st) >= 4:
+                last_hits[st] = last_hits.get(st, 0) + 1
+
+    def unique_last(lst, mononym=False):
+        need = 4 if mononym else 5
+        return any(len(st) >= need and last_hits.get(st, 0) == 1 for st in lst)
+
+    found, seen = [], set()
+    for a, firsts, last_st in parsed:
+        idxs = [i for i, st in enumerate(stems) if st & last_st]
+        if not idxs:
+            continue
+        close = False
+        if firsts:
+            for i in idxs:
+                window = stems[max(0, i - 3):i + 1]  # imię tuż przed albo w tym samym oknie
+                # tylko słowa przed nazwiskiem, nie samo nazwisko
+                window = stems[max(0, i - 3):i]
+                for f in firsts:
+                    fs = actor_stems(f)
+                    if any(st & fs for st in window):
+                        close = True
+                        break
+                if close:
+                    break
+        if not close and not unique_last(last_st, mononym=not firsts):
+            continue
+        if a["id"] in seen:
+            continue
+        seen.add(a["id"])
+        found.append((min(idxs), a))
+        if len(found) >= limit * 2:
+            break
+    found.sort(key=lambda x: x[0])
+    return [a for _, a in found[:limit]]
+
+
+def question_faces(q, catalog, limit=3):
+    """Zdjęcia do karty pytania. Jawna lista w q['actors'] nadpisuje lub wyłącza wykrywanie."""
+    catalog = catalog or []
+    by_id = {int(a["id"]): a for a in catalog if a.get("id")}
+    explicit = q.get("actors") if isinstance(q, dict) else None
+    if explicit is not None:
+        ids = parse_actors(explicit) or []
+    else:
+        ids = [a["id"] for a in match_actor_photos(
+            (q or {}).get("prompt_pl") or "", (q or {}).get("prompt_en") or "", catalog, limit=limit)]
+    out = []
+    for i in ids[:limit]:
+        a = by_id.get(int(i))
+        if a:
+            out.append({"id": int(a["id"]), "name": a.get("name") or "", "photo": f"/actor/{int(a['id'])}.jpg"})
+    return out
 
 
 def remake_tags(items):
@@ -327,6 +500,7 @@ def pack_data(con, pack):
     d = dict(pack)
     d["questions"] = load_questions(con, d["id"])
     d["bombs"] = load_questions(con, d["id"], "bomba")
+    d["actors"] = load_actor_catalog(con)
     return d
 
 
@@ -421,6 +595,7 @@ def merge_packs(con, pack_ids):
         "description_en": " + ".join(p.get("name_en") or p["name"] for p in packs),
         "color": packs[0]["color"] if packs else "#1B1712",
         "modes_off": "", "questions": questions, "bombs": bombs, "source_ids": [p["id"] for p in packs],
+        "actors": load_actor_catalog(con),
     }
     return pack, movies
 
@@ -471,6 +646,7 @@ def availability(pack, movies, has_key, cfg=None):
 class Room:
     def __init__(self, code, pack, movies, rounds, avail, kind="pack"):
         self.code, self.pack, self.movies, self.avail = code, pack, movies, avail
+        self.actors = actors_from_movies(movies, pack.get("actors") if isinstance(pack, dict) else None)
         if kind in ("filmrun", "bridge"):
             kind = "most"
         self.kind = kind
@@ -707,7 +883,7 @@ class Room:
             s = random.randrange(len(pl)) if pl else 0
             t.update(order=pl[s:] + pl[:s], sub="ready", holder=(pl[s] if pl else None), passes=0, answers={},
                      wrong={}, lit_at=None, fuse=None, fuse_end=None, heat_at=[], last=None, last_at=0.0,
-                     loser=None, exploded=False)
+                     loser=None, exploded=False, fuse_left=None, heat_left=None)
         elif t["mode"] == "hotbuzz":
             t.update(sub="ready", ready=[], offset=0.0, play_start=None, buzzer=None, answer_end=None,
                      locked=[], tries=[], winner=None, win_pts=0, buzz_pos=0.0)
@@ -922,8 +1098,48 @@ class Room:
         self.version += 1
         return {"ok": True}
 
+    def bomb_pause(self, p):
+        """Gospodarz (albo zastępujący go sędzia) zatrzymuje lont, żeby sprawdzić odpowiedź."""
+        t = self.task
+        if not self.cfg.get("bomb_check"):
+            return {"ok": False}
+        if p["id"] != self.bomb_judge() or t.get("sub") != "live":
+            return {"ok": False}
+        now = time.time()
+        if not t.get("fuse_end") or now >= t["fuse_end"]:
+            self.bomb_explode()
+            return {"ok": False, "late": True}
+        t["fuse_left"] = t["fuse_end"] - now
+        t["heat_left"] = [x - now for x in (t.get("heat_at") or [])]
+        t["heat_seen"] = self.bomb_heat(now)
+        t["sub"] = "check"
+        self.event("bombcheck", p["name"])
+        self.version += 1
+        return {"ok": True, "paused": True}
+
+    def bomb_resume(self, p, silent=False):
+        t = self.task
+        if p["id"] != self.bomb_judge() or t.get("sub") != "check":
+            return {"ok": False}
+        now = time.time()
+        left = t.get("fuse_left")
+        if left is None:
+            return {"ok": False}
+        t["fuse_end"] = now + left
+        t["heat_at"] = [now + x for x in (t.get("heat_left") or [])]
+        t["fuse_left"] = t["heat_left"] = None
+        t["sub"] = "live"
+        if not silent:
+            self.event("bombresume", p["name"])
+        else:
+            self.version += 1
+        return {"ok": True}
+
     def bomb_verdict(self, p, yes):
         t = self.task
+        if t.get("sub") == "check":
+            if not self.bomb_resume(p, silent=True).get("ok"):
+                return {"ok": False}
         if p["id"] != self.bomb_judge() or t.get("sub") != "live":
             return {"ok": False}
         now = time.time()
@@ -1432,6 +1648,10 @@ class Room:
         if mode == "bomba":
             if d.get("light"):
                 return self.bomb_light(p)
+            if d.get("check"):
+                return self.bomb_pause(p)
+            if d.get("resume"):
+                return self.bomb_resume(p)
             if "verdict" in d:
                 return self.bomb_verdict(p, bool(d.get("verdict")))
             return {"ok": False}
@@ -1575,7 +1795,9 @@ class Room:
                                      "year": t["movie"]["year"]} if self.sees_solution(me) else None)
             elif mode == "licytacja":
                 ans = t["q"]["answers"]
-                out.update(total=lic_total(t["q"]), prompt=self.prompt(t["q"], lang), bid_seconds=self.cfg["lic_bid"],
+                out.update(total=lic_total(t["q"]), prompt=self.prompt(t["q"], lang),
+                           faces=question_faces(t["q"], self.actors),
+                           bid_seconds=self.cfg["lic_bid"],
                            answer_seconds=t["dur"], bid=t["bid"],
                            history=[{"name": self.pname(pid) or "?", "bid": b} for pid, b in t["bids"]][-10:])
                 if t["bidder"] is None:
@@ -1608,9 +1830,14 @@ class Room:
                 judge = self.bomb_judge()
                 is_judge = bool(me and me["id"] == judge)
                 q = t["q"]
-                out.update(sub=t["sub"], prompt=self.prompt(q, lang), holder=t["holder"],
+                paused = t["sub"] == "check"
+                heat = t.get("heat_seen", 0) if paused else self.bomb_heat(now)
+                out.update(sub=t["sub"], prompt=self.prompt(q, lang), faces=question_faces(q, self.actors),
+                           holder=t["holder"],
                            holder_name=self.pname(t["holder"]), judge=judge, judge_name=self.pname(judge),
-                           can_judge=is_judge, heat=self.bomb_heat(now), passes=t["passes"], misses=sum(t["wrong"].values()),
+                           can_judge=is_judge, can_check=bool(is_judge and t["sub"] == "live" and self.cfg.get("bomb_check")),
+                           can_resume=bool(is_judge and paused), paused=paused,
+                           heat=heat, passes=t["passes"], misses=sum(t["wrong"].values()),
                            last=t.get("last"), last_at=round(now - (t.get("last_at") or 0), 2) if t.get("last_at") else None,
                            fuse_choice=self.cfg["bomb_fuse"],
                            order=[{"id": pid, "name": self.players[pid]["name"], "online": self.on(self.players[pid]),
@@ -1707,7 +1934,8 @@ class Room:
                                "won": p["id"] == t.get("winner"),
                                "points": p["history"][-1] if p["history"] else 0} for p in players]
         if mode == "bomba":
-            ans.update(prompt=self.prompt(t["q"], lang), exploded=bool(t.get("exploded")),
+            ans.update(prompt=self.prompt(t["q"], lang), faces=question_faces(t["q"], self.actors),
+                       exploded=bool(t.get("exploded")),
                        loser=t.get("loser"), loser_name=self.pname(t.get("loser")), passes=t["passes"],
                        examples=[example_label(a) for a in t["q"].get("answers") or []][:30])
             ans["results"] = [{"id": p["id"], "name": p["name"], "ok": t["answers"].get(p["id"], 0),
@@ -1724,6 +1952,7 @@ class Room:
             answers = [self.fview({"text": a["text"], "pl": a.get("pl") or ""}, lang) for a in t["q"]["answers"]]
             ans.update(bidder_name=self.pname(t["bidder"] or ""), bid=t["bid"],
                        success=t.get("success", False), total=lic_total(t["q"]), prompt=self.prompt(t["q"], lang),
+                       faces=question_faces(t["q"], self.actors),
                        answers=answers,
                        missed=[x for k, x in enumerate(answers) if k not in got][:40],
                        bids=[{"name": self.pname(pid) or "?", "bid": b} for pid, b in t["bids"] if b],

@@ -287,6 +287,30 @@ def main():
     md = adm.req("GET", f"/api/admin/packs/{pid}/modes")
     check(md["questions"] == 1 and md["avail"]["licytacja"]["ok"], "hub: licytacja gotowa, liczba pytań")
 
+    photo = adm.req("POST", "/api/admin/actors", {"data": "data:image/jpeg;base64," + base64.b64encode(JPG).decode(), "name": "Tom Hanks"})
+    check(photo.get("id"), "zapis zdjęcia aktora do przypisania")
+    alist = adm.req("GET", "/api/admin/actors?q=hanks")
+    check(any(x["id"] == photo["id"] and x["name"] == "Tom Hanks" and x["photo"].endswith("/actor/%d.jpg" % photo["id"]) for x in alist),
+          "lista aktorów filtruje po nazwisku i daje podgląd")
+    qact = adm.req("POST", f"/api/admin/packs/{pid}/questions",
+                   {"prompt_pl": "Filmy z inną osobą", "prompt_en": "Someone else", "actors": [photo["id"]]})
+    row = [q for q in adm.req("GET", f"/api/admin/packs/{pid}/questions") if q["id"] == qact["id"]][0]
+    check(row["actors"] == [photo["id"]] and row["faces"] and row["faces"][0]["id"] == photo["id"], "jawny wybór aktora wraca ze zdjęciem")
+    qauto = adm.req("POST", f"/api/admin/packs/{pid}/questions",
+                    {"prompt_pl": "Filmy z Tomem Hanksem", "prompt_en": "Name films with Tom Hanks"})
+    row = [q for q in adm.req("GET", f"/api/admin/packs/{pid}/questions") if q["id"] == qauto["id"]][0]
+    check(row["actors"] is None and row["faces"] and row["faces"][0]["id"] == photo["id"], "auto-wykrywanie na liście pytań")
+    adm.req("PUT", f"/api/admin/questions/{qauto['id']}",
+            {"prompt_pl": "Filmy z Tomem Hanksem", "prompt_en": "Name films with Tom Hanks", "actors": []})
+    row = [q for q in adm.req("GET", f"/api/admin/packs/{pid}/questions") if q["id"] == qauto["id"]][0]
+    check(row["actors"] == [] and row["faces"] == [], "pusta lista wyłącza zdjęcie")
+    bid = adm.req("POST", f"/api/admin/packs/{pid}/bombs",
+                  {"prompt_pl": "Filmy z Tomem Hanksem", "prompt_en": "Name films with Tom Hanks"})
+    brow = [q for q in adm.req("GET", f"/api/admin/packs/{pid}/bombs") if q["id"] == bid["id"]][0]
+    check(brow["faces"] and brow["faces"][0]["id"] == photo["id"], "kategoria Bomby też wykrywa aktora")
+    for i in (qact["id"], qauto["id"], bid["id"]):
+        adm.req("DELETE", f"/api/admin/questions/{i}")
+
     # --- gra: licytacja z własnym pytaniem
     a, b = Client(base, "pl"), Client(base, "en")
     ra = a.req("POST", "/api/rooms", {"pack_id": pid, "name": "Ala"}); code = ra["code"]; A = {"pid": ra["pid"], "token": ra["token"]}

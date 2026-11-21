@@ -253,6 +253,10 @@ def migrate(con):
                 con.execute(f"ALTER TABLE movies ADD COLUMN {c} TEXT NOT NULL DEFAULT ''")
         con.executescript(SCHEMA6)
         seed_bombs(con)
+        # faza 8: jawny wybór aktora przy pytaniu licytacji / kategorii Bomby (NULL = wykrywaj z treści)
+        qc = _cols(con, "questions")
+        if "actors" not in qc:
+            con.execute("ALTER TABLE questions ADD COLUMN actors TEXT")
         con.execute("CREATE TABLE IF NOT EXISTS tmdb_cache ("
                     "key TEXT PRIMARY KEY, body TEXT NOT NULL, updated REAL)")
         for slug, (n, d) in SEED_EN.items():

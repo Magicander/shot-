@@ -859,9 +859,13 @@ class Handler(BaseHTTPRequestHandler):
         if sub in ("questions", "bombs") and method == "GET":
             kind = "bomba" if sub == "bombs" else "licytacja"
             out = []
+            catalog = rooms_lib.load_actor_catalog(con)
             for r in con.execute("SELECT * FROM questions WHERE pack_id=? AND kind=? ORDER BY id", (pid, kind)):
-                out.append({"id": r["id"], "prompt_pl": r["prompt_pl"], "prompt_en": r["prompt_en"],
-                            "answers": json.loads(r["answers"] or "[]"), "kind": kind})
+                q = {"id": r["id"], "prompt_pl": r["prompt_pl"], "prompt_en": r["prompt_en"],
+                     "answers": json.loads(r["answers"] or "[]"), "kind": kind,
+                     "actors": rooms_lib.parse_actors(r["actors"] if "actors" in r.keys() else None)}
+                q["faces"] = rooms_lib.question_faces(q, catalog)
+                out.append(q)
             return self.json(out)
         if sub in ("questions", "bombs") and method == "POST":
             kind = "bomba" if sub == "bombs" else "licytacja"
@@ -901,14 +905,18 @@ class Handler(BaseHTTPRequestHandler):
             ans = existing
         else:
             ans = []
-        return {"prompt_pl": pl, "prompt_en": en, "answers": ans}
+        q = {"prompt_pl": pl, "prompt_en": en, "answers": ans}
+        if "actors" in d:
+            q["actors"] = rooms_lib.parse_actors(d.get("actors"))
+        return q
 
     @staticmethod
     def insert_question(con, pid, q, kind="licytacja"):
-        return con.execute("INSERT INTO questions (pack_id, prompt_pl, prompt_en, answers, created, kind) "
-                           "VALUES (?,?,?,?,?,?)",
+        actors = json.dumps(q["actors"], ensure_ascii=False) if "actors" in q and q["actors"] is not None else None
+        return con.execute("INSERT INTO questions (pack_id, prompt_pl, prompt_en, answers, created, kind, actors) "
+                           "VALUES (?,?,?,?,?,?,?)",
                            (pid, q["prompt_pl"], q["prompt_en"], json.dumps(q["answers"], ensure_ascii=False),
-                            time.time(), "bomba" if kind == "bomba" else "licytacja")).lastrowid
+                            time.time(), "bomba" if kind == "bomba" else "licytacja", actors)).lastrowid
 
     def start_music_job(self, rows):
         global scrape_progress, tmdb_thread
@@ -942,6 +950,26 @@ class Handler(BaseHTTPRequestHandler):
     def actor_photo_api(self, method, aid, con):
         import base64
         import webscrape
+        if method == "GET" and not aid:
+            from urllib.parse import parse_qs, urlparse
+            qtxt = rooms_lib.fold_text((parse_qs(urlparse(self.path).query).get("q") or [""])[0])
+            out = []
+            try:
+                rows = con.execute(
+                    "SELECT id, name FROM actor_photos WHERE length(image) >= 800 ORDER BY name COLLATE NOCASE, id"
+                ).fetchall()
+            except Exception:
+                rows = []
+            for r in rows:
+                name = r["name"] or ""
+                if qtxt:
+                    folded = rooms_lib.fold_text(name)
+                    if qtxt not in folded and not any(rooms_lib.actor_stems(qtxt) & rooms_lib.actor_stems(w) for w in folded.split()):
+                        continue
+                out.append({"id": r["id"], "name": name, "photo": f"/actor/{r['id']}.jpg"})
+                if len(out) >= 40:
+                    break
+            return self.json(out)
         if method == "GET" and aid:
             row = con.execute("SELECT id, key, name, source, source_id, url, updated, length(image) AS bytes "
                               "FROM actor_photos WHERE id=?", (aid,)).fetchone()
@@ -1172,8 +1200,13 @@ class Handler(BaseHTTPRequestHandler):
                     row = con.execute("SELECT answers FROM questions WHERE id=?", (iid,)).fetchone()
                     existing = json.loads((row["answers"] if row else None) or "[]")
                     q = self.question_from(d, existing=existing)
-                    con.execute("UPDATE questions SET prompt_pl=?, prompt_en=?, answers=? WHERE id=?",
-                                (q["prompt_pl"], q["prompt_en"], json.dumps(q["answers"], ensure_ascii=False), iid))
+                    if "actors" in q:
+                        actors = json.dumps(q["actors"], ensure_ascii=False) if q["actors"] is not None else None
+                        con.execute("UPDATE questions SET prompt_pl=?, prompt_en=?, answers=?, actors=? WHERE id=?",
+                                    (q["prompt_pl"], q["prompt_en"], json.dumps(q["answers"], ensure_ascii=False), actors, iid))
+                    else:
+                        con.execute("UPDATE questions SET prompt_pl=?, prompt_en=?, answers=? WHERE id=?",
+                                    (q["prompt_pl"], q["prompt_en"], json.dumps(q["answers"], ensure_ascii=False), iid))
             return self.json({"ok": True})
         raise ApiError(404, "Nie ma takiego adresu")
 

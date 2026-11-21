@@ -104,6 +104,7 @@ export function normSettings(d) {
     titles: ["ui", "pl", "en", "both"].includes(d.titles) ? d.titles : "ui",
     bomb_fuse: Object.prototype.hasOwnProperty.call(BOMB_FUSE, d.bomb_fuse) ? d.bomb_fuse : "normal",
     buzz_answer: toInt(d.buzz_answer, 4, 20, 8),
+    bomb_check: d.bomb_check !== false,
   };
 }
 
@@ -226,6 +227,120 @@ export function normTitle(s) {
   return s.replace(/ /g, "");
 }
 
+
+
+export function foldText(s) {
+  s = String(s || "").replace(/ł/g, "l").replace(/Ł/g, "L").normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase();
+  s = s.replace(/&/g, " and ");
+  return s.replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+const ACTOR_ENDINGS = ["owie", "ami", "ach", "ego", "emu", "owi", "iem", "ów", "om", "em", "im", "ym", "ie"];
+
+export function actorStems(word) {
+  const w = foldText(word);
+  if (!w) return new Set();
+  const out = new Set([w]);
+  for (const e of ACTOR_ENDINGS) if (w.endsWith(e) && w.length - e.length >= 3) out.add(w.slice(0, -e.length));
+  if (w.endsWith("a") && w.length >= 5) out.add(w.slice(0, -1));
+  if (w.endsWith("u") && w.length >= 5) out.add(w.slice(0, -1));
+  return out;
+}
+
+export function parseActors(raw) {
+  if (raw == null || raw === "" || raw === "auto") return null;
+  let vals = raw;
+  if (typeof raw === "string") {
+    try { vals = JSON.parse(raw); } catch { return null; }
+    if (vals == null || vals === "auto") return null;
+  }
+  if (!Array.isArray(vals)) return null;
+  const out = [], seen = new Set();
+  for (const x of vals) {
+    const i = parseInt(x, 10);
+    if (i > 0 && !seen.has(i)) { seen.add(i); out.push(i); }
+    if (out.length >= 3) break;
+  }
+  return out;
+}
+
+function nameParts(name) {
+  return foldText(name).split(/\s+/).filter(t => t.length >= 2);
+}
+
+export function actorsFromMovies(movies, extra) {
+  const by = new Map();
+  for (const a of extra || []) if (a && a.id && a.name) by.set(+a.id, { id: +a.id, name: a.name });
+  for (const m of movies || []) {
+    for (const c of m.cast || []) {
+      const i = +c.photo_id;
+      if (i && !by.has(i) && (c.name || "").trim()) by.set(i, { id: i, name: String(c.name).trim() });
+    }
+  }
+  return [...by.values()];
+}
+
+export function matchActorPhotos(promptPl, promptEn, catalog, limit = 3) {
+  catalog = (catalog || []).filter(a => a && a.id && String(a.name || "").trim());
+  if (!catalog.length) return [];
+  const hay = (foldText(promptPl) + " " + foldText(promptEn)).trim();
+  const words = hay.split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const stems = words.map(actorStems);
+  const lastHits = new Map();
+  const parsed = [];
+  for (const a of catalog) {
+    const parts = nameParts(a.name);
+    if (!parts.length) continue;
+    const last = parts[parts.length - 1], firsts = parts.slice(0, -1), lst = actorStems(last);
+    parsed.push({ a, firsts, lst });
+    for (const st of lst) if (st.length >= 4) lastHits.set(st, (lastHits.get(st) || 0) + 1);
+  }
+  const uniqueLast = (lst, mononym) => {
+    const need = mononym ? 4 : 5;
+    for (const st of lst) if (st.length >= need && lastHits.get(st) === 1) return true;
+    return false;
+  };
+  const found = [];
+  const seen = new Set();
+  for (const { a, firsts, lst } of parsed) {
+    const idxs = [];
+    stems.forEach((st, i) => { if ([...st].some(x => lst.has(x))) idxs.push(i); });
+    if (!idxs.length) continue;
+    let close = false;
+    if (firsts.length) {
+      for (const i of idxs) {
+        const window = stems.slice(Math.max(0, i - 3), i);
+        for (const f of firsts) {
+          const fs = actorStems(f);
+          if (window.some(st => [...st].some(x => fs.has(x)))) { close = true; break; }
+        }
+        if (close) break;
+      }
+    }
+    if (!close && !uniqueLast(lst, !firsts.length)) continue;
+    if (seen.has(a.id)) continue;
+    seen.add(a.id);
+    found.push([Math.min(...idxs), a]);
+    if (found.length >= limit * 2) break;
+  }
+  found.sort((x, y) => x[0] - y[0]);
+  return found.slice(0, limit).map(x => x[1]);
+}
+
+export function questionFaces(q, catalog, limit = 3) {
+  const by = new Map((catalog || []).filter(a => a && a.id).map(a => [+a.id, a]));
+  const explicit = q && "actors" in q ? parseActors(q.actors) : null;
+  const ids = explicit != null
+    ? explicit
+    : matchActorPhotos((q && q.prompt_pl) || "", (q && q.prompt_en) || "", catalog, limit).map(a => a.id);
+  const out = [];
+  for (const i of ids.slice(0, limit)) {
+    const a = by.get(+i);
+    if (a) out.push({ id: +a.id, name: a.name || "", photo: `/actor/${+a.id}.jpg` });
+  }
+  return out;
+}
 
 export function remakeTags(items) {
   const rows = Array.isArray(items) ? items : [];
@@ -353,6 +468,7 @@ export class Game {
   // r = stan pokoju, movies = filmy pakietu, online = Set pid z otwartym połączeniem (null = wszyscy)
   constructor(r, movies, online = null) {
     this.r = r; this.movies = movies; this.online = online;
+    this.actors = actorsFromMovies(movies, (r.pack && r.pack.actors) || r.actors || []);
     if (!r.cfg) r.cfg = normSettings({});          // pokoje sprzed aktualizacji
   }
   get cfg() { return this.r.cfg; }
@@ -570,7 +686,7 @@ export class Game {
     } else if (t.mode === "bomba") {
       const s = pl.length ? Math.floor(rnd() * pl.length) : 0;
       Object.assign(t, { order: pl.slice(s).concat(pl.slice(0, s)), sub: "ready", holder: pl.length ? pl[s] : null, passes: 0,
-        answers: {}, wrong: {}, lit_at: null, fuse: null, fuse_end: null, heat_at: [], last: null, last_at: 0, loser: null, exploded: false });
+        answers: {}, wrong: {}, lit_at: null, fuse: null, fuse_end: null, heat_at: [], last: null, last_at: 0, loser: null, exploded: false, fuse_left: null, heat_left: null });
     } else if (t.mode === "hotbuzz") {
       Object.assign(t, { sub: "ready", ready: [], offset: 0, play_start: null, buzzer: null, answer_end: null,
         locked: [], tries: [], winner: null, win_pts: 0, buzz_pos: 0 });
@@ -767,8 +883,35 @@ export class Game {
     this.event("bomb", this.pname(t.holder) || "?");
     return { ok: true };
   }
+  bombPause(p) {
+    const r = this.r, t = r.task, n = now();
+    if (!this.cfg.bomb_check) return { ok: false };
+    if (p.id !== this.bombJudge() || t.sub !== "live") return { ok: false };
+    if (!t.fuse_end || n >= t.fuse_end) { this.bombExplode(); return { ok: false, late: true }; }
+    t.fuse_left = t.fuse_end - n;
+    t.heat_left = (t.heat_at || []).map(x => x - n);
+    t.heat_seen = this.bombHeat(n);
+    t.sub = "check";
+    this.event("bombcheck", p.name);
+    return { ok: true, paused: true };
+  }
+  bombResume(p, silent = false) {
+    const r = this.r, t = r.task, n = now();
+    if (p.id !== this.bombJudge() || t.sub !== "check") return { ok: false };
+    if (t.fuse_left == null) return { ok: false };
+    t.fuse_end = n + t.fuse_left;
+    t.heat_at = (t.heat_left || []).map(x => n + x);
+    t.fuse_left = t.heat_left = null;
+    t.sub = "live";
+    if (!silent) this.event("bombresume", p.name);
+    else r.version++;
+    return { ok: true };
+  }
   bombVerdict(p, yes) {
     const r = this.r, t = r.task;
+    if (t.sub === "check") {
+      if (!this.bombResume(p, true).ok) return { ok: false };
+    }
     if (p.id !== this.bombJudge() || t.sub !== "live") return { ok: false };
     const n = now();
     if (n >= t.fuse_end) { this.bombExplode(); return { ok: false, late: true }; }
@@ -1237,6 +1380,8 @@ export class Game {
     }
     if (mode === "bomba") {
       if (d.light) return this.bombLight(p);
+      if (d.check) return this.bombPause(p);
+      if (d.resume) return this.bombResume(p);
       if ("verdict" in d) return this.bombVerdict(p, !!d.verdict);
       return { ok: false };
     }
@@ -1358,7 +1503,8 @@ export class Game {
       } else if (mode === "licytacja") {
         const ans = t.q.answers;
         Object.assign(out, {
-          total: licTotal(t.q), prompt: Game.prompt(t.q, lang), bid_seconds: this.cfg.lic_bid, answer_seconds: t.dur, bid: t.bid,
+          total: licTotal(t.q), prompt: Game.prompt(t.q, lang), faces: questionFaces(t.q, this.actors), faces: questionFaces(t.q, this.actors),
+          bid_seconds: this.cfg.lic_bid, answer_seconds: t.dur, bid: t.bid,
           history: t.bids.map(([pid, b]) => ({ name: this.pname(pid) || "?", bid: b })).slice(-10),
         });
         if (t.bidder === null) {
@@ -1389,9 +1535,15 @@ export class Game {
         }
       } else if (mode === "bomba") {
         const judge = this.bombJudge(), isJudge = !!(me && me.id === judge), q = t.q;
+        const paused = t.sub === "check";
+        const heat = paused ? (t.heat_seen || 0) : this.bombHeat(n);
         Object.assign(out, {
-          sub: t.sub, prompt: Game.prompt(q, lang), holder: t.holder, holder_name: this.pname(t.holder),
-          judge, judge_name: this.pname(judge), can_judge: isJudge, heat: this.bombHeat(n), passes: t.passes,
+          sub: t.sub, prompt: Game.prompt(q, lang), faces: questionFaces(q, this.actors),
+          holder: t.holder, holder_name: this.pname(t.holder),
+          judge, judge_name: this.pname(judge), can_judge: isJudge,
+          can_check: !!(isJudge && t.sub === "live" && this.cfg.bomb_check),
+          can_resume: !!(isJudge && paused), paused,
+          heat, passes: t.passes,
           misses: Object.values(t.wrong || {}).reduce((a, b) => a + b, 0), last: t.last, last_at: t.last_at ? r2(n - t.last_at) : null, fuse_choice: this.cfg.bomb_fuse,
           order: t.order.filter(pid => r.players[pid]).map(pid => ({ id: pid, name: r.players[pid].name,
             online: this.isOnline(r.players[pid]), ok: t.answers[pid] || 0 })),
@@ -1470,7 +1622,8 @@ export class Game {
     }
     if (mode === "bomba") {
       Object.assign(ans, {
-        prompt: Game.prompt(t.q, lang), exploded: !!t.exploded, loser: t.loser, loser_name: this.pname(t.loser),
+        prompt: Game.prompt(t.q, lang), faces: questionFaces(t.q, this.actors),
+        exploded: !!t.exploded, loser: t.loser, loser_name: this.pname(t.loser),
         passes: t.passes, examples: (t.q.answers || []).map(exampleLabel).slice(0, 30),
         results: players.map(p => ({ id: p.id, name: p.name, ok: (t.answers || {})[p.id] || 0, lost: p.id === t.loser,
           points: p.history.length ? p.history[p.history.length - 1] : 0 })),
@@ -1487,7 +1640,7 @@ export class Game {
       const got = new Set(t.found.map(f => f.i));
       Object.assign(ans, {
         bidder_name: this.pname(t.bidder || ""), bid: t.bid, success: t.success || false,
-        total: licTotal(t.q), prompt: Game.prompt(t.q, lang),
+        total: licTotal(t.q), prompt: Game.prompt(t.q, lang), faces: questionFaces(t.q, this.actors),
         answers: t.q.answers.map(a => Game.fview({ text: a.text, pl: a.pl || "" }, lang)),
         missed: t.q.answers.map((a, k) => [a, k]).filter(([, k]) => !got.has(k)).map(([a]) => Game.fview({ text: a.text, pl: a.pl || "" }, lang)).slice(0, 40),
         bids: t.bids.filter(([, b]) => b).map(([pid, b]) => ({ name: this.pname(pid) || "?", bid: b })),

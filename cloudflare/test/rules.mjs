@@ -1,6 +1,6 @@
 // Testy zasad portu (bez wranglera): node cloudflare/test/rules.mjs - te same scenariusze co test_rules.py
 import { readFileSync } from "node:fs";
-import { Game, newRoom, normSettings, JUDGE_GRACE, LIC_DONE_DELAY, LIC_BID_CAP, licTotal, topScore, topAssign, availability, mergePackData, MODES, BOMB_FUSE, remakeTags, placeMarks, timeOpt, REVEAL_SECONDS, GameError } from "../src/game.js";
+import { Game, newRoom, normSettings, JUDGE_GRACE, LIC_DONE_DELAY, LIC_BID_CAP, licTotal, topScore, topAssign, availability, mergePackData, MODES, BOMB_FUSE, remakeTags, placeMarks, timeOpt, REVEAL_SECONDS, GameError, matchActorPhotos, questionFaces } from "../src/game.js";
 import { scrapeCtx, fetchOne, parseFilmwebCast, parseImdbPage, absFwPhoto, isPlaceholderUrl, chain as scrapeChain, fetchActorImage } from "../src/webscrape.js";
 import { mostScore, pathMovies, pickPairFromGraph, localGraph, pickFilmrunPair, poolPeople } from "../src/most.js";
 
@@ -28,7 +28,7 @@ const st = (g, p) => g.state(p, "pl");
 let A, B, C, t;
 
 console.log("ustawienia");
-const DEF = { time: 0, mode_time: {}, order: "mix", per_mode: false, mode_rounds: {}, answer: "type", mode_answer: {}, judge: "rotate", lic_answer: 30, lic_bid: 10, hints: true, final_x: 1, top_n: 5, top_own: 45, top_guess: 45, most_time: 90, titles: "ui", bomb_fuse: "normal", buzz_answer: 8 };
+const DEF = { time: 0, mode_time: {}, order: "mix", per_mode: false, mode_rounds: {}, answer: "type", mode_answer: {}, judge: "rotate", lic_answer: 30, lic_bid: 10, hints: true, final_x: 1, top_n: 5, top_own: 45, top_guess: 45, most_time: 90, titles: "ui", bomb_fuse: "normal", buzz_answer: 8, bomb_check: true };
 check(eq(normSettings({}), DEF), "domyślne ustawienia");
 let d = normSettings({ time: 5, mode_time: { kadry: 500, licytacja: 40, xx: 3 }, order: "fixed", answer: "voice", mode_answer: { rok: "voice", zoom: "type" }, judge: "vote", lic_answer: 999, lic_bid: 1, final_x: 7, hints: false, mode_rounds: { rok: 50 } });
 check(d.time === 10 && eq(d.mode_time, { kadry: 120 }), "czas przycięty do 10..120, licytacja bez nadpisania");
@@ -561,6 +561,55 @@ console.log("Bomba: gospodarz zalicza odpowiedzi, ukryty lont, wybuch");
   check(!availability(FX.pack, ms).hotbuzz.ok, "mniej niż 5 filmów z muzyką: niedostępny");
   const mg = mergePackData([{ pack: FX.pack, movies: FX.movies }, { pack: { id: 2, name: "B", bombs: [{ id: 7, prompt_pl: "x", prompt_en: "x", answers: [] }] }, movies: [] }]);
   check(mg.pack.bombs.length === FX.pack.bombs.length + 1, "Custom łączy kategorie Bomby");
+}
+
+
+console.log("Zdjęcia aktorów przy pytaniu");
+const CAT = [
+  {id:1,name:"Tom Hanks"},{id:2,name:"Samuel L. Jackson"},{id:3,name:"Meg Ryan"},
+  {id:4,name:"Pedro Almodóvar"},{id:5,name:"John Carpenter"},{id:6,name:"Brad Pitt"},
+  {id:7,name:"Angelina Jolie"},{id:8,name:"Robert De Niro"},{id:9,name:"Michael Jackson"},{id:10,name:"Cher"},
+];
+const actorIds = (pl, en="") => matchActorPhotos(pl, en, CAT).map(a => a.id);
+check(eq(actorIds("Filmy z Tomem Hanksem"), [1]), "odmiana: z Tomem Hanksem");
+check(eq(actorIds("Name films with Samuel L. Jackson"), [2]), "EN: Samuel L. Jackson");
+check(eq(actorIds("Filmy z Tomem Hanksem i Meg Ryan"), [1, 3]), "dwóch aktorów");
+check(eq(actorIds("Filmy Almodóvara"), [4]), "samo nazwisko, jednoznaczne");
+check(eq(actorIds("filmy Jacksona"), []) && eq(actorIds("Horrory z duchami", "Horror films with ghosts"), []), "wieloznaczne / bez aktora");
+check(questionFaces({prompt_pl:"Filmy z Tomem Hanksem", actors:[]}, CAT).length === 0, "pusta lista wyłącza wykrywanie");
+check(questionFaces({prompt_pl:"Horrory z duchami", actors:[1]}, CAT)[0].photo === "/actor/1.jpg", "jawny wybór");
+{
+  const [g, [A, B]] = room(2, {}, ["bomba"]);
+  g.actors = CAT;
+  g.r.pack.bombs = [{id:99, prompt_pl:"Filmy z Tomem Hanksem", prompt_en:"Name films with Tom Hanks", answers:[], actors:null}];
+  g.start();
+  const faces = st(g, B).faces;
+  check(faces && faces.length === 1 && faces[0].id === 1, "stan rundy ma zdjęcie aktora");
+}
+
+console.log("Bomba: Sprawdzam zatrzymuje lont");
+{
+  const [g, [A, B]] = room(2, { bomb_fuse: "short", bomb_check: true }, ["bomba"]);
+  g.start(); g.answer(A, { light: true }, "pl");
+  const left0 = g.r.task.fuse_end - T;
+  adv(g, 3);
+  check(!g.answer(B, { check: true }, "pl").ok && g.r.task.sub === "live", "tylko gospodarz klika Sprawdzam");
+  check(g.answer(A, { check: true }, "pl").ok && g.r.task.sub === "check", "gospodarz pauzuje lont");
+  const sB = st(g, B), raw = JSON.stringify(sB);
+  check(sB.paused && !sB.can_check && st(g, A).can_resume, "pauza widoczna, wznów u gospodarza");
+  check(!/"fuse_left"|"heat_left"|"fuse_end"|"heat_at"|"lit_at"|"fuse":/.test(raw), "pozostały czas lontu nie wycieka");
+  adv(g, 40);
+  check(g.r.phase === "round" && g.r.task.sub === "check" && !g.r.task.exploded, "zatrzymany lont nie wybucha");
+  check(g.answer(A, { resume: true }, "pl").ok && g.r.task.sub === "live", "Wznów");
+  const rem = g.r.task.fuse_end - T;
+  check(Math.abs(rem - (left0 - 3)) < 0.05, "wznawia z tym samym ukrytym pozostałym czasem");
+  g.answer(A, { check: true }, "pl");
+  const h = g.r.task.holder;
+  check(g.answer(A, { verdict: true }, "pl").ok && g.r.task.sub === "live" && g.r.task.holder !== h, "dobra w pauzie wznawia i przekazuje");
+  const [g3, [A3]] = room(2, { bomb_check: false, bomb_fuse: "short" }, ["bomba"]);
+  g3.start(); g3.answer(A3, { light: true }, "pl");
+  check(!g3.answer(A3, { check: true }, "pl").ok && !st(g3, A3).can_check, "ustawienie wyłącza Sprawdzam");
+  check(normSettings({}).bomb_check === true, "Sprawdzam włączone domyślnie");
 }
 
 console.log("Hot buzz: muzyka, buzzer, blokada po pudle");

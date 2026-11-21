@@ -748,3 +748,33 @@ footer{padding:30px 0 50px;text-align:center;color:var(--muted);font-size:14px}
 .music-grid > .panel:last-child{order:-1}
 .musictable td .t{min-width:180px}
 .musictable audio{width:240px;max-width:100%}
+
+.qfaces{display:flex;justify-content:center;gap:14px;margin:2px 0 10px;flex-wrap:wrap}
+.qface{margin:0;width:92px;display:flex;flex-direction:column;align-items:center;gap:6px}
+.qface img{width:80px;height:80px;object-fit:cover;border-radius:50%;border:3px solid var(--orange);background:var(--bone);box-shadow:0 4px 0 rgba(27,23,18,.12);display:block}
+.qface figcaption{font-size:13px;text-align:center;line-height:1.2;max-width:96px;color:var(--ink)}
+.bpause{margin:8px 0 0;padding:8px 12px;border-radius:14px;background:var(--orange-l,#FFD9BF);color:var(--ink);font-weight:700;text-align:center}
+.bombstage.paused .bomb{opacity:.7;filter:grayscale(.15)}
+#bcheck,#bresume{width:100%;margin-bottom:8px}
+.dock .dockpause{display:none}
+@media (max-width:900px){
+  /* banner na karcie chowa się pod dokiem sędziego – pokaż go w doku */
+  .gmain:has(#bresume) .bombstage .bpause,
+  .gmain:has(#bcheck) .bombstage .bpause{display:none}
+  .dock .dockpause{display:block;margin:0 0 8px}
+}
+
+@media (max-width:560px){
+  .qface{width:76px}
+  .qface img{width:64px;height:64px;border-width:2px}
+  .qface figcaption{font-size:11px;max-width:76px}
+}
+.qpick{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.qpick .choice{display:flex;align-items:center;gap:8px;padding:6px 8px 6px 6px;border-radius:999px;background:var(--bone,#FCFAF5);border:1px solid rgba(27,23,18,.12)}
+.qpick .choice img{width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid var(--orange)}
+.qpick .choice button{border:0;background:none;cursor:pointer;font:inherit;color:var(--ink)}
+.apreview{display:flex;flex-direction:column;gap:6px;max-height:220px;overflow:auto;margin-top:8px}
+.apreview button{display:flex;align-items:center;gap:10px;width:100%;text-align:left;border:1px solid transparent;background:var(--bone,#FCFAF5);border-radius:12px;padding:6px 8px;cursor:pointer;font:inherit}
+.apreview button:hover{border-color:var(--orange)}
+.apreview img{width:40px;height:40px;border-radius:50%;object-fit:cover;border:2px solid var(--orange)}
+.amode{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 6px}

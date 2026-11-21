@@ -591,5 +591,14 @@ Object.assign(EN, {
   "{name} zalicza": "{name} got one",
   "{name}: bomba wybuchła": "{name}: the bomb went off",
   "{name} trzyma bombę": "{name} holds the bomb",
-  "{name}: buzz!": "{name}: buzz!"
+  "{name}: buzz!": "{name}: buzz!",
+  "Sprawdzam": "Check",
+  "Wznów": "Resume",
+  "Sprawdzam w Bombie": "Check in Bomb",
+  "Lont zatrzymany. Gospodarz sprawdza odpowiedź.": "The fuse is paused. The host is checking the answer.",
+  "Sprawdź odpowiedź, potem zalicz albo wznów lont.": "Check the answer, then accept it or resume the fuse.",
+  "Lont jest ukryty i losowy w każdej rundzie. Tykanie przyspiesza pod koniec, ale nikt nie zna dokładnego czasu. „Sprawdzam” zatrzymuje lont, żeby gospodarz mógł zweryfikować odpowiedź.": "The fuse is hidden and random each round. The ticking speeds up near the end, but nobody knows the exact time. Check pauses the fuse so the host can verify the answer.",
+  "{name} sprawdza odpowiedź": "{name} is checking the answer",
+  "{name} wznawia lont": "{name} resumes the fuse"
 });
+
