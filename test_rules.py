@@ -136,6 +136,69 @@ adv(r, 11)
 r.answer(B, {"verdict": True}, "pl"); r.answer(C, {"verdict": True}, "pl")
 check(r.phase == "reveal" and t["success"] and A["history"][-1] == 400, "werdykt tak: 200 x deklaracja")
 
+
+print("licytacja: dopasowanie na żywo = ocena końcowa")
+ANS = [
+    {"text": "The Shining", "pl": "Lśnienie", "aliases": []},
+    {"text": "The Green Mile", "pl": "Zielona mila", "aliases": ["Zielona Mila"]},
+    {"text": "Forrest Gump", "pl": "", "aliases": []},
+]
+check(rooms.best_answer("Lśnienie", ANS, [0, 1, 2]) == 0, "dopasowanie: PL z diakrytykami")
+check(rooms.best_answer("Lsnienie", ANS, [0, 1, 2]) == 0, "dopasowanie: PL bez znaków diakrytycznych")
+check(rooms.best_answer("the shining", ANS, [0, 1, 2]) == 0, "dopasowanie: EN niezależnie od wielkości liter")
+check(rooms.best_answer("Zielona mila", ANS, [0, 1, 2]) == 1, "dopasowanie: pole pl i alias")
+check(rooms.best_answer("Obcy", [{"text": "Alien", "pl": "Obcy - 8. pasażer Nostromo", "aliases": []}], [0]) == 0,
+      "dopasowanie: człon główny polskiego tytułu")
+check(rooms.best_answer("Alien", [{"text": "Alien", "pl": "Obcy - 8. pasażer Nostromo", "aliases": []}], [0]) == 0,
+      "dopasowanie: oryginał EN przy polskim pl")
+
+r, (A, B) = room(2, {"lic_answer": 30, "answer": "type", "titles": "en"}, modes=["licytacja"])
+r.pack["questions"] = [{"id": 99, "prompt_pl": "Filmy", "prompt_en": "Films", "answers": ANS}]
+r.start(); t = r.task
+t["order"] = [A["id"], B["id"]]; t["turn"] = 0
+r.answer(A, {"bid": 2}, "pl"); r.answer(B, {"pass": True}, "pl")
+check(not r.answer(A, {"text": "the shining"}, "en").get("correct"), "przed timerem wpis nie wchodzi")
+r.answer(B, {"start_timer": True}, "pl")
+check(r.state(A)["can_type"] and r.state(A)["has_list"] and not r.state(B)["can_type"], "wpisuje licytujący, ma listę")
+check(r.state(B)["can_verdict"] and not r.state(A)["can_verdict"], "Poprawnie od razu u sprawdzającego, nie po czasie")
+check(r.answer(A, {"text": "the shining"}, "en").get("correct"), "żywe EN w lang=en")
+check(r.answer(A, {"text": "Zielona mila"}, "en").get("correct"), "żywe PL przy titles=en i lang=en")
+check(r.phase == "round", "po zebraniu deklaracji jeszcze krótka chwila")
+adv(r, rooms.LIC_DONE_DELAY + 1)
+check(r.phase == "reveal" and t["success"] and r.state(A).get("untimed"),
+      "deklaracja z listy: te same dopasowania dają sukces i wyniki")
+check(r.reveal_manual(), "odsłona licytacji czeka na gospodarza")
+adv(r, 30)
+check(r.phase == "reveal", "wyniki nie znikają same")
+r.next()
+check(r.phase in ("final", "round", "lobby"), "gospodarz klika dalej")
+
+r, (A, B) = room(2, {"lic_answer": 30, "titles": "pl"}, modes=["licytacja"])
+r.pack["questions"] = [{"id": 99, "prompt_pl": "Filmy", "prompt_en": "Films", "answers": ANS}]
+r.start(); t = r.task
+t["order"] = [A["id"], B["id"]]; t["turn"] = 0
+r.answer(A, {"bid": 1}, "pl"); r.answer(B, {"pass": True}, "pl")
+r.answer(B, {"start_timer": True}, "pl")
+check(r.answer(A, {"text": "Lśnienie"}, "pl").get("correct"), "żywe Lśnienie w PL")
+check(r.answer(A, {"text": "zzzz nie ma"}, "pl").get("correct") is False, "brak na liście: źle na żywo")
+
+print("licytacja: Poprawnie w trakcie czasu, wyniki bez czekania")
+r, (A, B) = room(2, {"lic_answer": 40}, modes=["licytacja"])
+r.pack["questions"] = [{"id": 99, "prompt_pl": "Filmy z Tomem Hanksem", "prompt_en": "Name films", "answers": []}]
+r.start(); t = r.task
+t["order"] = [A["id"], B["id"]]; t["turn"] = 0
+r.answer(A, {"bid": 1}, "pl"); r.answer(B, {"pass": True}, "pl")
+r.answer(B, {"start_timer": True}, "pl")
+res = r.answer(A, {"text": "Forrest Gump"}, "pl")
+check(res.get("recorded") and res.get("correct") is not False, "bez listy: wpis nie jest oznaczany jako zły")
+check(r.state(B)["can_verdict"] and r.state(B)["left"] > 30, "Poprawnie dostępne, czas jeszcze leci")
+r.answer(B, {"verdict": True}, "pl")
+check(r.phase == "reveal" and t["success"] and r.state(A).get("untimed"),
+      "wszyscy ocenili w trakcie czasu: wyniki bez czekania na timer")
+adv(r, 30)
+check(r.phase == "reveal", "wyniki zostają, gospodarz klika dalej")
+
+
 print("mnożnik finału")
 r, (A,) = room(1, {"final_x": 2, "order": "fixed"}, modes=["zoom"])
 r.configure(rounds=2); r.start(); r.next(); r.next()
@@ -360,7 +423,7 @@ for i in range(5):
     seen.append(r.task["q"]["id"])
     check(r.state(A, "pl")["prompt"] == f"Horror {seen[-1]-100}", "prompt z puli pytań bez odpowiedzi")
     r.end_round()
-    adv(r, rooms.REVEAL_SECONDS + 7)
+    r.next()
 check(len(seen) == len(set(seen)) == 5, f"5 rund, 5 różnych pytań z puli 13 ({seen})")
 
 print("czas wyłączony i język tytułów")

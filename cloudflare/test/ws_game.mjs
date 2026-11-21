@@ -119,6 +119,42 @@ A.ws.close(); B2.ws.close();
   FA.ws.close(); FB.ws.close();
 }
 
+
+// Licytacja: wpis na żywo / Poprawnie od razu, wyniki czekają na gospodarza
+{
+  const cl = await post("/api/rooms", { pack_id: PACK, rounds: 1, modes: ["licytacja"], name: "Ala" });
+  const jl = await post(`/api/rooms/${cl.code}/join`, { name: "Bob" });
+  const LA = client(cl.code, cl, "pl"), LB = client(cl.code, jl, "en");
+  await Promise.all([LA.open, LB.open]);
+  await until(LA, s => s && s.players.length === 2 && s.players.every(p => p.online));
+  await LA.rpc("setup", { modes: ["licytacja"], rounds: 1, settings: { order: "fixed", lic_answer: 30 } });
+  await LA.rpc("start");
+  await until(LA, s => s.phase === "round" && s.mode === "licytacja" && s.sub === "bid");
+  const first = LA.s.turn === cl.pid ? LA : LB, second = first === LA ? LB : LA;
+  await first.rpc("guess", { bid: 1 });
+  await second.rpc("guess", { pass: true });
+  await until(LA, s => s.sub === "wait_timer");
+  const opp = LA.s.bidder === cl.pid ? LB : LA;
+  const bidr = LA.s.bidder === cl.pid ? LA : LB;
+  await opp.rpc("guess", { start_timer: true });
+  await until(LA, s => s.sub === "timed");
+  check(opp.s.can_verdict && !bidr.s.can_verdict, "licytacja: Poprawnie od razu u sprawdzającego");
+  if (bidr.s.can_type && bidr.s.has_list) {
+    const q = (data.pack.questions || []).find(q => q.prompt_pl === bidr.s.prompt || q.prompt_en === bidr.s.prompt) || (data.pack.questions || [])[0];
+    const titles = (q && q.answers || []).map(a => a.pl || a.text).filter(Boolean);
+    const r1 = await bidr.rpc("guess", { text: titles[0] || "zzzz" });
+    check(r1.d && r1.d.correct, `licytacja: żywe dopasowanie "${titles[0]}"`);
+  }
+  const early = await opp.rpc("guess", { verdict: true });
+  check(early.ok && early.d && early.d.ok !== false, "licytacja: werdykt w trakcie czasu");
+  await until(LA, s => s.phase === "reveal", 8000);
+  check(LA.s.untimed, "licytacja: wyniki czekają na gospodarza");
+  await sleep(8000);
+  check(LA.s.phase === "reveal", "licytacja: po 8 s dalej ekran wyników");
+  await LA.rpc("next");
+  LA.ws.close(); LB.ws.close();
+}
+
 // Bomba i Hot buzz: lont liczy serwer (alarm DO), klip z /music/, buzzer i blokada
 if (data.avail.bomba && data.avail.bomba.ok && data.avail.hotbuzz && data.avail.hotbuzz.ok) {
   const c4 = await post("/api/rooms", { pack_id: PACK, rounds: 2, modes: ["bomba", "hotbuzz"], name: "Ala" });

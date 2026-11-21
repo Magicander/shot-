@@ -11,7 +11,7 @@ import db
 
 STAGE_SECONDS = 15          # Kadry: trudny -> średni -> łatwy, co 15 s
 REVEAL_SECONDS = 9
-MANUAL_REVEAL = ("top", "kolejnosc", "bomba", "hotbuzz")   # wyniki tych trybów zawsze czekają na gospodarza
+MANUAL_REVEAL = ("top", "kolejnosc", "licytacja", "bomba", "hotbuzz")   # wyniki tych trybów zawsze czekają na gospodarza
 STAGE_POINTS = [1000, 600, 300]
 FIRST_BONUS = 100
 MAX_PLAYERS = 16
@@ -512,8 +512,35 @@ def fallback_question(movies):
                          "pl": m["pl_title"]} for m in movies]}
 
 
+def answer_names(a):
+    """Wszystkie akceptowane brzmienia: oryginał, polski tytuł, aliasy i człon główny
+    (np. "Lśnienie" z "Lśnienie - The Shining"). Język UI / ustawienie tytułów nie zawęża listy —
+    to samo dopasowanie jest używane na żywo i przy ocenie rundy."""
+    out, seen = [], set()
+    def add(s):
+        s = (s or "").strip()
+        if not s:
+            return
+        k = norm_title(s)
+        if not k or k in seen:
+            return
+        seen.add(k)
+        out.append(s)
+        head = re.split(r"\s+[-\u2013:]\s+|:\s+|\.\s+", s, maxsplit=1)[0].strip()
+        hk = norm_title(head)
+        if head != s and len(hk) >= 3 and hk not in seen:
+            seen.add(hk)
+            out.append(head)
+    if isinstance(a, dict):
+        add(a.get("text"))
+        for x in a.get("aliases") or []:
+            add(x)
+        add(a.get("pl"))
+    return out
+
+
 def answer_distance(guess, a):
-    ds = [d for d in (distance(guess, n) for n in [a["text"]] + list(a.get("aliases") or [])) if d is not None]
+    ds = [d for d in (distance(guess, n) for n in answer_names(a)) if d is not None]
     return min(ds) if ds else None
 
 
@@ -850,7 +877,7 @@ class Room:
     def reveal_manual(self):
         """Czy ekran wyników czeka na gospodarza (bez automatycznego przejścia).
         Topka i Ułóż po kolei zawsze: dwie kolumny wyników trzeba spokojnie przeczytać.
-        Pozostałe tryby: gdy runda była bez limitu czasu (Filmrun i licytacja mają własny rytm)."""
+        Pozostałe tryby: gdy runda była bez limitu czasu (Filmrun ma własny rytm)."""
         if not self.task:
             return False
         if self.mode in MANUAL_REVEAL:
@@ -1011,10 +1038,17 @@ class Room:
             if t["mode"] == "licytacja":
                 if t["bidder"] is None:
                     self.lic_tick(now)
-                elif t.get("sub") == "verdict":
-                    if self._lic_verdict_ready():
+                elif t.get("sub") in ("timed", "verdict") and self._lic_verdict_ready():
+                    self._lic_apply_votes()
+                    self.end_round()
+                elif self._lic_matched() >= (t.get("bid") or 0) > 0:
+                    if not t.get("done_at"):
+                        t["done_at"] = now
+                        self.version += 1
+                    elif now >= t["done_at"] + LIC_DONE_DELAY:
+                        t["success"] = True
                         self.end_round()
-                elif t.get("timer_started") and t.get("type_end") and now >= t["type_end"]:
+                elif t.get("timer_started") and t.get("type_end") and now >= t["type_end"] and t.get("sub") != "verdict":
                     self._lic_to_verdict()
             elif t["voice"]:
                 for c in t["claims"]:
@@ -1424,6 +1458,18 @@ class Room:
         votes = t.get("verdicts") or {}
         return bool(voters) and all(v in votes for v in voters)
 
+    def _lic_apply_votes(self):
+        t = self.task
+        if t.get("success") is not None:
+            return
+        others = self.lic_others() or ([t["bidder"]] if t.get("bidder") in self.players else [])
+        votes = [t.get("verdicts", {}).get(v) for v in others if v in (t.get("verdicts") or {})]
+        t["success"] = (sum(1 for x in votes if x) * 2) > len(votes) if votes else False
+
+    def _lic_matched(self):
+        t = self.task or {}
+        return sum(1 for f in t.get("found") or [] if f.get("i") is not None)
+
     def lic_start_timer(self, p):
         t = self.task
         if not t or t["mode"] != "licytacja" or not t.get("bidder") or t.get("timer_started"):
@@ -1443,8 +1489,9 @@ class Room:
         return {"ok": True}
 
     def lic_verdict(self, p, yes):
+        """Werdykt sędziego: dostępny od razu, gdy lont/timer odpowiedzi już leci, nie dopiero po sygnale."""
         t = self.task
-        if not t or t.get("sub") != "verdict":
+        if not t or t.get("sub") not in ("timed", "verdict"):
             return {"ok": False}
         others = self.lic_others()
         if not others and self.solo() and p["id"] == t.get("bidder"):
@@ -1453,8 +1500,7 @@ class Room:
             return {"ok": False}
         t.setdefault("verdicts", {})[p["id"]] = bool(yes)
         if self._lic_verdict_ready():
-            votes = [t["verdicts"][v] for v in others if v in t["verdicts"]]
-            t["success"] = (sum(1 for x in votes if x) * 2) > len(votes)
+            self._lic_apply_votes()
             self.end_round()
         else:
             self.version += 1
@@ -1570,12 +1616,10 @@ class Room:
             return {"ok": True}
         if mode == "licytacja":
             ans = t["q"]["answers"]
-            if t["bidder"] is not None:
-                if d.get("start_timer"):
-                    return self.lic_start_timer(p)
-                if "verdict" in d or d.get("success") is not None:
-                    return self.lic_verdict(p, d.get("verdict", d.get("success")))
-                return {"ok": False}
+            if d.get("start_timer"):
+                return self.lic_start_timer(p)
+            if "verdict" in d or d.get("success") is not None:
+                return self.lic_verdict(p, d.get("verdict", d.get("success")))
             if t["bidder"] is None:
                 self.tick()
                 if t["bidder"] is not None or self.phase != "round":
@@ -1617,7 +1661,16 @@ class Room:
                 return {"ok": True, "count": len(f)}
             if p["id"] != t["bidder"]:
                 return {"ok": False}
+            if not t.get("timer_started") and t.get("sub") not in ("timed", "type"):
+                return {"ok": False}
             text = str(d.get("text") or "")[:120]
+            if not text.strip():
+                return {"ok": False}
+            if not ans:
+                # brak listy: nie oceniamy na żywo (to zrobi sędzia). Zapisujemy tylko podgląd.
+                t["found"].append({"i": None, "text": text, "pl": ""})
+                self.version += 1
+                return {"ok": True, "recorded": True, "title": text}
             got = {f["i"] for f in t["found"]}
             i = best_answer(text, ans, [k for k in range(len(ans)) if k not in got])
             if i is None:
@@ -1627,6 +1680,8 @@ class Room:
                 self.version += 1
                 return {"ok": True, "correct": False, "duplicate": dup is not None}
             t["found"].append({"i": i, "text": ans[i]["text"], "pl": ans[i].get("pl") or ""})
+            if self._lic_matched() >= (t.get("bid") or 0) > 0 and not t.get("done_at"):
+                t["done_at"] = time.time()
             self.version += 1
             self.tick()
             return {"ok": True, "correct": True, "title": ans[i]["text"]}
@@ -1813,10 +1868,12 @@ class Room:
                     others = self.lic_others()
                     sub = t.get("sub") or ("wait_timer" if not t.get("timer_started") else "timed")
                     can_timer = bool(me and not t.get("timer_started") and (me["id"] in others or (not others and me["id"] == t["bidder"])))
-                    can_verdict = bool(me and sub == "verdict" and (me["id"] in others or (not others and me["id"] == t["bidder"])))
+                    can_verdict = bool(me and sub in ("timed", "verdict") and (me["id"] in others or (not others and me["id"] == t["bidder"])))
                     left = None
                     if t.get("timer_started") and t.get("type_end") and sub == "timed":
                         left = round(t["type_end"] - now, 1)
+                    has_list = bool(ans)
+                    can_type = bool(me and me["id"] == t["bidder"] and sub == "timed" and not t.get("voice"))
                     out.update(sub=sub, bidder=t["bidder"], bidder_name=self.pname(t["bidder"]) or "?",
                                duration=t["dur"] if t.get("timer_started") else None,
                                left=left,
@@ -1825,7 +1882,10 @@ class Room:
                                my_verdict=(t.get("verdicts") or {}).get(me["id"]) if me else None,
                                verdicts=[{"id": pid, "name": self.pname(pid), "vote": (t.get("verdicts") or {}).get(pid)}
                                          for pid in (others or [])],
-                               timer_by=self.pname(t.get("timer_by")))
+                               timer_by=self.pname(t.get("timer_by")),
+                               has_list=has_list, can_type=can_type,
+                               found=[self.fview(f, lang) for f in t.get("found") or []],
+                               count=len(t.get("found") or []))
             elif mode == "bomba":
                 judge = self.bomb_judge()
                 is_judge = bool(me and me["id"] == judge)

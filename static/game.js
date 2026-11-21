@@ -245,7 +245,7 @@ function playerList(players, opts = {}) {
 const MODE_INFO = {
   kadry: ["Kadry", "Trzy kadry z filmu, od najtrudniejszego. Im szybciej zgadniesz, tym więcej punktów."],
   zoom: ["Zoom", "Mocne zbliżenie fragmentu kadru, które powoli się oddala. Zgadnij tytuł jak najwcześniej."],
-  licytacja: ["Licytacja", "Pytanie z listą odpowiedzi. Gracze licytują po kolei. Zwycięzca wymienia odpowiedzi, a timer puszcza przeciwnik. Gdy czas minie, pozostali decydują (tak/nie), czy zaliczył zadanie. Sukces: 200 pkt za każdą zadeklarowaną dla licytującego. Porażka: pozostali dostają po 100 pkt za każdą."],
+  licytacja: ["Licytacja", "Pytanie z listą odpowiedzi. Gracze licytują po kolei. Zwycięzca wymienia odpowiedzi, a timer puszcza przeciwnik. Sprawdzający klika Poprawnie albo Źle od razu. Gdy wszyscy ocenią, gra pokazuje wyniki i gospodarz klika dalej. Sukces: 200 pkt za każdą zadeklarowaną. Porażka: pozostali dostają po 100 pkt za każdą."],
   rok: ["Który rok", "Podaj rok premiery. Dokładny rok to 1000 pkt, każdy rok różnicy zabiera około 30 procent, ponad 8 lat to zero."],
   kolejnosc: ["Ułóż po kolei", "Ułóż 4 filmy od najstarszego do najnowszego. 250 pkt za każde dobre miejsce."],
   plakat: ["Plakat", "Plakat odsłania się stopniowo. Im wcześniej zgadniesz, tym więcej punktów."],
@@ -749,8 +749,8 @@ function renderAuction(m) {
   const rules = `<details class="rules" ${S.sub === "bid" ? "open" : ""}><summary>${T("zasady licytacji")}</summary>${notice}<ol>
     <li>${T("Gra losuje, kto zaczyna. Potem gracze po kolei: podbijasz ofertę albo pasujesz. Na ruch masz {n} s, potem automatyczny pas.", {n: S.bid_seconds})}</li>
     <li>${T("Licytacja kończy się, gdy zostanie jedna osoba. Wygrywa najwyższa oferta.")}</li>
-    <li>${T("Zwycięzca wymienia odpowiedzi na głos. Timer puszcza przeciwnik (nie startuje sam). Na wypowiedź jest {n} s.", {n: secs})}</li>
-    <li>${T("Po czasie pozostali decydują (tak/nie), czy zaliczył zadanie. Sukces: licytujący dostaje 200 pkt za każdą zadeklarowaną. Porażka: każdy z pozostałych dostaje po 100 pkt za każdą.")}</li></ol></details>`;
+    <li>${T("Zwycięzca wymienia odpowiedzi (wpisuje albo mówi na głos). Timer puszcza przeciwnik (nie startuje sam). Na wypowiedź jest {n} s.", {n: secs})}</li>
+    <li>${T("Sprawdzający klika Poprawnie albo Źle od razu, gdy usłyszy dość odpowiedzi — nie czeka na koniec czasu. Gdy wszyscy ocenią albo licytujący zbierze deklarację z listy, gra przechodzi do wyników (gospodarz klika dalej). Sukces: 200 pkt za każdą zadeklarowaną. Porażka: pozostali dostają po 100 pkt za każdą.")}</li></ol></details>`;
   const hist = (S.history || []).length ? `<p class="muted small-note">${S.history.map(h => h.bid ? T("{name}: {n}", {name: esc(h.name), n: h.bid}) : T("{name}: pas", {name: esc(h.name)})).join(" · ")}</p>` : "";
   if (S.sub === "bid") {
     const myTurn = S.turn === S.me;
@@ -781,22 +781,29 @@ function renderAuction(m) {
       : waitBox(mine ? T("Czekasz na timer") : T("Czekamy"), T("Timer puszcza przeciwnik."));
     return [stage, dock];
   }
+  const foundList = (S.found || []).length
+    ? `<ul class="found live">${S.found.map(f => `<li>${esc(showTitle(f) || f.title || f.pl_title || "")}</li>`).join("")}</ul>`
+    : "";
+  // HTTP poll serializes a missing vote as null (not undefined). Treat both as "not voted yet".
+  const voteDock = () => S.can_verdict && S.my_verdict == null
+    ? `<div class="verdict-row"><button type="button" class="pill ghost big" id="vno">${T("Źle")}</button><button type="button" class="pill orange big" id="vyes">${T("Poprawnie")}</button></div>`
+    : waitBox(S.my_verdict == null ? T("Czekamy na ocenę") : (S.my_verdict ? T("Twój głos: poprawnie") : T("Twój głos: źle")), T("Gdy wszyscy ocenią, pokażemy wyniki."));
+  const votes = (S.verdicts || []).map(v => `<li class="${v.vote === true ? "ok" : v.vote === false ? "miss" : ""}">${esc(v.name)}: ${v.vote === true ? T("poprawnie") : v.vote === false ? T("źle") : T("czeka")}</li>`).join("");
   if (sub === "verdict") {
-    const votes = (S.verdicts || []).map(v => `<li class="${v.vote === true ? "ok" : v.vote === false ? "miss" : ""}">${esc(v.name)}: ${v.vote === true ? T("tak") : v.vote === false ? T("nie") : T("czeka")}</li>`).join("");
     const stage = `${stageHead}
-      <p class="notice30 big">${T("Czas minął. Pozostali gracze decydują, czy {name} zaliczył zadanie (wymienił {n} odpowiedzi).", {name: esc(S.bidder_name), n: S.bid})}</p>
-      <ul class="results">${votes}</ul>${hist}</div>`;
-    const dock = S.can_verdict && S.my_verdict === undefined
-      ? `<div class="verdict-row"><button type="button" class="pill ghost big" id="vno">${T("nie zaliczył")}</button><button type="button" class="pill orange big" id="vyes">${T("zaliczył")}</button></div>`
-      : waitBox(S.my_verdict === undefined ? T("Czekamy na ocenę") : (S.my_verdict ? T("Twój głos: tak") : T("Twój głos: nie")), T("Gdy wszyscy ocenią, runda się kończy."));
-    return [stage, dock];
+      <p class="notice30 big">${T("Pozostali gracze decydują, czy {name} zaliczył zadanie (wymienił {n} odpowiedzi).", {name: esc(S.bidder_name), n: S.bid})}</p>
+      ${foundList}<ul class="results">${votes}</ul>${hist}</div>`;
+    return [stage, voteDock()];
   }
   const stage = `${stageHead}
-    <p class="notice30 big">${mine ? T("Wymieniaj odpowiedzi na głos. Masz {n} s.", {n: secs}) : T("{name} wymienia odpowiedzi. Masz {n} s na słuchanie, potem ocenisz, czy zaliczył.", {name: esc(S.bidder_name), n: secs})}</p>
+    <p class="notice30 big">${mine
+      ? (S.can_type ? T("Wpisz tytuły. Masz {n} s. Jeśli zrobisz deklarację wcześniej, runda przejdzie do wyników.", {n: secs}) : T("Wymieniaj odpowiedzi na głos. Masz {n} s.", {n: secs}))
+      : T("{name} wymienia odpowiedzi. Oceń, gdy usłyszysz dość — nie musisz czekać na koniec czasu.", {name: esc(S.bidder_name)})}</p>
     <div class="bigclock" id="bigclock"></div>
-    ${hist}</div>`;
-  const dock = mine ? waitBox(T("Mów odpowiedzi na głos!"), T("Po czasie ocenią pozostali."))
-    : waitBox(T("Słuchaj odpowiedzi"), T("Po sygnale ocenisz, czy zadanie zostało zaliczone."));
+    ${foundList}${hist}</div>`;
+  const dock = mine
+    ? (S.can_type ? guessForm(T("Kolejny tytuł?")) : waitBox(T("Mów odpowiedzi na głos!"), T("Sprawdzający może kliknąć Poprawnie od razu.")))
+    : voteDock();
   return [stage, dock];
 }
 
@@ -1245,8 +1252,10 @@ function setupGuess(prev, focus, auction) {
     try {
       const r = await roomCall("guess", {text});
       if (r.correct) { if (auction) { g.value = ""; toast(T("Zaliczone: {t}", {t: r.title})); } lastKey = ""; if (!WS_MODE) poll(); }
+      else if (r.recorded) { g.value = ""; toast(T("Zapisane: {t}", {t: r.title || text})); lastKey = ""; if (!WS_MODE) poll(); }
       else if (r.duplicate) { fb.textContent = (auction ? T("Ta odpowiedź już była.") : T("Ten film już był.")); fb.className = "feedback bad"; g.select(); }
-      else { fb.textContent = auction ? T("\"{text}\" nie ma na liście.", {text}) : T("Nie, to nie \"{text}\". Próbuj dalej.", {text}); fb.className = "feedback bad"; g.select(); }
+      else if (r.correct === false) { fb.textContent = auction ? T("\"{text}\" nie ma na liście.", {text}) : T("Nie, to nie \"{text}\". Próbuj dalej.", {text}); fb.className = "feedback bad"; g.select(); }
+      else { toast(r.error || T("Nie udało się wysłać odpowiedzi")); }
     } catch (e) { toast(e.message); }
   };
   $("#gf").onsubmit = e => { e.preventDefault(); ac.classList.add("hidden"); submit(); };
@@ -1479,7 +1488,7 @@ function renderReveal(v) {
   else if (mode === "licytacja") {
     body = (a.prompt ? `<p class="muted qprompt-r">${esc(a.prompt)}</p>` : "") + facesHtml(a.faces) + (a.bidder_name ? `<h2>${a.success ? T("{name} zaliczył zadanie", {name: esc(a.bidder_name)}) : T("{name} nie zaliczył zadania", {name: esc(a.bidder_name)})}</h2>
       <div class="year">${T("deklaracja: {n}", {n: a.bid})}</div>
-      <p class="muted">${T("Po timerze pozostali gracze zdecydowali, czy licytujący wymienił tyle odpowiedzi. Sukces: 200 pkt × deklaracja dla licytującego. Porażka: 100 pkt × deklaracja dla pozostałych.")}</p>
+      <p class="muted">${T("Sprawdzający ocenili, czy licytujący wymienił tyle odpowiedzi (wpisy z listy zaliczają się same). Sukces: 200 pkt × deklaracja dla licytującego. Porażka: 100 pkt × deklaracja dla pozostałych.")}</p>
       <p class="muted">${T("Deklaracje: {list}", {list: (a.bids || []).map(b => esc(b.name) + " " + b.bid).join(", ")})}</p>
       ${(a.answers || a.missed || a.found || []).length ? `<p class="muted" style="margin:10px 0 4px">${T("Lista poprawnych odpowiedzi:")}</p><ul class="found">${(a.answers || a.missed || a.found).map(f => `<li>${showTitle(f)}</li>`).join("")}</ul>` : ""}`
       : `<h2>${T("nikt nie licytował")}</h2>`);
@@ -1490,7 +1499,7 @@ function renderReveal(v) {
   v.innerHTML = `<div class="game"><div class="gmain">${hud()}<div class="panel reveal">${head}${body}${roundResults()}</div>
       <div class="dock revdock">
         <div class="wait">${S.untimed && isHost() ? "" : `<span class="spin"></span>`}${waitNext}</div>
-        ${isHost() ? `<button class="pill orange big" id="nx">${S.round >= S.rounds ? T("pokaż wyniki") : (S.untimed ? T("następna runda") : T("dalej"))}</button>` : ""}
+        ${isHost() ? `<button class="pill orange big" id="nx">${S.round >= S.rounds ? T("pokaż wyniki") : T("dalej")}</button>` : ""}
       </div></div>${board()}</div><div class="sheetbg" id="sheetbg"></div>`;
   wireCommon();
   if (isHost()) $("#nx").onclick = () => act("next");

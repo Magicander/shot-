@@ -238,6 +238,8 @@ def main():
             b.req("POST", f"/api/rooms/{code}/guess", {**B, "start_timer": True})
             st2 = a.req("GET", f"/api/rooms/{code}?pid={A['pid']}&token={A['token']}")
             check(st2["sub"] == "timed" and st2.get("duration") == 30, "Bob puszcza timer (30 s)")
+            sb_live = b.req("GET", f"/api/rooms/{code}?pid={B['pid']}&token={B['token']}")
+            check(sb_live.get("can_verdict") and not st2.get("can_verdict"), "Poprawnie od razu u sprawdzającego, w trakcie czasu")
             t["type_end"] = __import__("time").time() - 0.1
             room.tick()
             check(t.get("sub") == "verdict", "po czasie jest werdykt")
@@ -259,6 +261,7 @@ def main():
             check(pts["Bob"] - scores.get("Bob", 0) < n * n, "Top: Bob nie zgadł kompletnie, remis jest OK gdyby był")
         if mode == "licytacja":
             check(pts["Ala"] - scores.get("Ala", 0) == 400, "Licytacja: 2 x 200 pkt")
+            check(sr.get("untimed"), "Licytacja: odsłona czeka na gospodarza")
         scores = pts
         a.req("POST", f"/api/rooms/{code}/next", A)
     sf = a.req("GET", f"/api/rooms/{code}?pid={A['pid']}&token={A['token']}")
@@ -401,6 +404,71 @@ def main():
     a.req("POST", f"/api/rooms/{code}/next", A)
     check(a.req("GET", f"/api/rooms/{code}?pid={A['pid']}&token={A['token']}")["phase"] == "final", "koniec gry w nowych trybach")
     seen += ["bomba", "hotbuzz"]
+
+
+    # HTTP poll serializuje brak głosu jako null; przycisk nie może wymagać === undefined.
+    js = (HERE / "static" / "game.js").read_text(encoding="utf-8")
+    block = js.split("const voteDock", 1)[1][:500]
+    check("S.my_verdict == null" in block and "S.my_verdict === undefined" not in block,
+          "UI Poprawnie: my_verdict == null (poll i WS)")
+
+    # licytacja: wpis na żywo (PL/EN) i Poprawnie przed końcem czasu
+    ca2, cb2 = Client(base, "pl"), Client(base, "en")
+    cr2 = ca2.req("POST", "/api/rooms", {"pack_id": pid, "name": "Ala", "modes": ["licytacja"], "rounds": 1})
+    code2, A2 = cr2["code"], {"pid": cr2["pid"], "token": cr2["token"]}
+    jr2 = cb2.req("POST", f"/api/rooms/{code2}/join", {"name": "Bob"})
+    B2 = {"pid": jr2["pid"], "token": jr2["token"]}
+    room2 = app.rooms[code2]
+    ans_q = {"id": 9901, "prompt_pl": "Filmy", "prompt_en": "Films",
+             "answers": [{"text": "The Shining", "pl": "Lśnienie", "aliases": []},
+                         {"text": "The Green Mile", "pl": "Zielona mila", "aliases": []}]}
+    ca2.req("POST", f"/api/rooms/{code2}/setup", {**A2, "modes": ["licytacja"], "rounds": 1,
+                                                  "settings": {"order": "fixed", "lic_answer": 30, "titles": "en"}})
+    ca2.req("POST", f"/api/rooms/{code2}/start", A2)
+    t2 = room2.task
+    t2["q"] = ans_q
+    t2["order"] = [A2["pid"], B2["pid"]]; t2["turn"] = 0
+    ca2.req("POST", f"/api/rooms/{code2}/guess", {**A2, "bid": 2})
+    cb2.req("POST", f"/api/rooms/{code2}/guess", {**B2, "pass": True})
+    cb2.req("POST", f"/api/rooms/{code2}/guess", {**B2, "start_timer": True})
+    stt = ca2.req("GET", f"/api/rooms/{code2}?pid={A2['pid']}&token={A2['token']}")
+    stb = cb2.req("GET", f"/api/rooms/{code2}?pid={B2['pid']}&token={B2['token']}")
+    check(stt.get("can_type") and stb.get("can_verdict"), "HTTP: wpis u licytującego, Poprawnie u sprawdzającego od razu")
+    rpl = ca2.req("POST", f"/api/rooms/{code2}/guess", {**A2, "text": "Lśnienie"})
+    check(rpl.get("correct"), "HTTP: polski tytuł z diakrytykami zaliczony na żywo (titles=en)")
+    ren = ca2.req("POST", f"/api/rooms/{code2}/guess", {**A2, "text": "the green mile"})
+    check(ren.get("correct"), "HTTP: angielski tytuł zaliczony na żywo")
+    # krótka chwila na auto-sukces (serwer używa prawdziwego czasu)
+    import time as _time
+    t2["done_at"] = _time.time() - 4
+    room2.tick()
+    sr2 = ca2.req("GET", f"/api/rooms/{code2}?pid={A2['pid']}&token={A2['token']}")
+    check(sr2["phase"] == "reveal" and sr2.get("untimed") and (sr2.get("answer") or {}).get("success"),
+          "HTTP: zebrana deklaracja kończy rundę wynikami, bez pominięcia odsłony")
+
+    # drugi pokój: bez listy, werdykt w trakcie czasu
+    ca3, cb3 = Client(base, "pl"), Client(base, "en")
+    cr3 = ca3.req("POST", "/api/rooms", {"pack_id": pid, "name": "Ala", "modes": ["licytacja"], "rounds": 1})
+    code3, A3 = cr3["code"], {"pid": cr3["pid"], "token": cr3["token"]}
+    jr3 = cb3.req("POST", f"/api/rooms/{code3}/join", {"name": "Bob"})
+    B3 = {"pid": jr3["pid"], "token": jr3["token"]}
+    room3 = app.rooms[code3]
+    ca3.req("POST", f"/api/rooms/{code3}/setup", {**A3, "modes": ["licytacja"], "rounds": 1, "settings": {"lic_answer": 40}})
+    ca3.req("POST", f"/api/rooms/{code3}/start", A3)
+    t3 = room3.task
+    t3["q"] = {"id": 9902, "prompt_pl": "Filmy z Tomem Hanksem", "prompt_en": "Name films", "answers": []}
+    t3["order"] = [A3["pid"], B3["pid"]]; t3["turn"] = 0
+    ca3.req("POST", f"/api/rooms/{code3}/guess", {**A3, "bid": 1})
+    cb3.req("POST", f"/api/rooms/{code3}/guess", {**B3, "pass": True})
+    cb3.req("POST", f"/api/rooms/{code3}/guess", {**B3, "start_timer": True})
+    rec = ca3.req("POST", f"/api/rooms/{code3}/guess", {**A3, "text": "Forrest Gump"})
+    check(rec.get("recorded") and rec.get("correct") is not False, "HTTP: bez listy wpis nie jest zły")
+    stb3 = cb3.req("GET", f"/api/rooms/{code3}?pid={B3['pid']}&token={B3['token']}")
+    check(stb3.get("can_verdict") and stb3.get("left") and stb3["left"] > 5, "HTTP: Poprawnie w trakcie odliczania")
+    cb3.req("POST", f"/api/rooms/{code3}/guess", {**B3, "verdict": True})
+    sr3 = ca3.req("GET", f"/api/rooms/{code3}?pid={A3['pid']}&token={A3['token']}")
+    check(sr3["phase"] == "reveal" and sr3.get("untimed") and (sr3.get("answer") or {}).get("success"),
+          "HTTP: wszyscy ocenili — wyniki od razu, gospodarz klika dalej")
 
     # oryginalna baza nietknięta
     if SRC.exists():

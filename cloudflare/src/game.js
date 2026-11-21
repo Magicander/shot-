@@ -3,7 +3,7 @@
 
 export const STAGE_SECONDS = 15;
 export const REVEAL_SECONDS = 9;
-export const MANUAL_REVEAL = ["top", "kolejnosc", "bomba", "hotbuzz"];   // wyniki tych trybów zawsze czekają na gospodarza
+export const MANUAL_REVEAL = ["top", "kolejnosc", "licytacja", "bomba", "hotbuzz"];   // wyniki tych trybów zawsze czekają na gospodarza
 export const STAGE_POINTS = [1000, 600, 300];
 export const FIRST_BONUS = 100;
 export const MAX_PLAYERS = 16;
@@ -435,8 +435,30 @@ export function fallbackQuestion(movies) {
   };
 }
 
-function answerDistance(guess, a) {
-  const ds = [a.text, ...(a.aliases || [])].map(n => distance(guess, n)).filter(d => d !== null);
+export function answerNames(a) {
+  // EN, PL, aliasy i człon główny tytułu. Język UI nie zawęża — live i finisz używają tej samej listy.
+  const out = [], seen = new Set();
+  const add = s => {
+    s = String(s || "").trim();
+    if (!s) return;
+    const k = normTitle(s);
+    if (!k || seen.has(k)) return;
+    seen.add(k); out.push(s);
+    const m = s.match(/\s+[-\u2013:]\s+|:\s+|\.\s+/);
+    const head = (m ? s.slice(0, m.index) : s).trim();
+    const hk = normTitle(head);
+    if (head !== s && hk.length >= 3 && !seen.has(hk)) { seen.add(hk); out.push(head); }
+  };
+  if (a && typeof a === "object") {
+    add(a.text);
+    for (const x of a.aliases || []) add(x);
+    add(a.pl);
+  }
+  return out;
+}
+
+export function answerDistance(guess, a) {
+  const ds = answerNames(a).map(n => distance(guess, n)).filter(d => d !== null);
   return ds.length ? Math.min(...ds) : null;
 }
 
@@ -791,8 +813,11 @@ export class Game {
       const el = n - r.t0, t = r.task, act = this.active();
       if (t.mode === "licytacja") {
         if (t.bidder === null) this.licTick(n);
-        else if (t.sub === "verdict") { if (this._licVerdictReady()) this.endRound(); }
-        else if (t.timer_started && t.type_end && n >= t.type_end) this._licToVerdict();
+        else if ((t.sub === "timed" || t.sub === "verdict") && this._licVerdictReady()) { this._licApplyVotes(); this.endRound(); }
+        else if (this._licMatched() >= (t.bid || 0) && (t.bid || 0) > 0) {
+          if (!t.done_at) { t.done_at = n; r.version++; }
+          else if (n >= t.done_at + LIC_DONE_DELAY) { t.success = true; this.endRound(); }
+        } else if (t.timer_started && t.type_end && n >= t.type_end && t.sub !== "verdict") this._licToVerdict();
       } else if (t.voice) {
         for (const c of t.claims) if (c.st === "wait") this.resolve(c);
         if (r.phase !== "round") return;
@@ -830,7 +855,10 @@ export class Game {
     const own = t.mode === "bomba" || t.mode === "hotbuzz";
     if (t.mode === "licytacja") {
       if (t.bidder === null) marks.push(t.turn_end);
-      else if (t.timer_started && t.type_end && t.sub !== "verdict") marks.push(t.type_end);
+      else {
+        if (t.timer_started && t.type_end && t.sub !== "verdict") marks.push(t.type_end);
+        if (t.done_at && this._licMatched() >= (t.bid || 0) && (t.bid || 0) > 0) marks.push(t.done_at + LIC_DONE_DELAY);
+      }
     } else if (t.mode === "bomba") {
       if (t.sub === "live") marks.push(...(t.heat_at || []), t.fuse_end);
     } else if (t.mode === "hotbuzz") {
@@ -1162,6 +1190,18 @@ export class Game {
     const votes = t.verdicts || {};
     return voters.length > 0 && voters.every(v => v in votes);
   }
+  _licApplyVotes() {
+    const t = this.r.task;
+    if (t.success != null) return;
+    let others = this.licOthers();
+    if (!others.length && t.bidder && this.r.players[t.bidder]) others = [t.bidder];
+    const votes = others.filter(v => t.verdicts && v in t.verdicts).map(v => t.verdicts[v]);
+    t.success = votes.length ? votes.filter(Boolean).length * 2 > votes.length : false;
+  }
+  _licMatched() {
+    const t = this.r.task || {};
+    return (t.found || []).filter(f => f.i != null).length;
+  }
   licStartTimer(p) {
     const t = this.r.task;
     if (!t || t.mode !== "licytacja" || !t.bidder || t.timer_started) return { ok: false };
@@ -1178,15 +1218,14 @@ export class Game {
   }
   licVerdict(p, yes) {
     const t = this.r.task;
-    if (!t || t.sub !== "verdict") return { ok: false };
+    if (!t || !["timed", "verdict"].includes(t.sub)) return { ok: false };
     let others = this.licOthers();
     if (!others.length && this.solo() && p.id === t.bidder) others = [t.bidder];
     if (!others.includes(p.id)) return { ok: false };
     t.verdicts = t.verdicts || {};
     t.verdicts[p.id] = !!yes;
     if (this._licVerdictReady()) {
-      const votes = others.map(v => t.verdicts[v]);
-      t.success = votes.filter(Boolean).length * 2 > votes.length;
+      this._licApplyVotes();
       this.endRound();
     } else this.r.version++;
     return { ok: true };
@@ -1317,11 +1356,8 @@ export class Game {
     }
     if (mode === "licytacja") {
       const ans = t.q.answers;
-      if (t.bidder !== null) {
-        if (d.start_timer) return this.licStartTimer(p);
-        if ("verdict" in d || d.success != null) return this.licVerdict(p, d.verdict != null ? d.verdict : d.success);
-        return { ok: false };
-      }
+      if (d.start_timer) return this.licStartTimer(p);
+      if ("verdict" in d || d.success != null) return this.licVerdict(p, d.verdict != null ? d.verdict : d.success);
       if (t.bidder === null) {
         this.tick();
         if (t.bidder !== null || r.phase !== "round") return { ok: false };
@@ -1349,7 +1385,14 @@ export class Game {
         return { ok: true, count: f.length };
       }
       if (p.id !== t.bidder) return { ok: false };
+      if (!t.timer_started && !["timed", "type"].includes(t.sub)) return { ok: false };
       const text = String(d.text || "").slice(0, 120);
+      if (!text.trim()) return { ok: false };
+      if (!ans || !ans.length) {
+        t.found.push({ i: null, text, pl: "" });
+        r.version++;
+        return { ok: true, recorded: true, title: text };
+      }
       const got = new Set(t.found.map(f => f.i));
       const i = bestAnswer(text, ans, ans.map((_, k) => k).filter(k => !got.has(k)));
       if (i === null) {
@@ -1358,6 +1401,7 @@ export class Game {
         return { ok: true, correct: false, duplicate: dup !== null };
       }
       t.found.push({ i, text: ans[i].text, pl: ans[i].pl || "" });
+      if (this._licMatched() >= (t.bid || 0) && (t.bid || 0) > 0 && !t.done_at) t.done_at = now();
       r.version++; this.tick();
       return { ok: true, correct: true, title: ans[i].text };
     }
@@ -1503,7 +1547,7 @@ export class Game {
       } else if (mode === "licytacja") {
         const ans = t.q.answers;
         Object.assign(out, {
-          total: licTotal(t.q), prompt: Game.prompt(t.q, lang), faces: questionFaces(t.q, this.actors), faces: questionFaces(t.q, this.actors),
+          total: licTotal(t.q), prompt: Game.prompt(t.q, lang), faces: questionFaces(t.q, this.actors),
           bid_seconds: this.cfg.lic_bid, answer_seconds: t.dur, bid: t.bid,
           history: t.bids.map(([pid, b]) => ({ name: this.pname(pid) || "?", bid: b })).slice(-10),
         });
@@ -1519,9 +1563,11 @@ export class Game {
           const others = this.licOthers();
           const sub = t.sub || (t.timer_started ? "timed" : "wait_timer");
           const canTimer = !!(me && !t.timer_started && (others.includes(me.id) || (!others.length && me.id === t.bidder)));
-          const canVerdict = !!(me && sub === "verdict" && (others.includes(me.id) || (!others.length && me.id === t.bidder)));
+          const canVerdict = !!(me && (sub === "timed" || sub === "verdict") && (others.includes(me.id) || (!others.length && me.id === t.bidder)));
           let left = null;
           if (t.timer_started && t.type_end && sub === "timed") left = r1(t.type_end - n);
+          const hasList = !!(ans && ans.length);
+          const canType = !!(me && me.id === t.bidder && sub === "timed" && !t.voice);
           Object.assign(out, {
             sub, bidder: t.bidder, bidder_name: this.pname(t.bidder) || "?",
             duration: t.timer_started ? t.dur : null,
@@ -1531,6 +1577,9 @@ export class Game {
             my_verdict: me && (t.verdicts || {})[me.id],
             verdicts: others.map(pid => ({ id: pid, name: this.pname(pid), vote: (t.verdicts || {})[pid] })),
             timer_by: this.pname(t.timer_by),
+            has_list: hasList, can_type: canType,
+            found: (t.found || []).map(f => Game.fview(f, lang)),
+            count: (t.found || []).length,
           });
         }
       } else if (mode === "bomba") {

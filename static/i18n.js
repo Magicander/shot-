@@ -471,7 +471,7 @@ Object.assign(EN, {
   "deklaracja: {n}": "bid: {n}",
   "{name} zaliczył zadanie": "{name} completed the task",
   "{name} nie zaliczył zadania": "{name} did not complete the task",
-  "Po timerze pozostali gracze zdecydowali, czy licytujący wymienił tyle odpowiedzi. Sukces: 200 pkt × deklaracja dla licytującego. Porażka: 100 pkt × deklaracja dla pozostałych.": "After the timer the other players decided whether the bidder listed that many answers. Success: 200 pts × the bid for the bidder. Failure: 100 pts × the bid for the others.",
+  "Sprawdzający ocenili, czy licytujący wymienił tyle odpowiedzi (wpisy z listy zaliczają się same). Sukces: 200 pkt × deklaracja dla licytującego. Porażka: 100 pkt × deklaracja dla pozostałych.": "The checkers judged whether the bidder listed that many answers (titles typed from the list count automatically). Success: 200 pts × the bid for the bidder. Failure: 100 pts × the bid for the others.",
   "Lista poprawnych odpowiedzi:": "List of valid answers:",
   "tak": "yes",
   "nie": "no",
@@ -602,3 +602,21 @@ Object.assign(EN, {
   "{name} wznawia lont": "{name} resumes the fuse"
 });
 
+Object.assign(EN, {
+  "Poprawnie": "Correct",
+  "Źle": "Wrong",
+  "poprawnie": "correct",
+  "Twój głos: poprawnie": "Your vote: correct",
+  "Twój głos: źle": "Your vote: wrong",
+  "Gdy wszyscy ocenią, pokażemy wyniki.": "When everyone has voted, we will show the results.",
+  "Pozostali gracze decydują, czy {name} zaliczył zadanie (wymienił {n} odpowiedzi).": "The other players decide whether {name} completed the task (listed {n} answers).",
+  "Wpisz tytuły. Masz {n} s. Jeśli zrobisz deklarację wcześniej, runda przejdzie do wyników.": "Type the titles. You have {n} s. If you complete the bid early, the round goes to the results.",
+  "{name} wymienia odpowiedzi. Oceń, gdy usłyszysz dość — nie musisz czekać na koniec czasu.": "{name} is listing answers. Judge as soon as you have heard enough — you do not have to wait for the timer.",
+  "Kolejny tytuł?": "Next title?",
+  "Sprawdzający może kliknąć Poprawnie od razu.": "The checker can tap Correct immediately.",
+  "Zapisane: {t}": "Saved: {t}",
+  "Nie udało się wysłać odpowiedzi": "Could not send the answer",
+  "Zwycięzca wymienia odpowiedzi (wpisuje albo mówi na głos). Timer puszcza przeciwnik (nie startuje sam). Na wypowiedź jest {n} s.": "The winner lists the answers (types them or says them out loud). An opponent starts the timer (it does not start by itself). They have {n} s to answer.",
+  "Sprawdzający klika Poprawnie albo Źle od razu, gdy usłyszy dość odpowiedzi — nie czeka na koniec czasu. Gdy wszyscy ocenią albo licytujący zbierze deklarację z listy, gra przechodzi do wyników (gospodarz klika dalej). Sukces: 200 pkt za każdą zadeklarowaną. Porażka: pozostali dostają po 100 pkt za każdą.": "Checkers tap Correct or Wrong as soon as they have heard enough — they do not wait for the timer. When everyone has voted, or the bidder completes the bid from the list, the game goes to the results (the host clicks next). Success: 200 pts per declared answer. Failure: everyone else gets 100 pts per declared answer.",
+  "Pytanie z listą odpowiedzi. Gracze licytują po kolei. Zwycięzca wymienia odpowiedzi, a timer puszcza przeciwnik. Sprawdzający klika Poprawnie albo Źle od razu. Gdy wszyscy ocenią, gra pokazuje wyniki i gospodarz klika dalej. Sukces: 200 pkt za każdą zadeklarowaną. Porażka: pozostali dostają po 100 pkt za każdą.": "A question with a list of answers. Players bid in turns. The winner lists answers and an opponent starts the timer. Checkers tap Correct or Wrong immediately. When everyone has voted, the game shows the results and the host clicks next. Success: 200 pts per declared answer. Failure: everyone else gets 100 pts per declared answer."
+});

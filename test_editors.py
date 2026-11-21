@@ -372,8 +372,7 @@ def main():
               f"runda {i+1} ładuje pytanie z puli")
         seen_p.append(snap["prompt"])
         room2.end_round()
-        room2.t0 = __import__("time").time() - 20
-        room2.tick()
+        room2.next()
     check(len(set(seen_p)) == 5, f"5 rund, 5 różnych pytań ({seen_p})")
 
     # --- kadr Zoom niezależny od Kadry

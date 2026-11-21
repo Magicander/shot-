@@ -1,6 +1,6 @@
 // Testy zasad portu (bez wranglera): node cloudflare/test/rules.mjs - te same scenariusze co test_rules.py
 import { readFileSync } from "node:fs";
-import { Game, newRoom, normSettings, JUDGE_GRACE, LIC_DONE_DELAY, LIC_BID_CAP, licTotal, topScore, topAssign, availability, mergePackData, MODES, BOMB_FUSE, remakeTags, placeMarks, timeOpt, REVEAL_SECONDS, GameError, matchActorPhotos, questionFaces } from "../src/game.js";
+import { Game, newRoom, normSettings, JUDGE_GRACE, LIC_DONE_DELAY, LIC_BID_CAP, licTotal, topScore, topAssign, availability, mergePackData, MODES, BOMB_FUSE, remakeTags, placeMarks, timeOpt, REVEAL_SECONDS, GameError, matchActorPhotos, questionFaces, bestAnswer, answerNames, MANUAL_REVEAL } from "../src/game.js";
 import { scrapeCtx, fetchOne, parseFilmwebCast, parseImdbPage, absFwPhoto, isPlaceholderUrl, chain as scrapeChain, fetchActorImage } from "../src/webscrape.js";
 import { mostScore, pathMovies, pickPairFromGraph, localGraph, pickFilmrunPair, poolPeople } from "../src/most.js";
 
@@ -116,6 +116,70 @@ g.answer(B, { start_timer: true }, "pl");
 adv(g, 11);
 g.answer(B, { verdict: true }, "pl"); g.answer(C, { verdict: true }, "pl");
 check(g.r.phase === "reveal" && t.success && A.history.at(-1) === 400, "werdykt tak: 200 x deklaracja");
+
+
+console.log("licytacja: dopasowanie na żywo = ocena końcowa");
+const ANS = [
+  { text: "The Shining", pl: "Lśnienie", aliases: [] },
+  { text: "The Green Mile", pl: "Zielona mila", aliases: ["Zielona Mila"] },
+  { text: "Forrest Gump", pl: "", aliases: [] },
+];
+check(bestAnswer("Lśnienie", ANS, [0, 1, 2]) === 0, "dopasowanie: PL z diakrytykami");
+check(bestAnswer("Lsnienie", ANS, [0, 1, 2]) === 0, "dopasowanie: PL bez znaków diakrytycznych");
+check(bestAnswer("the shining", ANS, [0, 1, 2]) === 0, "dopasowanie: EN niezależnie od wielkości liter");
+check(bestAnswer("Zielona mila", ANS, [0, 1, 2]) === 1, "dopasowanie: pole pl i alias");
+check(bestAnswer("Obcy", [{ text: "Alien", pl: "Obcy - 8. pasażer Nostromo", aliases: [] }], [0]) === 0,
+  "dopasowanie: człon główny polskiego tytułu");
+check(bestAnswer("Alien", [{ text: "Alien", pl: "Obcy - 8. pasażer Nostromo", aliases: [] }], [0]) === 0,
+  "dopasowanie: oryginał EN przy polskim pl");
+
+[g, [A, B]] = room(2, { lic_answer: 30, answer: "type", titles: "en" }, ["licytacja"]);
+g.r.pack.questions = [{ id: 99, prompt_pl: "Filmy", prompt_en: "Films", answers: ANS }];
+g.start(); t = g.r.task;
+t.order = [A.id, B.id]; t.turn = 0;
+g.answer(A, { bid: 2 }, "pl"); g.answer(B, { pass: true }, "pl");
+check(!g.answer(A, { text: "the shining" }, "en").correct, "przed timerem wpis nie wchodzi");
+g.answer(B, { start_timer: true }, "pl");
+check(st(g, A).can_type && st(g, A).has_list && !st(g, B).can_type, "wpisuje licytujący, ma listę");
+check(st(g, B).can_verdict && !st(g, A).can_verdict, "Poprawnie od razu u sprawdzającego, nie po czasie");
+check(g.answer(A, { text: "the shining" }, "en").correct, "żywe EN w lang=en");
+check(g.answer(A, { text: "Zielona mila" }, "en").correct, "żywe PL przy titles=en i lang=en");
+check(g.r.phase === "round", "po zebraniu deklaracji jeszcze krótka chwila");
+adv(g, LIC_DONE_DELAY + 1);
+check(g.r.phase === "reveal" && t.success && st(g, A).untimed,
+  "deklaracja z listy: te same dopasowania dają sukces i wyniki");
+check(g.revealManual() && MANUAL_REVEAL.includes("licytacja"), "odsłona licytacji czeka na gospodarza");
+check(g.nextWake() === null, "odsłona licytacji: bez alarmu samoprzełączenia");
+adv(g, 30);
+check(g.r.phase === "reveal", "wyniki nie znikają same");
+g.next();
+check(["final", "round", "lobby"].includes(g.r.phase), "gospodarz klika dalej");
+
+[g, [A, B]] = room(2, { lic_answer: 30, titles: "pl" }, ["licytacja"]);
+g.r.pack.questions = [{ id: 99, prompt_pl: "Filmy", prompt_en: "Films", answers: ANS }];
+g.start(); t = g.r.task;
+t.order = [A.id, B.id]; t.turn = 0;
+g.answer(A, { bid: 1 }, "pl"); g.answer(B, { pass: true }, "pl");
+g.answer(B, { start_timer: true }, "pl");
+check(g.answer(A, { text: "Lśnienie" }, "pl").correct, "żywe Lśnienie w PL");
+check(g.answer(A, { text: "zzzz nie ma" }, "pl").correct === false, "brak na liście: źle na żywo");
+
+console.log("licytacja: Poprawnie w trakcie czasu, wyniki bez czekania");
+[g, [A, B]] = room(2, { lic_answer: 40 }, ["licytacja"]);
+g.r.pack.questions = [{ id: 99, prompt_pl: "Filmy z Tomem Hanksem", prompt_en: "Name films", answers: [] }];
+g.start(); t = g.r.task;
+t.order = [A.id, B.id]; t.turn = 0;
+g.answer(A, { bid: 1 }, "pl"); g.answer(B, { pass: true }, "pl");
+g.answer(B, { start_timer: true }, "pl");
+const rec = g.answer(A, { text: "Forrest Gump" }, "pl");
+check(rec.recorded && rec.correct !== false, "bez listy: wpis nie jest oznaczany jako zły");
+check(st(g, B).can_verdict && st(g, B).left > 30, "Poprawnie dostępne, czas jeszcze leci");
+g.answer(B, { verdict: true }, "pl");
+check(g.r.phase === "reveal" && t.success && st(g, A).untimed,
+  "wszyscy ocenili w trakcie czasu: wyniki bez czekania na timer");
+adv(g, 30);
+check(g.r.phase === "reveal", "wyniki zostają, gospodarz klika dalej");
+
 
 console.log("mnożnik finału");
 [g, [A]] = room(1, { final_x: 2, order: "fixed" }, ["zoom"]);
@@ -298,7 +362,7 @@ for (let i = 0; i < 5; i++) {
   seen.push(g.r.task.q.id);
   check(g.state(ps[0], "pl").prompt === `Horror ${seen[seen.length - 1] - 100}`, "prompt z puli pytań bez odpowiedzi");
   g.endRound();
-  adv(g, 16);
+  g.next();
 }
 check(new Set(seen).size === 5 && seen.length === 5, `5 rund, 5 różnych pytań z puli 13 (${seen})`);
 
